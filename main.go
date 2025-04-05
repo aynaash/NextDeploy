@@ -1,9 +1,10 @@
+/*
+Copyright © 2025 NAME HERE <EMAIL ADDRESS>
 
+*/
 package main
 
-import (
-	"NextOperations/cmd"
-)
+import "nextdeploy/cmd"
 
 func main() {
 	cmd.Execute()

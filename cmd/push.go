@@ -3,7 +3,7 @@ package cmd
 
 import (
 	"fmt"
-	"NextOperations/utils"
+	"nextdeploy/utils"
 
 	"github.com/spf13/cobra"
 )

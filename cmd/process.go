@@ -4,42 +4,50 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
-	"NextOperations/utils"
+	"nextdeploy/utils"
 
 	"github.com/spf13/cobra"
 )
-
-var secret string
 
 var processCmd = &cobra.Command{
 	Use:   "process",
 	Short: "Process a JSON file",
 	Run: func(cmd *cobra.Command, args []string) {
-		file, err := os.Open("data.json")
+		// Get the absolute path to data.json
+		jsonPath := filepath.Join("cmd", "data.json")
+
+		// Open the JSON file
+		file, err := os.Open(jsonPath)
 		if err != nil {
-			fmt.Println("Error opening file:", err)
+			fmt.Printf("Error opening file (%s): %v\n", jsonPath, err)
 			return
 		}
 		defer file.Close()
 
+		// Decode JSON data
 		var data utils.Data
 		if err := json.NewDecoder(file).Decode(&data); err != nil {
-			fmt.Println("Error decoding JSON:", err)
+			fmt.Printf("Error decoding JSON: %v\n", err)
 			return
 		}
 
-		// Fetch secrets if not provided via flag
-		if secret == "" {
-			secret = utils.GetSecret("APPNAME")
+		// Process data
+		result := utils.ProcessData(data, "")
+
+		// Pretty-print the processed JSON output
+		formattedJSON, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			fmt.Printf("Error formatting JSON: %v\n", err)
+			return
 		}
 
-		result := utils.ProcessData(data, secret)
-		fmt.Printf("Processed data: %+v\n", result)
+		fmt.Println("Processed Data:")
+		fmt.Println(string(formattedJSON))
 	},
 }
 
 func init() {
-	processCmd.Flags().StringVarP(&secret, "secret", "s", "", "Secret for processing")
 	rootCmd.AddCommand(processCmd)
 }
