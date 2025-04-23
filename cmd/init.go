@@ -7,6 +7,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type   initoptions  struct {
+packageManager  string
+cloudprovider string
+}
+
 // initCmd represents the init command
 var initCmd = &cobra.Command{
 	Use:   "init",

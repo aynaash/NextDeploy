@@ -15,3 +15,4 @@ func testmain() {
     // convert to JSON. String() is also implemented
     fmt.Println(v)
 }
+
