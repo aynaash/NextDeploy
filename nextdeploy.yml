@@ -1,6 +1,0 @@
-
-app_name: my-nextjs-app
-port: 3000
-deploy:
-  ssh_host: user@your-vps-ip
-  docker_compose_path: /home/user/my-nextjs-app/docker-compose.yml

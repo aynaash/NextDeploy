@@ -1,16 +1,13 @@
 package cmd
-
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
 	"github.com/spf13/cobra"
 )
-
-type   initoptions  struct {
-packageManager  string
-cloudprovider string
-}
 
 // initCmd represents the init command
 var initCmd = &cobra.Command{
@@ -18,81 +15,156 @@ var initCmd = &cobra.Command{
 	Short: "Initialize your project with Dockerfile and nextdeploy.yml",
 	Long:  "Scaffolds a Dockerfile and nextdeploy.yml to set up your Next.js project for deployment.",
 	Run: func(cmd *cobra.Command, args []string) {
-		// Get the package manager preference from flags
-		pkgManager, _ := cmd.Flags().GetString("package-manager")
+		// Check for existing Dockerfile
+		dockerfilePath := filepath.Join(".", "Dockerfile")
+		if _, err := os.Stat(dockerfilePath); os.IsNotExist(err) {
+			fmt.Println("ℹ️  No Dockerfile found in current directory")
+			
+			// Prompt user to create a sample Dockerfile
+			reader := bufio.NewReader(os.Stdin)
+			fmt.Print("Would you like to create a sample Next.js Dockerfile? (y/n): ")
+			response, _ := reader.ReadString('\n')
+			response = strings.TrimSpace(strings.ToLower(response))
 
-		// Generate the Dockerfile and nextdeploy.yml
-		dockerfile := generateDockerfile(pkgManager)
-		createFile("Dockerfile", dockerfile)
-		createFile("nextdeploy.yml", deployConfigContent)
+			if response == "y" || response == "yes" {
+				// Get package manager preference
+				pkgManager := promptForPackageManager()
+				
+				// Generate and create Dockerfile
+				dockerfile := generateDockerfile(pkgManager)
+				createFile("Dockerfile", dockerfile)
+			} else {
+				fmt.Println("ℹ️  Skipping Dockerfile creation")
+			}
+		} else {
+			fmt.Println("✅ Dockerfile already exists")
+		}
+
+		// Generate nextdeploy.yml with required fields
+		createNextDeployConfig()
 	},
 }
 
-// Set default content for nextdeploy.yml
-const deployConfigContent = `
-app_name: my-nextjs-app
+func promptForPackageManager() string {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print("Choose your package manager (npm/yarn/pnpm): ")
+		pkgManager, _ := reader.ReadString('\n')
+		pkgManager = strings.TrimSpace(strings.ToLower(pkgManager))
+		
+		switch pkgManager {
+		case "npm", "yarn", "pnpm":
+			return pkgManager
+		default:
+			fmt.Println("❌ Invalid choice. Please enter npm, yarn, or pnpm")
+		}
+	}
+}
+
+func createNextDeployConfig() {
+	reader := bufio.NewReader(os.Stdin)
+	
+	// Get required configuration values
+	fmt.Print("Enter your application name: ")
+	appName, _ := reader.ReadString('\n')
+	appName = strings.TrimSpace(appName)
+	
+	fmt.Print("Enter SSH host (user@your-vps-ip): ")
+	sshHost, _ := reader.ReadString('\n')
+	sshHost = strings.TrimSpace(sshHost)
+	
+	fmt.Print("Enter Docker compose path on server (e.g. /home/user/my-app/docker-compose.yml): ")
+	composePath, _ := reader.ReadString('\n')
+	composePath = strings.TrimSpace(composePath)
+	
+	// Generate the config content
+	configContent := fmt.Sprintf(`
+app_name: %s
 port: 3000
 deploy:
-  ssh_host: user@your-vps-ip
-  docker_compose_path: /home/user/my-nextjs-app/docker-compose.yml
-`
+  ssh_host: %s
+  docker_compose_path: %s
+`, appName, sshHost, composePath)
+	
+	createFile("nextdeploy.yml", configContent)
+}
 
 // Function to generate Dockerfile based on package manager choice
 func generateDockerfile(pkgManager string) string {
-	if pkgManager == "" {
-		pkgManager = "npm" // Default to npm if no flag is provided
-	}
-
 	dockerfileContent := fmt.Sprintf(`
 # syntax=docker.io/docker/dockerfile:1
-
+### ---- BASE IMAGE ---- ###
 FROM node:18-alpine AS base
+WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN apk add --no-cache libc6-compat bash
 
-# Install dependencies only when needed
+### ---- DEPENDENCIES ---- ###
 FROM base AS deps
-RUN apk add --no-cache libc6-compat
-WORKDIR /app
 
-# Install dependencies based on the preferred package manager
+# Copy only the files needed to determine lockfile
 COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* .npmrc* ./
-RUN \
-  if [ -f yarn.lock ]; then yarn --frozen-lockfile; \
-  elif [ -f package-lock.json ]; then npm ci; \
-  elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm i --frozen-lockfile; \
-  else echo "Lockfile not found." && exit 1; \
-  fi
 
-# Rebuild the source code only when needed
+# Install the appropriate package manager deps
+RUN bash -c '\
+  if [ -f yarn.lock ]; then \
+    echo "📦 Using Yarn"; yarn install --frozen-lockfile; \
+  elif [ -f package-lock.json ]; then \
+    echo "📦 Using npm"; npm ci; \
+  elif [ -f pnpm-lock.yaml ]; then \
+    echo "📦 Using pnpm"; corepack enable pnpm && pnpm install --frozen-lockfile; \
+  else \
+    echo "⚠️  No lockfile found. Skipping install." && mkdir node_modules; \
+  fi'
+
+### ---- BUILDER ---- ###
 FROM base AS builder
-WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-RUN \
-  if [ -f yarn.lock ]; then yarn run build; \
-  elif [ -f package-lock.json ]; then npm run build; \
-  elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm run build; \
-  else echo "Lockfile not found." && exit 1; \
-  fi
+# Optional: Add build script fallback
+RUN bash -c '\
+  if [ -f yarn.lock ]; then \
+    yarn build; \
+  elif [ -f package-lock.json ]; then \
+    npm run build; \
+  elif [ -f pnpm-lock.yaml ]; then \
+    corepack enable pnpm && pnpm run build; \
+  else \
+    echo "⚠️  No lockfile found. Skipping build."; \
+  fi'
 
-# Production image, copy all the files and run next
+### ---- RUNTIME ---- ###
 FROM base AS runner
+
+# Setup app directory and user
+RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
 WORKDIR /app
 
-ENV NODE_ENV=production
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
-
+# Copy only needed files
 COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder /app/.next ./.next
 
+# Handle both standalone and traditional builds safely
+RUN bash -c '\
+  mkdir -p .next && \
+  if [ -d /app/.next/standalone ]; then \
+    echo "🚀 Using standalone build"; \
+    cp -r /app/.next/standalone/* ./ && \
+    cp -r /app/.next/static ./public/static; \
+  else \
+    echo "📦 Using traditional .next build"; \
+    mkdir -p .next && \
+    cp -r /app/.next/* .next/; \
+  fi'
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
-CMD ["node", "server.js"]
-`, pkgManager)
+ENV HOSTNAME=0.0.0.0
+
+CMD ["sh", "-c", "if [ -f server.js ]; then node server.js; else npm start; fi"]
+`)
 
 	return dockerfileContent
 }
@@ -114,9 +186,5 @@ func createFile(name, content string) {
 }
 
 func init() {
-	// Adding 'package-manager' flag to specify which package manager to use
-	initCmd.Flags().StringP("package-manager", "p", "", "Specify the package manager (npm, yarn, pnpm)")
-
-	// Adding init command to rootCmd
 	rootCmd.AddCommand(initCmd)
 }
