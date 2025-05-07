@@ -87,7 +87,7 @@ NextDeploy is more than a tool — it's a **movement** toward developer-owned de
 
 ## 🔗 Join Us
 
-* 🌐 Website: [nextdeploy.dev](https://nextdeploy.dev)
+* 🌐 Website: [nextdeploy.one](https://nextdeploy.one)
 * 🐙 GitHub: [nextdeploy/cli](https://github.com/nextdeploy/cli)
 * 📬 Twitter: [@nextdeploydev](https://twitter.com/nextdeploydev)
 

@@ -92,78 +92,41 @@ deploy:
 // Function to generate Dockerfile based on package manager choice
 func generateDockerfile(pkgManager string) string {
 	dockerfileContent := fmt.Sprintf(`
-# syntax=docker.io/docker/dockerfile:1
-### ---- BASE IMAGE ---- ###
-FROM node:18-alpine AS base
+# Use official Node.js image
+FROM node:20-alpine
+
+# Set working directory
 WORKDIR /app
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-RUN apk add --no-cache libc6-compat bash
 
-### ---- DEPENDENCIES ---- ###
-FROM base AS deps
+# 1. Copy package files for dependency installation
+COPY package.json package-lock.json ./
 
-# Copy only the files needed to determine lockfile
-COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* .npmrc* ./
+# 2. Install dependencies (production-only)
+RUN npm ci --only=production
 
-# Install the appropriate package manager deps
-RUN bash -c '\
-  if [ -f yarn.lock ]; then \
-    echo "📦 Using Yarn"; yarn install --frozen-lockfile; \
-  elif [ -f package-lock.json ]; then \
-    echo "📦 Using npm"; npm ci; \
-  elif [ -f pnpm-lock.yaml ]; then \
-    echo "📦 Using pnpm"; corepack enable pnpm && pnpm install --frozen-lockfile; \
-  else \
-    echo "⚠️  No lockfile found. Skipping install." && mkdir node_modules; \
-  fi'
-
-### ---- BUILDER ---- ###
-FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
+# 3. Copy all files (except those in .dockerignore)
 COPY . .
 
-# Optional: Add build script fallback
-RUN bash -c '\
-  if [ -f yarn.lock ]; then \
-    yarn build; \
-  elif [ -f package-lock.json ]; then \
-    npm run build; \
-  elif [ -f pnpm-lock.yaml ]; then \
-    corepack enable pnpm && pnpm run build; \
-  else \
-    echo "⚠️  No lockfile found. Skipping build."; \
-  fi'
+# 4. Build the app
+RUN npm run build
 
-### ---- RUNTIME ---- ###
-FROM base AS runner
-
-# Setup app directory and user
-RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
+# 5. Use lightweight web server for production
+FROM node:20-alpine
 WORKDIR /app
 
-# Copy only needed files
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next ./.next
+# Copy only necessary files from builder
+COPY --from=0 /app/public ./public
+COPY --from=0 /app/.next/standalone ./
+COPY --from=0 /app/.next/static ./.next/static
 
-# Handle both standalone and traditional builds safely
-RUN bash -c '\
-  mkdir -p .next && \
-  if [ -d /app/.next/standalone ]; then \
-    echo "🚀 Using standalone build"; \
-    cp -r /app/.next/standalone/* ./ && \
-    cp -r /app/.next/static ./public/static; \
-  else \
-    echo "📦 Using traditional .next build"; \
-    mkdir -p .next && \
-    cp -r /app/.next/* .next/; \
-  fi'
+# 6. Run as non-root user
+RUN adduser -D nextjs && chown -R nextjs:nextjs /app
 USER nextjs
+
+# 7. Start the app
 EXPOSE 3000
 ENV PORT=3000
-ENV HOSTNAME=0.0.0.0
-
-CMD ["sh", "-c", "if [ -f server.js ]; then node server.js; else npm start; fi"]
+CMD ["node", "server.js"]
 `)
 
 	return dockerfileContent
