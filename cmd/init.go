@@ -1,4 +1,5 @@
-package cmd
+package main
+
 import (
 	"bufio"
 	"fmt"
@@ -9,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// initCmd represents the init command
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize your project with Dockerfile and nextdeploy.yml",
@@ -19,18 +19,17 @@ var initCmd = &cobra.Command{
 		dockerfilePath := filepath.Join(".", "Dockerfile")
 		if _, err := os.Stat(dockerfilePath); os.IsNotExist(err) {
 			fmt.Println("ℹ️  No Dockerfile found in current directory")
-			
-			// Prompt user to create a sample Dockerfile
+
 			reader := bufio.NewReader(os.Stdin)
 			fmt.Print("Would you like to create a sample Next.js Dockerfile? (y/n): ")
-			response, _ := reader.ReadString('\n')
-			response = strings.TrimSpace(strings.ToLower(response))
+			resp, _ := reader.ReadString('\n')
+			resp = strings.TrimSpace(strings.ToLower(resp))
 
-			if response == "y" || response == "yes" {
-				// Get package manager preference
-				pkgManager := promptForPackageManager()
-				
-				// Generate and create Dockerfile
+			if resp == "y" || resp == "yes" {
+				// Prompt for package manager (optional now, defaulting to yarn)
+				// pkgManager := promptForPackageManager()
+				pkgManager := "yarn"
+
 				dockerfile := generateDockerfile(pkgManager)
 				createFile("Dockerfile", dockerfile)
 			} else {
@@ -40,7 +39,7 @@ var initCmd = &cobra.Command{
 			fmt.Println("✅ Dockerfile already exists")
 		}
 
-		// Generate nextdeploy.yml with required fields
+		// Always try to generate nextdeploy.yml
 		createNextDeployConfig()
 	},
 }
@@ -51,7 +50,7 @@ func promptForPackageManager() string {
 		fmt.Print("Choose your package manager (npm/yarn/pnpm): ")
 		pkgManager, _ := reader.ReadString('\n')
 		pkgManager = strings.TrimSpace(strings.ToLower(pkgManager))
-		
+
 		switch pkgManager {
 		case "npm", "yarn", "pnpm":
 			return pkgManager
@@ -63,21 +62,19 @@ func promptForPackageManager() string {
 
 func createNextDeployConfig() {
 	reader := bufio.NewReader(os.Stdin)
-	
-	// Get required configuration values
+
 	fmt.Print("Enter your application name: ")
 	appName, _ := reader.ReadString('\n')
 	appName = strings.TrimSpace(appName)
-	
-	fmt.Print("Enter SSH host (user@your-vps-ip): ")
+
+	fmt.Print("Enter your server's SSH host (e.g., user@ip): ")
 	sshHost, _ := reader.ReadString('\n')
 	sshHost = strings.TrimSpace(sshHost)
-	
-	fmt.Print("Enter Docker compose path on server (e.g. /home/user/my-app/docker-compose.yml): ")
+
+	fmt.Print("Enter docker-compose path on server (/home/user/my-app/docker-compose.yml): ")
 	composePath, _ := reader.ReadString('\n')
 	composePath = strings.TrimSpace(composePath)
-	
-	// Generate the config content
+
 	configContent := fmt.Sprintf(`
 app_name: %s
 port: 3000
@@ -85,56 +82,50 @@ deploy:
   ssh_host: %s
   docker_compose_path: %s
 `, appName, sshHost, composePath)
-	
+
 	createFile("nextdeploy.yml", configContent)
 }
 
-// Function to generate Dockerfile based on package manager choice
 func generateDockerfile(pkgManager string) string {
-	dockerfileContent := fmt.Sprintf(`
-# Use official Node.js image
-FROM node:20-alpine
+	return fmt.Sprintf(`
+# ---------- STAGE 1: Build ----------
+FROM node:20-alpine AS builder
 
-# Set working directory
 WORKDIR /app
 
-# 1. Copy package files for dependency installation
-COPY package.json package-lock.json ./
+# Copy dependency files
+COPY package.json ./
+COPY %s.lock ./
 
-# 2. Install dependencies (production-only)
-RUN npm ci --only=production
+RUN %s install
 
-# 3. Copy all files (except those in .dockerignore)
+# Copy rest of the project files
 COPY . .
 
-# 4. Build the app
-RUN npm run build
+RUN %s run build
 
-# 5. Use lightweight web server for production
+# ---------- STAGE 2: Runtime ----------
 FROM node:20-alpine
+
 WORKDIR /app
 
-# Copy only necessary files from builder
-COPY --from=0 /app/public ./public
-COPY --from=0 /app/.next/standalone ./
-COPY --from=0 /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
 
-# 6. Run as non-root user
 RUN adduser -D nextjs && chown -R nextjs:nextjs /app
 USER nextjs
 
-# 7. Start the app
 EXPOSE 3000
 ENV PORT=3000
-CMD ["node", "server.js"]
-`)
 
-	return dockerfileContent
+CMD ["node", "server.js"]
+`, pkgManager, pkgManager, pkgManager)
 }
 
-// Function to create files if they don't already exist
 func createFile(name, content string) {
 	path := filepath.Join(".", name)
+
 	if _, err := os.Stat(path); err == nil {
 		fmt.Printf("⚠️  %s already exists, skipping...\n", name)
 		return
@@ -148,6 +139,11 @@ func createFile(name, content string) {
 	}
 }
 
-func init() {
+func main() {
+	rootCmd := &cobra.Command{Use: "nextdeploy"}
 	rootCmd.AddCommand(initCmd)
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Printf("❌ Error: %v\n", err)
+		os.Exit(1)
+	}
 }

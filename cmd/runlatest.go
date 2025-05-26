@@ -9,8 +9,8 @@ import (
 )
 
 var memCmd = &cobra.Command{
-	Use:   "mem",
-	Short: "Show system memory usage",
+	Use:   "runlatest",
+	Short: "Runs the latest container using blue-green deployment",
 	Run: func(cmd *cobra.Command, args []string) {
 		v, err := mem.VirtualMemory()
 		if err != nil {

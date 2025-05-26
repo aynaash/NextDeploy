@@ -12,8 +12,8 @@ import (
 )
 
 var processCmd = &cobra.Command{
-	Use:   "process",
-	Short: "Process a JSON file",
+	Use:   "healthcheck",
+	Short: "Test the health of the lates container",
 	Run: func(cmd *cobra.Command, args []string) {
 		// Get the absolute path to data.json
 		jsonPath := filepath.Join("cmd", "data.json")
