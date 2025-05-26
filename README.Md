@@ -1,7 +1,7 @@
 
 ---
 
-## 🛠️ NextDeploy CLI — Real DevOps for Developers Who Give a Damn
+## 🛠️ NextDeploy CLI — Real DevOps for Developers Who care
 
 Sick of being trapped in Vercel’s walled garden? Done fighting opaque CI/CD pipelines and vendor secrets sprawl?
 
