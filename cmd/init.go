@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"bufio"
@@ -26,8 +26,7 @@ var initCmd = &cobra.Command{
 			resp = strings.TrimSpace(strings.ToLower(resp))
 
 			if resp == "y" || resp == "yes" {
-				// Prompt for package manager (optional now, defaulting to yarn)
-				// pkgManager := promptForPackageManager()
+				// Currently defaulting to yarn, prompt is commented out for now
 				pkgManager := "yarn"
 
 				dockerfile := generateDockerfile(pkgManager)
@@ -44,6 +43,10 @@ var initCmd = &cobra.Command{
 	},
 }
 
+func init() {
+	// This init function runs automatically and registers the init command
+	rootCmd.AddCommand(initCmd)
+}
 func promptForPackageManager() string {
 	reader := bufio.NewReader(os.Stdin)
 	for {
@@ -136,14 +139,5 @@ func createFile(name, content string) {
 		fmt.Printf("❌ Failed to create %s: %v\n", name, err)
 	} else {
 		fmt.Printf("✅ Created %s\n", name)
-	}
-}
-
-func main() {
-	rootCmd := &cobra.Command{Use: "nextdeploy"}
-	rootCmd.AddCommand(initCmd)
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Printf("❌ Error: %v\n", err)
-		os.Exit(1)
 	}
 }
