@@ -4,19 +4,10 @@ package config
 import (
 	"fmt"
 	"os"
-
 	"gopkg.in/yaml.v3"
 )
 
-type SecretsConfig struct {
-	Provider string `yaml:"provider"`
-	Project  string `yaml:"project"`
-	Config   string `yaml:"config"`
-}
 
-type AppConfig struct {
-	Secrets *SecretsConfig `yaml:"secrets,omitempty"`
-}
 
 const configFile = ".nextdeploy.yml"
 

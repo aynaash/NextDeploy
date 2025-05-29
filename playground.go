@@ -2,140 +2,122 @@
 // +build ignore
 
 
- package cmd
+// internal/config/template.go
+package config
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
+)
 
+const sampleConfig = `# nextdeploy.yml
+version: "1.0"
+
+app:
+  name: example-app
+  environment: production
+  domain: app.example.com
+  port: 3000
+
+repository:
+  url: git@github.com:username/example-app.git
+  branch: main
+  auto_deploy: true
+  webhook_secret: your_webhook_secret  # Optional if using webhook triggers
+
+docker:
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      NODE_ENV: production
+    no_cache: false
+  image: username/example-app:latest
+  registry: ghcr.io  # or docker.io, or ECR/GCR if you support it
+  push: true  # Push after successful build
+
+# ... rest of the sample config
+`
+
+func GenerateSampleConfig() error {
+	// Write the sample config to sample.nextdeploy.yml in the current directory
+	path := filepath.Join(".", "sample.nextdeploy.yml")
+	return os.WriteFile(path, []byte(sampleConfig), 0644)
+}
+
+// cmd/init.go
+package cmd
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"nextdeploy/internal/config"
+	"nextdeploy/internal/docker"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 )
 
-type SecretsConfig struct {
-	Provider string `yaml:"provider"`
-	Token    string `yaml:"token,omitempty"` // Only stored temporarily
-	Project  string `yaml:"project"`
-	Config   string `yaml:"config"`
-}
-
-type AppConfig struct {
-	Secrets *SecretsConfig `yaml:"secrets,omitempty"`
-	// Add other existing config fields here
-}
-
-var (
-	secretsProvider string
-	secretsToken    string
-	secretsProject  string
-	secretsConfig   string
-)
-
-var secretsAddCmd = &cobra.Command{
-	Use:   "add",
-	Short: "Add a secrets provider configuration",
-	Long: `Add a secrets provider like Doppler to your project.
-Example: nextdeploy secrets add --provider=doppler --token=dp.st.xxx --project=myapp --config=production`,
+var initCmd = &cobra.Command{
+	Use:   "init",
+	Short: "Initialize your project configuration",
 	Run: func(cmd *cobra.Command, args []string) {
-		// Load existing config
-		cfg, err := loadConfig()
-		if err != nil {
-			fmt.Printf("Error loading config: %v\n", err)
-			os.Exit(1)
+		reader := bufio.NewReader(os.Stdin)
+
+		// Ask if they want to generate a sample config
+		if config.PromptYesNo(reader, "Would you like to generate a sample configuration file?") {
+			if err := config.GenerateSampleConfig(); err != nil {
+				fmt.Printf("Error generating sample config: %v\n", err)
+			} else {
+				fmt.Println("✅ sample.nextdeploy.yml created")
+			}
 		}
 
-		// Validate inputs
-		if secretsProvider != "doppler" {
-			fmt.Println("Currently only Doppler is supported as a secrets provider")
-			os.Exit(1)
+		// Ask if they want to create a custom config
+		if config.PromptYesNo(reader, "Would you like to create a custom nextdeploy.yml?") {
+			cfg, err := config.PromptForConfig(reader)
+			if err != nil {
+				fmt.Printf("Error getting configuration: %v\n", err)
+				os.Exit(1)
+			}
+
+			if err := config.WriteConfig("nextdeploy.yml", cfg); err != nil {
+				fmt.Printf("Error writing config: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("✅ nextdeploy.yml created")
 		}
 
-		if secretsToken == "" || secretsProject == "" {
-			fmt.Println("Token and project are required")
-			os.Exit(1)
+		// Handle Dockerfile creation
+		if config.PromptYesNo(reader, "Would you like to create a Dockerfile?") {
+			if err := docker.HandleDockerfileCreation(reader); err != nil {
+				fmt.Printf("Error creating Dockerfile: %v\n", err)
+				os.Exit(1)
+			}
 		}
-
-		if secretsConfig == "" {
-			secretsConfig = "development" // Default value
-		}
-
-		// Validate Doppler token
-		if err := validateDopplerToken(secretsToken, secretsProject, secretsConfig); err != nil {
-			fmt.Printf("Doppler token validation failed: %v\n", err)
-			os.Exit(1)
-		}
-
-		// Update config
-		cfg.Secrets = &SecretsConfig{
-			Provider: secretsProvider,
-			Project:  secretsProject,
-			Config:   secretsConfig,
-		}
-
-		// Save config
-		if err := saveConfig(cfg); err != nil {
-			fmt.Printf("Error saving config: %v\n", err)
-			os.Exit(1)
-		}
-
-		// Store token securely
-		if err := storeTokenSecurely(secretsToken); err != nil {
-			fmt.Printf("Warning: could not store token securely: %v\n", err)
-		}
-
-		fmt.Println("✅ Secrets configuration added successfully")
 	},
 }
 
-func init() {
-	secretsAddCmd.Flags().StringVarP(&secretsProvider, "provider", "p", "doppler", "Secrets provider (currently only 'doppler')")
-	secretsAddCmd.Flags().StringVarP(&secretsToken, "token", "t", "", "Provider access token (required)")
-	secretsAddCmd.Flags().StringVarP(&secretsProject, "project", "j", "", "Project name in provider (required)")
-	secretsAddCmd.Flags().StringVarP(&secretsConfig, "config", "c", "", "Configuration/environment name (default: development)")
-	secretsCmd.AddCommand(secretsAddCmd)
-}
 
-func loadConfig() (*AppConfig, error) {
-	data, err := os.ReadFile(".nextdeploy.yml")
-	if err != nil {
-		return nil, fmt.Errorf("could not read config file: %w", err)
+// internal/docker/docker.go
+package docker
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"strings"
+)
+
+func HandleDockerfileCreation(reader *bufio.Reader) error {
+	if DockerfileExists() {
+		if !PromptYesNo(reader, "Dockerfile exists. Overwrite?") {
+			return nil
+		}
 	}
 
-	var cfg AppConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("could not parse config file: %w", err)
-	}
-
-	return &cfg, nil
+	pkgManager := promptPackageManager(reader)
+	content := GenerateDockerfile(pkgManager)
+	return WriteFile("Dockerfile", content)
 }
 
-func saveConfig(cfg *AppConfig) error {
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("could not marshal config: %w", err)
-	}
-
-	return os.WriteFile(".nextdeploy.yml", data, 0644)
-}
-
-func storeTokenSecurely(token string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-
-	tokenDir := filepath.Join(home, ".nextdeploy", "tokens")
-	if err := os.MkdirAll(tokenDir, 0700); err != nil {
-		return err
-	}
-
-	tokenFile := filepath.Join(tokenDir, "doppler.token")
-	return os.WriteFile(tokenFile, []byte(token), 0600)
-}
-
-func validateDopplerToken(token, project, config string) error {
-	// Implement actual Doppler API validation
-	// For now just a placeholder
-	return nil
-}
+// ... other Docker-related functions

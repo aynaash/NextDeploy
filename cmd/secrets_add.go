@@ -14,7 +14,6 @@ var (
 	secretsProject  string
 	secretsConfig   string
 )
-
 var secretsAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Add a secrets provider configuration",

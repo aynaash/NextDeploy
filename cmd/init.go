@@ -4,140 +4,235 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
-
+	"encoding/json"
+	"path/filepath"
+	"nextdeploy/internal/config"
+	"nextdeploy/internal/docker"
 	"github.com/spf13/cobra"
 )
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Initialize your project with Dockerfile and nextdeploy.yml",
-	Long:  "Scaffolds a Dockerfile and nextdeploy.yml to set up your Next.js project for deployment.",
+	Short: "Initialize your Next.js deployment configuration",
+	Long: `Scaffolds all necessary files for deploying a Next.js application including:
+- Dockerfile for containerization
+- nextdeploy.yml for deployment configuration
+- Optional sample configuration`,
 	Run: func(cmd *cobra.Command, args []string) {
-		// Check for existing Dockerfile
-		dockerfilePath := filepath.Join(".", "Dockerfile")
-		if _, err := os.Stat(dockerfilePath); os.IsNotExist(err) {
-			fmt.Println("ℹ️  No Dockerfile found in current directory")
+		// check if current directory is a Next.js project
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Printf("❌ Error getting current directory: %v\n", err)
+			os.Exit(1)
+		}
+		isNextJS, err := isNextJSProject(cwd)
+		if err != nil {
+			fmt.Printf("❌ Error checking project type: %v\n", err)
+			os.Exit(1)
+		}
+		if !isNextJS {
+			fmt.Println("❌ We only support Next.js projects at the moment.")
+			os.Exit(1)
+		}
+		// Create a buffered reader for user input
+		reader := bufio.NewReader(os.Stdin)
+		
+		// Welcome message
+		fmt.Println("🚀 NextDeploy Initialization")
+		fmt.Println("This will help you set up your Next.js project for deployment")
+		fmt.Println("----------------------------------------")
 
-			reader := bufio.NewReader(os.Stdin)
-			fmt.Print("Would you like to create a sample Next.js Dockerfile? (y/n): ")
-			resp, _ := reader.ReadString('\n')
-			resp = strings.TrimSpace(strings.ToLower(resp))
-
-			if resp == "y" || resp == "yes" {
-				// Currently defaulting to yarn, prompt is commented out for now
-				pkgManager := "yarn"
-
-				dockerfile := generateDockerfile(pkgManager)
-				createFile("Dockerfile", dockerfile)
+		// Step 1: Offer to generate sample config
+		if config.PromptYesNo(reader, "Would you like to generate a sample configuration file for reference?") {
+			// NOTE: works
+			if err := config.GenerateSampleConfig(); err != nil {
+				fmt.Printf("❌ Error generating sample config: %v\n", err)
 			} else {
-				fmt.Println("ℹ️  Skipping Dockerfile creation")
+				fmt.Println("✅ sample.nextdeploy.yml created")
+				fmt.Println("You can review this file and customize it as needed")
 			}
-		} else {
-			fmt.Println("✅ Dockerfile already exists")
 		}
 
-		// Always try to generate nextdeploy.yml
-		createNextDeployConfig()
+		// Step 2: Interactive configuration
+		if config.PromptYesNo(reader, "Would you like to create a customized nextdeploy.yml now?") {
+			cfg, err := config.PromptForConfig(reader)
+			if err != nil {
+				fmt.Printf("❌ Error getting configuration: %v\n", err)
+				os.Exit(1)
+			}
+
+			// print out the config of nextdeploy.yml
+			fmt.Println("Here is your nextdeploy.yml configuration:")
+			fmt.Println("------------------------------------------------")
+			fmt.Printf("The config looks like this %+v\n", cfg)
+
+			if err := config.WriteConfig("nextdeploy.yml", cfg); err != nil {
+				fmt.Printf("❌ Error writing configuration: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("✅ nextdeploy.yml created with your custom settings")
+		}
+
+		// Step 3: Dockerfile setup
+		if config.PromptYesNo(reader, "Would you like to set up a Dockerfile for your project?") {
+			if err := handleDockerfileSetup(reader); err != nil {
+				fmt.Printf("❌ Error setting up Dockerfile: %v\n", err)
+				os.Exit(1)
+			}
+		}
+
+		// Completion message
+		fmt.Println("\n🎉 Setup complete! Next steps:")
+		if docker.DockerfileExists() {
+			fmt.Println("- Review the generated Dockerfile")
+		}
+		fmt.Println("- Review your nextdeploy.yml configuration")
+		fmt.Println("- Run 'nextdeploy build' to build the docker image")
 	},
 }
 
 func init() {
-	// This init function runs automatically and registers the init command
 	rootCmd.AddCommand(initCmd)
 }
-func promptForPackageManager() string {
-	reader := bufio.NewReader(os.Stdin)
+
+func handleDockerfileSetup(reader *bufio.Reader) error {
+	// Check for existing Dockerfile
+	if docker.DockerfileExists() {
+		if !config.PromptYesNo(reader, "A Dockerfile already exists. Overwrite it?") {
+			fmt.Println("ℹ️ Using existing Dockerfile")
+			return nil
+		}
+	}
+
+	// Determine package manager
+	pkgManager := promptForPackageManager(reader)
+	
+	// Generate and write Dockerfile
+	content := docker.GenerateDockerfile(pkgManager)
+  if content != nil {
+		// 
+		fmt.Print(content)
+	}
+	// Offer to add to gitignore
+	if config.PromptYesNo(reader, "Would you like to add .env and node_modules to .gitignore?") {
+		if err := addToGitignore(); err != nil {
+			fmt.Printf("⚠️ Couldn't update .gitignore: %v\n", err)
+		}
+	}
+
+	return nil
+}
+
+func promptForPackageManager(reader *bufio.Reader) string {
 	for {
 		fmt.Print("Choose your package manager (npm/yarn/pnpm): ")
-		pkgManager, _ := reader.ReadString('\n')
-		pkgManager = strings.TrimSpace(strings.ToLower(pkgManager))
-
-		switch pkgManager {
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(strings.ToLower(input))
+		switch input {
 		case "npm", "yarn", "pnpm":
-			return pkgManager
+			return input
 		default:
-			fmt.Println("❌ Invalid choice. Please enter npm, yarn, or pnpm")
+			fmt.Println("❌ Invalid choice. Please choose: npm, yarn, or pnpm.")
 		}
 	}
 }
 
-func createNextDeployConfig() {
-	reader := bufio.NewReader(os.Stdin)
-
-	fmt.Print("Enter your application name: ")
-	appName, _ := reader.ReadString('\n')
-	appName = strings.TrimSpace(appName)
-
-	fmt.Print("Enter your server's SSH host (e.g., user@ip): ")
-	sshHost, _ := reader.ReadString('\n')
-	sshHost = strings.TrimSpace(sshHost)
-
-	fmt.Print("Enter docker-compose path on server (/home/user/my-app/docker-compose.yml): ")
-	composePath, _ := reader.ReadString('\n')
-	composePath = strings.TrimSpace(composePath)
-
-	configContent := fmt.Sprintf(`
-app_name: %s
-port: 3000
-deploy:
-  ssh_host: %s
-  docker_compose_path: %s
-`, appName, sshHost, composePath)
-
-	createFile("nextdeploy.yml", configContent)
-}
-
-func generateDockerfile(pkgManager string) string {
-	return fmt.Sprintf(`
-# ---------- STAGE 1: Build ----------
-FROM node:20-alpine AS builder
-
-WORKDIR /app
-
-# Copy dependency files
-COPY package.json ./
-COPY %s.lock ./
-
-RUN %s install
-
-# Copy rest of the project files
-COPY . .
-
-RUN %s run build
-
-# ---------- STAGE 2: Runtime ----------
-FROM node:20-alpine
-
-WORKDIR /app
-
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-
-RUN adduser -D nextjs && chown -R nextjs:nextjs /app
-USER nextjs
-
-EXPOSE 3000
-ENV PORT=3000
-
-CMD ["node", "server.js"]
-`, pkgManager, pkgManager, pkgManager)
-}
-
-func createFile(name, content string) {
-	path := filepath.Join(".", name)
-
-	if _, err := os.Stat(path); err == nil {
-		fmt.Printf("⚠️  %s already exists, skipping...\n", name)
-		return
+func addToGitignore() error {
+	// Check if entries already exist
+	content, err := os.ReadFile(".gitignore")
+	if err != nil && !os.IsNotExist(err) {
+		return err
 	}
 
-	err := os.WriteFile(path, []byte(content), 0644)
+	entries := []string{"\n# NextDeploy", ".env", "node_modules"}
+	for _, entry := range entries {
+		if strings.Contains(string(content), entry) {
+			continue
+		}
+
+		f, err := os.OpenFile(".gitignore", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return err
+		}
+		defer func(){
+			closedErr := f.Close()
+			if closedErr != nil {
+				fmt.Printf("⚠️ Error closing .gitignore file: %v\n", closedErr)
+			}
+		}()
+		// Write the entry to .gitignore
+		if _, err := f.WriteString(entry + "\n"); err != nil {
+			return err
+		}
+	}
+
+	fmt.Println("✅ Updated .gitignore")
+	return nil
+}
+
+type PackageJSON struct {
+	Dependencies    map[string]string `json:"dependencies"`
+	DevDependencies map[string]string `json:"devDependencies"`
+	Scripts         map[string]string `json:"scripts"`
+}
+
+func isNextJSProject(dir string) (bool, error) {
+	// Check for package.json
+	packageJsonPath := filepath.Join(dir, "package.json")
+	if _, err := os.Stat(packageJsonPath); os.IsNotExist(err) {
+		return false, nil
+	}
+
+	// Parse package.json
+	content, err := os.ReadFile(packageJsonPath)
 	if err != nil {
-		fmt.Printf("❌ Failed to create %s: %v\n", name, err)
-	} else {
-		fmt.Printf("✅ Created %s\n", name)
+		return false, fmt.Errorf("error reading package.json: %w", err)
 	}
+
+	var pkg PackageJSON
+	if err := json.Unmarshal(content, &pkg); err != nil {
+		return false, fmt.Errorf("error parsing package.json: %w", err)
+	}
+
+	// Check dependencies
+	checkDeps := func(deps map[string]string) bool {
+		for dep := range deps {
+			if dep == "next" {
+				return true
+			}
+		}
+		return false
+	}
+
+	if checkDeps(pkg.Dependencies) || checkDeps(pkg.DevDependencies) {
+		return true, nil
+	}
+
+	// Check scripts for Next.js commands
+	for _, script := range pkg.Scripts {
+		if strings.Contains(script, "next ") || 
+		   strings.Contains(script, "next build") ||
+		   strings.Contains(script, "next dev") {
+			return true, nil
+		}
+	}
+
+	// Check for Next.js specific files/directories
+	nextFiles := []string{
+		"next.config.js",
+		"next.config.mjs",
+		filepath.Join("src", "pages"),
+		"pages",
+		"app", // Next.js 13+
+		".next",
+	}
+
+	for _, file := range nextFiles {
+		if _, err := os.Stat(filepath.Join(dir, file)); err == nil {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
