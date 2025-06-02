@@ -9,6 +9,7 @@ type NextDeployConfig struct {
 	Deployment  Deployment     `yaml:"deployment"`
 	Database    *Database      `yaml:"database,omitempty"`
 	Monitoring  *Monitoring    `yaml:"monitoring,omitempty"`
+Secrets *SecretsConfig `yaml:"secrets"`
 }
 
 // AppConfig contains application-specific settings

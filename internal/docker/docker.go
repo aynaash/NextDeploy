@@ -8,27 +8,145 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 const (
-	dockerfileName          = "Dockerfile"
-	defaultDockerfileContent = `
-# ---------- STAGE 1: Build ----------
-FROM node:20-alpine AS builder
+	DockerfileName = "Dockerfile"
+	nodeVersion    = "20-alpine"
+)
+
+var (
+	ErrDockerfileExists    = errors.New("dockerfile already exists")
+	ErrDockerNotInstalled  = errors.New("docker not installed")
+	ErrInvalidImageName    = errors.New("invalid Docker image name")
+	ErrDockerfileNotFound  = errors.New("dockerfile not found")
+	ErrBuildFailed         = errors.New("docker build failed")
+	ErrPushFailed          = errors.New("docker push failed")
+)
+
+type DockerManager struct {
+	verbose bool
+	logger  Logger // Interface for logging
+}
+
+type Logger interface {
+	Debugf(format string, args ...interface{})
+	Infof(format string, args ...interface{})
+	Errorf(format string, args ...interface{})
+}
+
+type BuildOptions struct {
+	ImageName string
+	NoCache   bool
+	Pull      bool
+	Target    string
+	BuildArgs []string
+	Platform  string // Added platform support
+}
+
+// NewDockerManager creates a new DockerManager instance
+func NewDockerManager(verbose bool, logger Logger) *DockerManager {
+	if logger == nil {
+		logger = &defaultLogger{verbose: verbose}
+	}
+	return &DockerManager{
+		verbose: verbose,
+		logger:  logger,
+	}
+}
+
+type defaultLogger struct {
+	verbose bool
+}
+
+func (l *defaultLogger) Debugf(format string, args ...interface{}) {
+	if l.verbose {
+		fmt.Printf("[DEBUG] "+format+"\n", args...)
+	}
+}
+
+func (l *defaultLogger) Infof(format string, args ...interface{}) {
+	fmt.Printf("[INFO] "+format+"\n", args...)
+}
+
+func (l *defaultLogger) Errorf(format string, args ...interface{}) {
+	fmt.Printf("[ERROR] "+format+"\n", args...)
+}
+
+// DockerfileExists checks if a Dockerfile exists in the specified directory
+func (dm *DockerManager) DockerfileExists(dir string) (bool, error) {
+	path := filepath.Join(dir, DockerfileName)
+	dm.logger.Debugf("Checking for Dockerfile at: %s", path)
+	
+	stat, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("error checking Dockerfile existence: %w", err)
+	}
+	
+	if stat.IsDir() {
+		return false, fmt.Errorf("dockerfile path is a directory")
+	}
+	
+	return true, nil
+}
+
+// GenerateDockerfile creates a new Dockerfile with content tailored to the package manager
+func (dm *DockerManager) GenerateDockerfile(dir, pkgManager string, overwrite bool) error {
+	exists, err := dm.DockerfileExists(dir)
+	if err != nil {
+		return fmt.Errorf("failed to check Dockerfile existence: %w", err)
+	}
+	if exists && !overwrite {
+		return ErrDockerfileExists
+	}
+
+	content, err := dm.generateDockerfileContent(pkgManager)
+	if err != nil {
+		return fmt.Errorf("failed to generate Dockerfile content: %w", err)
+	}
+
+	return dm.WriteDockerfile(dir, content)
+}
+
+// WriteDockerfile writes content to Dockerfile in the specified directory
+func (dm *DockerManager) WriteDockerfile(dir, content string) error {
+	content = strings.TrimSpace(content) + "\n"
+	dm.logger.Debugf("Writing Dockerfile with content:\n%s", content)
+	
+	path := filepath.Join(dir, DockerfileName)
+	err := os.WriteFile(path, []byte(content), 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write Dockerfile: %w", err)
+	}
+	
+	dm.logger.Infof("Dockerfile created successfully at %s", path)
+	return nil
+}
+
+// generateDockerfileContent creates Dockerfile content based on package manager
+func (dm *DockerManager) generateDockerfileContent(pkgManager string) (string, error) {
+	// Predefined templates for different package managers
+	templates := map[string]string{
+		"npm": `# ---------- STAGE 1: Build ----------
+FROM node:%s AS builder
 
 WORKDIR /app
 
 COPY package.json ./
-COPY yarn.lock ./
+COPY package-lock.json ./
 
-RUN yarn install
+RUN npm ci --production=false
 
 COPY . .
 
-RUN yarn run build
+RUN npm run build
 
 # ---------- STAGE 2: Runtime ----------
-FROM node:20-alpine
+FROM node:%s
 
 WORKDIR /app
 
@@ -41,158 +159,203 @@ USER nextjs
 
 EXPOSE 3000
 ENV PORT=3000
+ENV NODE_ENV=production
 
-CMD ["node", "server.js"]
-	`
-)
+CMD ["node", "server.js"]`,
 
-// DockerfileExists checks if a Dockerfile exists in the current directory
-func DockerfileExists() bool {
-	path := filepath.Join(".", dockerfileName)
-	fmt.Printf("Checking for Dockerfile at: %s\n", path)
-	_, err := os.Stat(path)
-	exists := !os.IsNotExist(err)
-	fmt.Printf("Dockerfile exists: %v\n", exists)
-	return exists
-}
+		"yarn": `# ---------- STAGE 1: Build ----------
+FROM node:%s AS builder
 
-// GenerateDockerfile creates a new Dockerfile with default or custom content
-func GenerateDockerfile(content string) error {
-	fmt.Println("Generating Dockerfile...")
-	if DockerfileExists() {
-		return errors.New("dockerfile already exists")
+WORKDIR /app
+
+COPY package.json ./
+COPY yarn.lock ./
+
+RUN yarn install --frozen-lockfile
+
+COPY . .
+
+RUN yarn build
+
+# ---------- STAGE 2: Runtime ----------
+FROM node:%s
+
+WORKDIR /app
+
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+
+RUN adduser -D nextjs && chown -R nextjs:nextjs /app
+USER nextjs
+
+EXPOSE 3000
+ENV PORT=3000
+ENV NODE_ENV=production
+
+CMD ["node", "server.js"]`,
+
+		"pnpm": `# ---------- STAGE 1: Build ----------
+FROM node:%s AS builder
+
+WORKDIR /app
+
+COPY package.json ./
+COPY pnpm-lock.yaml ./
+
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+
+RUN pnpm run build
+
+# ---------- STAGE 2: Runtime ----------
+FROM node:%s
+
+WORKDIR /app
+
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+
+RUN adduser -D nextjs && chown -R nextjs:nextjs /app
+USER nextjs
+
+EXPOSE 3000
+ENV PORT=3000
+ENV NODE_ENV=production
+
+CMD ["node", "server.js"]`,
 	}
 
-	if content == "" {
-		content = defaultDockerfileContent
-		fmt.Println("Using default Dockerfile content")
-	} else {
-		fmt.Println("Using custom Dockerfile content")
+	template, ok := templates[pkgManager]
+	if !ok {
+		dm.logger.Debugf("Unknown package manager '%s', defaulting to npm", pkgManager)
+		template = templates["npm"]
 	}
 
-	return WriteDockerfile(content)
+	return fmt.Sprintf(template, nodeVersion, nodeVersion), nil
 }
-
-// WriteDockerfile writes content to Dockerfile
-func WriteDockerfile(content string) error {
-	fmt.Printf("Writing Dockerfile with content:\n%s\n", content)
-	err := os.WriteFile(dockerfileName, []byte(content), 0644)
-	if err != nil {
-		fmt.Printf("Error writing Dockerfile: %v\n", err)
-	} else {
-		fmt.Println("Dockerfile written successfully")
-	}
-	return err
-}
-
-var imageNameRegex = regexp.MustCompile(`^([a-z0-9]+(?:[._-][a-z0-9]+)*)(?:/([a-z0-9]+(?:[._-][a-z0-9]+)*))*(?::([a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}))?$`)
 
 // ValidateImageName checks if a Docker image name is valid
-func ValidateImageName(name string) error {
-	fmt.Printf("Validating image name: %s\n", name)
-	
+func (dm *DockerManager) ValidateImageName(name string) error {
 	if len(name) == 0 {
-		return errors.New("image name cannot be empty")
+		return fmt.Errorf("%w: image name cannot be empty", ErrInvalidImageName)
 	}
 	
 	if len(name) > 255 {
-		return errors.New("image name exceeds 255 characters")
+		return fmt.Errorf("%w: exceeds 255 characters", ErrInvalidImageName)
 	}
 
-	if name[0] == '.' || name[0] == '_' || name[0] == '-' || name[0] == '/' || name[0] == ':' {
-		return errors.New("image name cannot start with a separator")
+	// Regex from Docker's implementation
+	validImageName := regexp.MustCompile(`^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$`)
+	validTag := regexp.MustCompile(`^[\w][\w.-]{0,127}$`)
+
+	parts := strings.SplitN(name, ":", 2)
+	if !validImageName.MatchString(parts[0]) {
+		return fmt.Errorf("%w: invalid repository name", ErrInvalidImageName)
 	}
 
-	if name[len(name)-1] == '.' || name[len(name)-1] == '_' || name[len(name)-1] == '-' || name[len(name)-1] == '/' || name[len(name)-1] == ':' {
-		return errors.New("image name cannot end with a separator")
-	}
-
-	if matched := regexp.MustCompile(`[._\-]{2,}|/{2,}|:{2,}`).MatchString(name); matched {
-		return errors.New("image name cannot contain consecutive separators")
-	}
-
-	if parts := regexp.MustCompile(`:`).Split(name, 2); len(parts) == 2 {
-		if len(parts[1]) > 128 {
-			return errors.New("tag cannot exceed 128 characters")
+	if len(parts) == 2 {
+		if !validTag.MatchString(parts[1]) {
+			return fmt.Errorf("%w: invalid tag format", ErrInvalidImageName)
 		}
 	}
 
-	if !imageNameRegex.MatchString(name) {
-		return errors.New("invalid image name format")
-	}
-
-	fmt.Println("Image name validation passed")
+	dm.logger.Debugf("Image name validation passed: %s", name)
 	return nil
 }
 
 // CheckDockerInstalled verifies Docker is available
-func CheckDockerInstalled() error {
-	fmt.Println("Checking if Docker is installed...")
+func (dm *DockerManager) CheckDockerInstalled() error {
+	dm.logger.Debugf("Checking if Docker is installed...")
+	
 	path, err := exec.LookPath("docker")
 	if err != nil {
-		fmt.Println("Docker not found in PATH")
-		return errors.New("docker not found in PATH")
+		return ErrDockerNotInstalled
 	}
-	fmt.Printf("Docker found at: %s\n", path)
+	
+	dm.logger.Debugf("Docker found at: %s", path)
+	
+	// Verify docker is actually working
+	cmd := exec.Command("docker", "version")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker is installed but not functioning: %w", err)
+	}
+	
 	return nil
 }
 
-// BuildImage builds a Docker image
-func BuildImage(ctx context.Context, imageName string, noCache bool) error {
-	fmt.Printf("Building Docker image: %s (no-cache: %v)\n", imageName, noCache)
-	
-	if err := ValidateImageName(imageName); err != nil {
+// BuildImage builds a Docker image with options
+func (dm *DockerManager) BuildImage(ctx context.Context, dir string, opts BuildOptions) error {
+	if err := dm.ValidateImageName(opts.ImageName); err != nil {
 		return fmt.Errorf("invalid image name: %w", err)
 	}
 
-	if err := CheckDockerInstalled(); err != nil {
-		return err
+	if err := dm.CheckDockerInstalled(); err != nil {
+		return fmt.Errorf("docker check failed: %w", err)
 	}
 
-	if !DockerfileExists() {
-		return errors.New("dockerfile not found in current directory")
+	exists, err := dm.DockerfileExists(dir)
+	if err != nil {
+		return fmt.Errorf("dockerfile check failed: %w", err)
+	}
+	if !exists {
+		return ErrDockerfileNotFound
 	}
 
-	args := []string{"build", "-t", imageName, "."}
-	if noCache {
+	args := []string{"build"}
+	if opts.NoCache {
 		args = append(args, "--no-cache")
 	}
+	if opts.Pull {
+		args = append(args, "--pull")
+	}
+	if opts.Target != "" {
+		args = append(args, "--target", opts.Target)
+	}
+	if opts.Platform != "" {
+		args = append(args, "--platform", opts.Platform)
+	}
+	for _, buildArg := range opts.BuildArgs {
+		args = append(args, "--build-arg", buildArg)
+	}
 
-	fmt.Printf("Executing docker command with args: %v\n", args)
+	args = append(args, "-t", opts.ImageName, ".")
+
+	dm.logger.Infof("Building Docker image with args: %v", args)
 	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	err := cmd.Run()
-	if err != nil {
-		fmt.Printf("Error building image: %v\n", err)
-	} else {
-		fmt.Println("Image built successfully")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%w: %v", ErrBuildFailed, err)
 	}
-	return err
+
+	dm.logger.Infof("Image built successfully: %s", opts.ImageName)
+	return nil
 }
 
 // PushImage pushes a Docker image to registry
-func PushImage(ctx context.Context, imageName string) error {
-	fmt.Printf("Pushing Docker image: %s\n", imageName)
-	
-	if err := ValidateImageName(imageName); err != nil {
+func (dm *DockerManager) PushImage(ctx context.Context, imageName string) error {
+	if err := dm.ValidateImageName(imageName); err != nil {
 		return fmt.Errorf("invalid image name: %w", err)
 	}
 
-	if err := CheckDockerInstalled(); err != nil {
-		return err
+	if err := dm.CheckDockerInstalled(); err != nil {
+		return fmt.Errorf("docker check failed: %w", err)
 	}
 
+	dm.logger.Infof("Pushing Docker image: %s", imageName)
 	cmd := exec.CommandContext(ctx, "docker", "push", imageName)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	err := cmd.Run()
-	if err != nil {
-		fmt.Printf("Error pushing image: %v\n", err)
-	} else {
-		fmt.Println("Image pushed successfully")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%w: %v", ErrPushFailed, err)
 	}
-	return err
+
+	dm.logger.Infof("Image pushed successfully: %s", imageName)
+	return nil
 }

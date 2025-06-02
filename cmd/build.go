@@ -4,7 +4,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -17,85 +16,113 @@ var (
 	imageName string
 	registry  string
 	noCache   bool
+	pull      bool
 	tag       string
+	target    string
+	platform  string
+	buildArgs []string
 )
-/*
-* This commands needs to do the following 
-* 1. Check if Dockerfile DockerfileExists
-* 2. Validate the image name format
-* 3. Validate the registry format
-* 4. If tag is not provided, use the Git commit hash as the tag
-* 5. Check if there are uncommitted changes in the Git repository
-* 6. Build the Docker image using the provided or default IsValidRegistry
-* 7. Print success or error messages accordingly
-* * Usage:
-* nextdeploy build [flags]
-* Flags:
-* --image string       Name for the Docker image (default "nextjs-app")
-* --registry string    Container registry URL (default "registry.digitalocean.com/your-namespace")
-* --no-cache           Build without using cache
-* --tag string         Tag for the Docker image (default is Git commit hash)
-* Example:
-* nextdeploy build --image my-nextjs-app --registry registry.digitalocean.com/my-namespace --no-cache --tag v1.0.0
-*
-*
-*
-*/
+
 var buildCmd = &cobra.Command{
 	Use:   "build",
 	Short: "Build Docker image from the Dockerfile",
-	PreRun: func(cmd *cobra.Command, args []string) {
-		// check if Docker is installed
-		if err := docker.CheckDockerInstalled(); err != nil {
-			fmt.Println("❌ Docker is not installed or not in PATH.")
-			os.Exit(1)
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		dm := docker.NewDockerManager(true, nil)
+
+		// Validate Docker installation
+		if err := dm.CheckDockerInstalled(); err != nil {
+			return fmt.Errorf("docker is not installed or not functioning: %w", err)
 		}
 
-// check if Dockerfile exists 
-		if !docker.DockerfileExists() { 
-			fmt.Println("❌ Dockerfile not found in the current directory. Please run 'nextdeploy init' to create one.")
-			os.Exit(1)
+		// Check for Dockerfile
+		exists, err := dm.DockerfileExists(".")
+		if err != nil {
+			return fmt.Errorf("failed to check for Dockerfile: %w", err)
 		}
-		if err := docker.ValidateImageName(imageName); err != nil {
-			fmt.Printf("❌ Invalid image name: %v\n", err)
-			os.Exit(1)
+		if !exists {
+			return fmt.Errorf("Dockerfile not found in current directory")
 		}
+
+		// Validate registry if provided
 		if registry != "" && !validators.IsValidRegistry(registry) {
-			fmt.Println("❌ Invalid registry format.")
-			os.Exit(1)
+			return fmt.Errorf("invalid registry format: %s", registry)
 		}
+
+		// Set default tag from Git if not provided
 		if tag == "" {
-			hash, err := gitutils.GetCommitHash()
+			hash, err := git.GetCommitHash()
 			if err != nil {
-				fmt.Printf("❌ Failed to get commit hash: %v\n", err)
-	 		os.Exit(1)
+				return fmt.Errorf("failed to get git commit hash: %w", err)
 			}
 			tag = hash
-			fmt.Printf("ℹ️  Using Git commit hash as tag: %s\n", tag)
+			cmd.Printf("Using Git commit hash as tag: %s\n", tag)
 		}
-		if gitutils.IsDirty() {
-			fmt.Println("⚠️  Uncommitted changes present.")
-		}
-	},
-	Run: func(cmd *cobra.Command, args []string) {
-		fullImage := strings.TrimSuffix(registry, "/") + "/" + imageName + ":" + tag
-		fmt.Printf("🚀 Building image: %s\n", fullImage)
 
-		// build the Docker image 
-		 ctx := context.Background()
-		 if err := docker.BuildImage(ctx, fullImage, noCache); err != nil {
-			 fmt.Printf("❌ Build failed: %v\n", err)
-			 os.Exit(1)
-		 }
-		fmt.Println("✅ Build successful.")
+		// Warn about uncommitted changes
+		if git.IsDirty() {
+			cmd.Printf("Warning: Uncommitted changes present in working directory\n")
+		}
+
+		return nil
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dm := docker.NewDockerManager(true, nil)
+
+		// Construct full image name with registry and tag
+		fullImage := constructImageName(imageName, registry, tag)
+		cmd.Printf("Building image: %s\n", fullImage)
+
+		// Prepare build options
+		opts := docker.BuildOptions{
+			ImageName: fullImage,
+			NoCache:   noCache,
+			Pull:      pull,
+			Target:    target,
+			Platform:  platform,
+			BuildArgs: buildArgs,
+		}
+
+		// Execute build with context
+		ctx := context.Background()
+		if err := dm.BuildImage(ctx, ".", opts); err != nil {
+			return fmt.Errorf("build failed: %w", err)
+		}
+
+		cmd.Printf("Successfully built image: %s\n", fullImage)
+		return nil
 	},
 }
 
 func init() {
-	buildCmd.Flags().StringVarP(&imageName, "image", "i", "nextjs-app", "Name for the Docker image")
-	buildCmd.Flags().StringVarP(&registry, "registry", "r", "registry.digitalocean.com/your-namespace", "Container registry URL")
-	buildCmd.Flags().BoolVar(&noCache, "no-cache", false, "Build without using cache")
-	buildCmd.Flags().StringVarP(&tag, "tag", "t", "", "Tag for the Docker image")
+	// Image configuration flags
+	buildCmd.Flags().StringVarP(&imageName, "image", "i", "nextjs-app", 
+		"Name for the Docker image (without registry)")
+	buildCmd.Flags().StringVarP(&registry, "registry", "r", "", 
+		"Container registry URL (e.g., 'docker.io/myorg')")
+	buildCmd.Flags().StringVarP(&tag, "tag", "t", "", 
+		"Tag for the Docker image (default: Git commit hash)")
+
+	// Build optimization flags
+	buildCmd.Flags().BoolVar(&noCache, "no-cache", false, 
+		"Build without using cache")
+	buildCmd.Flags().BoolVar(&pull, "pull", false, 
+		"Always attempt to pull a newer version of the base image")
+
+	// Advanced build flags
+	buildCmd.Flags().StringVar(&target, "target", "", 
+		"Set the target build stage to build")
+	buildCmd.Flags().StringVar(&platform, "platform", "", 
+		"Set platform if server is multi-platform capable")
+	buildCmd.Flags().StringArrayVar(&buildArgs, "build-arg", []string{}, 
+		"Set build-time variables")
+
 	rootCmd.AddCommand(buildCmd)
 }
-	
+
+func constructImageName(name, registry, tag string) string {
+	fullImage := name
+	if registry != "" {
+		fullImage = strings.TrimSuffix(registry, "/") + "/" + name
+	}
+	return fullImage + ":" + tag
+}
