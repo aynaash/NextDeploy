@@ -3,121 +3,180 @@
 
 
 // internal/config/template.go
-package config
+package secrets
 
 import (
+	"errors"
+	"encoding/json"
 	"os"
+	"os/exec"
+	"fmt"
+	"io"
+	"net/http"
 	"path/filepath"
+	"time"
+	"gopkg.in/yaml.v3"
 )
 
-const sampleConfig = `# nextdeploy.yml
-version: "1.0"
+// Config represents the structure of nextdeploy.yml
+func LoadTokenFromConfig() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to get current working directory: %w", err)
+	}
 
-app:
-  name: example-app
-  environment: production
-  domain: app.example.com
-  port: 3000
+	configPath := filepath.Join(cwd, "nextdeploy.yml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read nextdeploy.yml: %w", err)
+	}
 
-repository:
-  url: git@github.com:username/example-app.git
-  branch: main
-  auto_deploy: true
-  webhook_secret: your_webhook_secret  # Optional if using webhook triggers
+	var config Config
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return "", fmt.Errorf("failed to parse nextdeploy.yml: %w", err)
+	}
 
-docker:
-  build:
-    context: .
-    dockerfile: Dockerfile
-    args:
-      NODE_ENV: production
-    no_cache: false
-  image: username/example-app:latest
-  registry: ghcr.io  # or docker.io, or ECR/GCR if you support it
-  push: true  # Push after successful build
+	if config.Repository.WebhookSecret == "" {
+		return "", errors.New("webhook_secret not found in nextdeploy.yml")
+	}
 
-# ... rest of the sample config
-`
-
-func GenerateSampleConfig() error {
-	// Write the sample config to sample.nextdeploy.yml in the current directory
-	path := filepath.Join(".", "sample.nextdeploy.yml")
-	return os.WriteFile(path, []byte(sampleConfig), 0644)
+	return config.Repository.WebhookSecret, nil
 }
 
-// cmd/init.go
-package cmd
-
-import (
-	"bufio"
-	"fmt"
-	"os"
-	"nextdeploy/internal/config"
-	"nextdeploy/internal/docker"
-	"github.com/spf13/cobra"
-)
-
-var initCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Initialize your project configuration",
-	Run: func(cmd *cobra.Command, args []string) {
-		reader := bufio.NewReader(os.Stdin)
-
-		// Ask if they want to generate a sample config
-		if config.PromptYesNo(reader, "Would you like to generate a sample configuration file?") {
-			if err := config.GenerateSampleConfig(); err != nil {
-				fmt.Printf("Error generating sample config: %v\n", err)
-			} else {
-				fmt.Println("✅ sample.nextdeploy.yml created")
-			}
-		}
-
-		// Ask if they want to create a custom config
-		if config.PromptYesNo(reader, "Would you like to create a custom nextdeploy.yml?") {
-			cfg, err := config.PromptForConfig(reader)
-			if err != nil {
-				fmt.Printf("Error getting configuration: %v\n", err)
-				os.Exit(1)
-			}
-
-			if err := config.WriteConfig("nextdeploy.yml", cfg); err != nil {
-				fmt.Printf("Error writing config: %v\n", err)
-				os.Exit(1)
-			}
-			fmt.Println("✅ nextdeploy.yml created")
-		}
-
-		// Handle Dockerfile creation
-		if config.PromptYesNo(reader, "Would you like to create a Dockerfile?") {
-			if err := docker.HandleDockerfileCreation(reader); err != nil {
-				fmt.Printf("Error creating Dockerfile: %v\n", err)
-				os.Exit(1)
-			}
-		}
-	},
+ // Secret represents a key-value pair for Doppler
+type Secret struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
+// ExtractAndPushSecretsToDoppler extracts all secrets from nextdeploy.yml and pushes them to Doppler
+func ExtractAndPushSecretsToDoppler(dopplerProject string, dopplerConfig string) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current working directory: %w", err)
+	}
 
-// internal/docker/docker.go
-package docker
+	configPath := filepath.Join(cwd, "nextdeploy.yml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read nextdeploy.yml: %w", err)
+	}
 
-import (
-	"bufio"
-	"fmt"
-	"os"
-	"strings"
-)
+	var config Config
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("failed to parse nextdeploy.yml: %w", err)
+	}
 
-func HandleDockerfileCreation(reader *bufio.Reader) error {
-	if DockerfileExists() {
-		if !PromptYesNo(reader, "Dockerfile exists. Overwrite?") {
-			return nil
+	// Collect all secrets from the config
+	secrets := []Secret{
+		{"REPOSITORY_WEBHOOK_SECRET", config.Repository.WebhookSecret},
+		{"DATABASE_PASSWORD", config.Database.Password},
+		{"DATABASE_USERNAME", config.Database.Username},
+		{"BACKUP_ACCESS_KEY", config.Backup.Storage.AccessKey},
+		{"BACKUP_SECRET_KEY", config.Backup.Storage.SecretKey},
+	}
+
+	// Add Docker build args if they exist
+	for k, v := range config.Docker.Build.Args {
+		secrets = append(secrets, Secret{
+			Name:  fmt.Sprintf("DOCKER_BUILD_ARG_%s", k),
+			Value: v,
+		})
+	}
+
+	// Filter out empty secrets
+	var nonEmptySecrets []Secret
+	for _, secret := range secrets {
+		if secret.Value != "" {
+			nonEmptySecrets = append(nonEmptySecrets, secret)
 		}
 	}
 
-	pkgManager := promptPackageManager(reader)
-	content := GenerateDockerfile(pkgManager)
-	return WriteFile("Dockerfile", content)
+	// Push secrets to Doppler
+	for _, secret := range nonEmptySecrets {
+		cmd := exec.Command("doppler", "secrets", "set", 
+			fmt.Sprintf("%s=%s", secret.Name, secret.Value),
+			"--project", dopplerProject,
+			"--config", dopplerConfig,
+			"--silent",
+		)
+
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to set secret %s in Doppler: %w\nOutput: %s", secret.Name, err, string(output))
+		}
+	}
+
+	return nil
 }
 
-// ... other Docker-related functions
+// VerifyDopplerSecrets verifies that all secrets exist in Doppler
+func VerifyDopplerSecrets(dopplerProject string, dopplerConfig string) error {
+	// Get list of secrets from Doppler
+	cmd := exec.Command("doppler", "secrets", "download", 
+		"--project", dopplerProject,
+		"--config", dopplerConfig,
+		"--format", "json",
+		"--no-file",
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to download secrets from Doppler: %w\nOutput: %s", err, string(output))
+	}
+
+	var dopplerSecrets map[string]interface{}
+	if err := json.Unmarshal(output, &dopplerSecrets); err != nil {
+		return fmt.Errorf("failed to parse Doppler secrets: %w", err)
+	}
+
+	// Load our expected secrets
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current working directory: %w", err)
+	}
+
+	configPath := filepath.Join(cwd, "nextdeploy.yml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read nextdeploy.yml: %w", err)
+	}
+
+	var config Config
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("failed to parse nextdeploy.yml: %w", err)
+	}
+
+	// Check critical secrets exist in Doppler
+	requiredSecrets := []string{
+		"DATABASE_PASSWORD",
+		"DATABASE_USERNAME",
+	}
+
+	for _, secretName := range requiredSecrets {
+		if _, exists := dopplerSecrets[secretName]; !exists {
+			return fmt.Errorf("required secret %s not found in Doppler", secretName)
+		}
+	}
+	:
+	return nil
+}func main() {
+	// Load token from config
+	token, err := secrets.LoadTokenFromConfig()
+	if err != nil {
+		log.Fatalf("Error loading token: %v", err)
+	}
+	fmt.Println("Loaded token:", token)
+
+	// Push secrets to Doppler
+	err = secrets.ExtractAndPushSecretsToDoppler("my-project", "dev")
+	if err != nil {
+		log.Fatalf("Error pushing secrets to Doppler: %v", err)
+	}
+
+	// Verify secrets in Doppler
+	err = secrets.VerifyDopplerSecrets("my-project", "dev")
+	if err != nil {
+		log.Fatalf("Error verifying Doppler secrets: %v", err)
+	}
+}

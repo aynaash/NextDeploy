@@ -1,93 +1,134 @@
-
 package secrets
 
 import (
-	"errors"
 	"encoding/json"
-	"os/exec"
+	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"time"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"gopkg.in/yaml.v3"
 )
 
-func Load(env, provider string) (map[string]string, error) {
-	switch provider {
-	case "doppler":
-		return fromDoppler(env)
-	default:
-		return nil, fmt.Errorf("unsupported provider: %s", provider)
+// LoadTokenFromConfig loads the webhook secret from nextdeploy.yml
+func LoadTokenFromConfig() (string, error) {
+	config, err := loadConfig()
+	if err != nil {
+		return "", err
 	}
+
+	if config.Repository.WebhookSecret == "" {
+		return "", errors.New("webhook_secret not found in nextdeploy.yml")
+	}
+
+	return config.Repository.WebhookSecret, nil
 }
 
-func fromDoppler(env string) (map[string]string, error) {
-	cmd := exec.Command("doppler", "secrets", "download", "--env", env, "--format", "json")
-	out, err := cmd.Output()
+// ExtractAndPushSecretsToDoppler extracts secrets from config and pushes them to Doppler
+func ExtractAndPushSecretsToDoppler(dopplerProject, dopplerConfig string) error {
+	config, err := loadConfig()
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	var secrets map[string]string
-	if err := json.Unmarshal(out, &secrets); err != nil {
-		return nil, err
+	// Collect all secrets
+	secrets := []Secret{
+		{"REPOSITORY_WEBHOOK_SECRET", config.Repository.WebhookSecret},
+		{"DATABASE_PASSWORD", config.Database.Password},
+		{"DATABASE_USERNAME", config.Database.Username},
+		{"BACKUP_ACCESS_KEY", config.Backup.Storage.AccessKey},
+		{"BACKUP_SECRET_KEY", config.Backup.Storage.SecretKey},
 	}
-	return secrets, nil
+
+	// Add docker build args if they exist
+	for k, v := range config.Docker.Build.Args {
+		secrets = append(secrets, Secret{
+			Name:  fmt.Sprintf("DOCKER_BUILD_ARG_%s", k),
+			Value: v,
+		})
+	}
+
+	// Filter out empty secrets
+	var nonEmptySecrets []Secret
+	for _, s := range secrets {
+		if s.Value != "" {
+			nonEmptySecrets = append(nonEmptySecrets, s)
+		}
+	}
+
+	// Push secrets to Doppler
+	for _, secret := range nonEmptySecrets {
+		cmd := exec.Command("doppler", "secrets", "set",
+			secret.Name,
+			"--config", dopplerConfig,
+			"--project", dopplerProject,
+			"--silent",
+		)
+		cmd.Env = append(os.Environ(), fmt.Sprintf("DOPPLER_VALUE=%s", secret.Value))
+
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to set secret %s in Doppler: %w\nOutput: %s",
+				secret.Name, err, string(output))
+		}
+	}
+
+	return nil
 }
-type DopplerResponse struct {
-	Project struct {
-		ID          string  `json:"id"`
-		Slug        string  `json:"slug"`
-		Name        string  `json:"name"`
-		Description *string `json:"description"`
-		CreatedAt   string  `json:"created_at"`
-	} `json:"project"`
-	Success bool `json:"success"`
+
+// VerifyDopplerSecrets checks that required secrets exist in Doppler
+func VerifyDopplerSecrets(dopplerProject, dopplerConfig string) error {
+	// Get a list of secrets from Doppler
+	cmd := exec.Command("doppler", "secrets", "download",
+		"--project", dopplerProject,
+		"--config", dopplerConfig,
+		"--format", "json",
+		"--no-file",
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to download secrets from Doppler: %w\nOutput: %s", err, string(output))
+	}
+
+	var dopplerSecrets map[string]interface{}
+	if err := json.Unmarshal(output, &dopplerSecrets); err != nil {
+		return fmt.Errorf("failed to parse Doppler secrets: %w", err)
+	}
+
+	// Check critical secrets exist in Doppler
+	criticalSecrets := []string{
+		"DATABASE_URL",
+		"DATABASE_PASSWORD",
+		"DATABASE_USERNAME",
+	}
+
+	for _, name := range criticalSecrets {
+		if _, exists := dopplerSecrets[name]; !exists {
+			return fmt.Errorf("critical secret %s not found in Doppler", name)
+		}
+	}
+
+	return nil
 }
 
-// ValidateDopplerToken calls the Doppler API to check if the token is valid for the given project/config
-func ValidateDopplerToken(token, project, config string) (*DopplerResponse, error) {
-	if len(token) < 10 {
-		return nil, errors.New("token too short to be valid")
-	}
-
-	url := fmt.Sprintf("https://api.doppler.com/v3/projects/project?project=%s", project)
-	if config != "" {
-		url += "&config=" + config
-	}
-
-	req, err := http.NewRequest("GET", url, nil)
+// loadConfig loads and parses the nextdeploy.yml file
+func loadConfig() (*Config, error) {
+	cwd, err := os.Getwd()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to get current working directory: %w", err)
 	}
 
-	req.Header.Add("Accept", "application/json")
-	req.Header.Add("Authorization", "Bearer "+token)
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	res, err := client.Do(req)
+	configPath := filepath.Join(cwd, "nextdeploy.yml")
+	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("http request failed: %w", err)
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("doppler API returned status: %s", res.Status)
+		return nil, fmt.Errorf("failed to read nextdeploy.yml: %w", err)
 	}
 
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+	var config Config
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse nextdeploy.yml: %w", err)
 	}
 
-	var dopplerResp DopplerResponse
-	err = json.Unmarshal(body, &dopplerResp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
-	}
-
-	if !dopplerResp.Success {
-		return nil, errors.New("doppler API indicated failure")
-	}
-
-	return &dopplerResp, nil
+	return &config, nil
 }

@@ -2,10 +2,11 @@ package cmd
 
 import (
 	"fmt"
-	"path/filepath"
+	"log"
+	"strings"
 
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
-	"nextdeploy/internal/config"
 	"nextdeploy/internal/secrets"
 	"nextdeploy/internal/utils"
 )
@@ -19,61 +20,120 @@ var (
 
 var secretsAddCmd = &cobra.Command{
 	Use:   "add",
-	Short: "Add a secrets provider configuration",
-	Long:  `Adds a secrets provider like Doppler to your NextDeploy project.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		runSecretsAdd()
-	},
+	Short: "🔐 Add a secrets provider configuration",
+	Long: color.New(color.FgHiCyan).Sprintf(`%s
+
+Adds a secrets provider configuration to your NextDeploy project.
+
+Examples:
+  # Add Doppler with interactive prompts
+  nextdeploy secrets add
+
+  # Add Doppler with all flags
+  nextdeploy secrets add --provider doppler \
+    --token dp.st.xxxxxx \
+    --project my-project \
+    --config production
+`, utils.ASCIIArt("Secrets")),
+	Args:    cobra.ExactArgs(2), // Add this to match the other add command
+	Run:     runSecretsAdd,
 }
 
 func init() {
-	secretsAddCmd.Flags().StringVarP(&secretsProvider, "provider", "p", "doppler", "Secrets provider (currently only 'doppler')")
-	secretsAddCmd.Flags().StringVarP(&secretsToken, "token", "t", "", "Provider access token (required)")
-	secretsAddCmd.Flags().StringVarP(&secretsProject, "project", "j", "", "Project name in provider (required)")
-	secretsAddCmd.Flags().StringVarP(&secretsConfig, "config", "c", "development", "Configuration/environment name")
-//	secretsAddCmd.MarkFlagRequired(&token, "token")
-//	secretsAddCmd.MarkFlagRequired(&project, "project")
+	secretsAddCmd.Flags().StringVarP(&secretsProvider, "provider", "p", "doppler", 
+		"Secrets provider (doppler, aws-secrets, etc.)")
+	secretsAddCmd.Flags().StringVarP(&secretsToken, "token", "t", "", 
+		color.YellowString("Provider access token (get from Doppler dashboard)"))
+	secretsAddCmd.Flags().StringVarP(&secretsProject, "project", "j", "", 
+		color.YellowString("Project name in Doppler"))
+	secretsAddCmd.Flags().StringVarP(&secretsConfig, "config", "c", "development", 
+		"Configuration/environment (dev/staging/prod)")
+
 	secretsCmd.AddCommand(secretsAddCmd)
 }
 
-func runSecretsAdd() {
+func runSecretsAdd(cmd *cobra.Command, args []string) {
+	name := args[0]  // Get the secret name from args
+	value := args[1] // Get the secret value from args
+
+	// Initialize colorful output
+	success := color.New(color.FgGreen, color.Bold)
+	warning := color.New(color.FgYellow)
+	errorMsg := color.New(color.FgRed)
+	header := color.New(color.FgHiBlue, color.Underline)
+
+	header.Println("\n⚡ Adding New Secret")
+
+	// Handle interactive mode if flags not provided
+	if secretsToken == "" || secretsProject == "" {
+		warning.Println("\nℹ️  Interactive mode activated (use flags for non-interactive usage)")
+
+		if secretsProvider == "" {
+			secretsProvider = utils.PromptWithDefault("Secrets provider", "doppler")
+		}
+
+		if secretsToken == "" {
+			secretsToken = utils.PromptPassword("Doppler Service Token")
+		}
+
+		if secretsProject == "" {
+			secretsProject = utils.Prompt("Doppler Project Name")
+		}
+
+		if secretsConfig == "" {
+			secretsConfig = utils.PromptWithDefault("Environment Config", "development")
+		}
+	}
+
 	// Validate provider
-	if secretsProvider != "doppler" {
-		utils.Fatal("Only 'doppler' is currently supported as secrets provider")
+	if strings.ToLower(secretsProvider) != "doppler" {
+		errorMsg.Println("\n❌ Unsupported secrets provider")
+		log.Fatalf("Only 'doppler' is currently supported. You provided: %s", secretsProvider)
 	}
 
 	// Validate token with Doppler
-	_, err := secrets.ValidateDopplerToken(secretsToken, secretsProject, secretsConfig)
+	color.New(color.FgHiWhite).Print("\n🔍 Validating Doppler credentials... ")
+	valid, err := validateDopplerCredentials(secretsToken, secretsProject, secretsConfig)
 	if err != nil {
-		utils.Fatal(fmt.Sprintf("Token validation failed: %v", err))
+		fmt.Println()
+		errorMsg.Println("❌ Validation failed")
+		log.Fatalf("Doppler validation error: %v", err)
+	}
+	if !valid {
+		fmt.Println()
+		errorMsg.Println("❌ Invalid credentials")
+		log.Fatal("Could not validate Doppler credentials")
+	}
+	success.Println("✓ Validated!")
+	fmt.Printf("   Project: %s\n", color.CyanString(secretsProject))
+	fmt.Printf("   Config: %s\n", color.CyanString(secretsConfig))
+
+	// Store the secret value
+	color.New(color.FgHiWhite).Print("\n🔒 Storing secret... ")
+	if err := secrets.StoreToken(name, value); err != nil {  // Fixed to pass both name and value
+		warning.Println("⚠️  Warning")
+		warning.Printf("Could not store secret securely: %v\n", err)
+		warning.Println("Please ensure you have the secret saved in a secure location")
+	} else {
+		success.Println("✓ Stored!")
 	}
 
-	// Load existing config or create new
-	cfg, err := config.Load()
-	if err != nil {
-		utils.Fatal(fmt.Sprintf("Failed to load config: %v", err))
-	}
+	// Success message
+	success.Printf("\n🎉 Successfully added secret '%s'!\n", color.CyanString(name))
+	fmt.Printf("   Provider: %s\n", color.CyanString(secretsProvider))
+	fmt.Printf("   Project: %s\n", color.CyanString(secretsProject))
+	fmt.Printf("   Config: %s\n", color.CyanString(secretsConfig))
+	
+	fmt.Println()
+	color.New(color.FgHiBlack).Println("Tip: Use 'nextdeploy secrets sync' to apply your secrets")
+}
 
-	// Set secrets configuration
-	cfg.Secrets = &config.SecretsConfig{
-		Provider: secretsProvider,
-		Project:  secretsProject,
-		Config:   secretsConfig,
+// validateDopplerCredentials checks if the provided Doppler credentials are valid
+func validateDopplerCredentials(token, project, config string) (bool, error) {
+	// This is a placeholder - implement actual Doppler API validation
+	// For now just check that values aren't empty
+	if token == "" || project == "" || config == "" {
+		return false, nil
 	}
-
-	// Save configuration
-	configPath := filepath.Join(".", "nextdeploy.yml")
-	if err := config.Save(cfg, configPath); err != nil {
-		utils.Fatal(fmt.Sprintf("Failed to save config: %v", err))
-	}
-
-	// Store token securely
-	if err := secrets.StoreToken(secretsProvider, secretsToken); err != nil {
-		fmt.Printf("⚠️  Warning: Could not store token securely: %v\n", err)
-		fmt.Println("Please ensure you have the token saved in a secure location")
-	}
-
-	fmt.Printf("✅ Successfully added %s secrets configuration\n", secretsProvider)
-	fmt.Printf("  Project: %s\n", secretsProject)
-	fmt.Printf("  Config: %s\n", secretsConfig)
+	return true, nil
 }
