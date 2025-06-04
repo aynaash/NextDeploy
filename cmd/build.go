@@ -67,8 +67,8 @@ var buildCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dm := docker.NewDockerManager(true, nil)
-
-		// Construct full image name with registry and tag
+  //
+		 // Construct full image name with registry and tag
 		fullImage := constructImageName(imageName, registry, tag)
 		cmd.Printf("Building image: %s\n", fullImage)
 

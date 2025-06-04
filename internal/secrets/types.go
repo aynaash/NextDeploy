@@ -14,6 +14,9 @@ type Config struct {
 	Backup      BackupConfig     `yaml:"backup"`
 	SSL         SSLConfig        `yaml:"ssl"`
 	Webhook     WebhookConfig    `yaml:"webhook"`
+	Secrets     []Secret         `yaml:"secrets"`
+	Doppler     Doppler          `yaml:"doppler"`
+	Environment Env        `yaml:"environment"`
 }
 
 type AppConfig struct {
@@ -134,4 +137,15 @@ type DatabaseConfig struct {
 type Secret struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
+}
+
+type Doppler struct {
+	Project string `json:"project"`
+	Config  string `json:"config"`
+	Secrets []Secret `json:"secrets"`
+
+}
+type Env struct {
+	Name  string `yaml:"name"`
+	Value string `yaml:"value"`
 }
