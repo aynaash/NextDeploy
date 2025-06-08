@@ -169,3 +169,7 @@ func VerifyDopplerSecrets(dopplerProject string, dopplerConfig string) error {
 
 	return nil
 }
+func (dm *DopplerManager) PushSecret(path string, value string) error {
+	// Implementation for pushing to Doppler
+	return fmt.Errorf("PushSecret method not implemented for DopplerManager")
+}

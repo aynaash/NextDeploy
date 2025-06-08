@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"gopkg.in/yaml.v3"
-	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +15,11 @@ type SecretManager struct {
 	configPath string
 	masterKey  []byte
 	doppler    *DopplerManager
+}
+type DopplerConfig struct {
+	Token   string `yaml:"token"`
+	Project string `yaml:"project"`
+	Config  string `yaml:"config"`
 }
 
 // NewSecretManager creates a new SecretManager
@@ -36,7 +41,6 @@ func (sm *SecretManager) GetSecret(path string) (string, error) {
 		return "", err
 	}
 
-	// check if the value is encrypted(starts with "enc:")
 	if strings.HasPrefix(value, "enc:") {
 		encrypted, err := base64.StdEncoding.DecodeString(value[4:])
 		if err != nil {
@@ -65,22 +69,56 @@ func (sm *SecretManager) UpdateSecret(path string, value string, encrypt bool) e
 		value = "enc:" + base64.StdEncoding.EncodeToString(encrypted)
 	}
 
-	err = sm.setNestedValue(config, path, value)
+	// Convert config to map[string]interface{} for nested operations
+	configMap, ok := config.ToMap()
+	if !ok {
+		return errors.New("failed to convert config to map")
+	}
+
+	err = sm.setNestedValue(configMap, path, value)
 	if err != nil {
 		return err
 	}
 
+	// Update the original config with the modified map
+	if err := config.FromMap(configMap); err != nil {
+		return err
+	}
+
 	if sm.doppler != nil {
-		if err := sm.doppler.PushSecret(sm.configPath); err != nil {
+		if err := sm.doppler.PushSecret(path, value); err != nil {
 			return fmt.Errorf("failed to sync with doppler: %w", err)
 		}
 	}
 	return sm.saveConfig(config)
 }
 
+// StoreToken stores a secret name/value pair (encrypted by default)
+func (sm *SecretManager) StoreToken(name, value string) error {
+	return sm.UpdateSecret(name, value, true) // true = encrypt the value
+}
+
+// StoreToken creates a SecretManager and stores a name/value pair
+func StoreToken(name, value string) error {
+	// Create a basic configuration
+	cfg := &Config{
+		Doppler: Doppler{
+			// These can be empty if not using Doppler
+		},
+	}
+
+	// Create secret manager with empty path and master key for now
+	// You might want to make these configurable
+	sm, err := NewSecretManager("", "default-master-key", cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create secret manager: %w", err)
+	}
+
+	return sm.StoreToken(name, value)
+}
 func (sm *SecretManager) LoadConfig() (*Config, error) {
 	if _, err := os.Stat(sm.configPath); os.IsNotExist(err) {
-		return config, nil
+		return &Config{}, nil // Return empty config instead of undefined variable
 	}
 
 	data, err := ioutil.ReadFile(sm.configPath)
@@ -88,13 +126,14 @@ func (sm *SecretManager) LoadConfig() (*Config, error) {
 		return nil, err
 	}
 
+	var config Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
-	return config, nil
+	return &config, nil
 }
 
-func (sm *SecretManager) saveConfig(config map[string]interface{}) error {
+func (sm *SecretManager) saveConfig(config *Config) error {
 	data, err := yaml.Marshal(config)
 	if err != nil {
 		return err
@@ -104,8 +143,10 @@ func (sm *SecretManager) saveConfig(config map[string]interface{}) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	return io.WriteFile(sm.configPath, data, 0644)
+	return ioutil.WriteFile(sm.configPath, data, 0644)
 }
+
+// ... rest of the methods remain the same ...
 
 func (sm *SecretManager) getNestedValue(path string) (string, error) {
 	config, err := sm.LoadConfig()
@@ -170,8 +211,11 @@ func (sm *SecretManager) DeleteSecret(path string) error {
 	if err != nil {
 		return err
 	}
-
-	err = sm.deleteNestedValue(config, path)
+	configMap, ok := config.ToMap()
+	if !ok {
+		return errors.New("failed to convert config to map")
+	}
+	err = sm.deleteNestedValue(configMap, path)
 	if err != nil {
 		return err
 	}

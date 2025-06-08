@@ -35,18 +35,18 @@ Examples:
     --project my-project \
     --config production
 `, utils.ASCIIArt("Secrets")),
-	Args:    cobra.ExactArgs(2), // Add this to match the other add command
-	Run:     runSecretsAdd,
+	Args: cobra.ExactArgs(2), // Add this to match the other add command
+	Run:  runSecretsAdd,
 }
 
 func init() {
-	secretsAddCmd.Flags().StringVarP(&secretsProvider, "provider", "p", "doppler", 
+	secretsAddCmd.Flags().StringVarP(&secretsProvider, "provider", "p", "doppler",
 		"Secrets provider (doppler, aws-secrets, etc.)")
-	secretsAddCmd.Flags().StringVarP(&secretsToken, "token", "t", "", 
+	secretsAddCmd.Flags().StringVarP(&secretsToken, "token", "t", "",
 		color.YellowString("Provider access token (get from Doppler dashboard)"))
-	secretsAddCmd.Flags().StringVarP(&secretsProject, "project", "j", "", 
+	secretsAddCmd.Flags().StringVarP(&secretsProject, "project", "j", "",
 		color.YellowString("Project name in Doppler"))
-	secretsAddCmd.Flags().StringVarP(&secretsConfig, "config", "c", "development", 
+	secretsAddCmd.Flags().StringVarP(&secretsConfig, "config", "c", "development",
 		"Configuration/environment (dev/staging/prod)")
 
 	secretsCmd.AddCommand(secretsAddCmd)
@@ -110,7 +110,7 @@ func runSecretsAdd(cmd *cobra.Command, args []string) {
 
 	// Store the secret value
 	color.New(color.FgHiWhite).Print("\n🔒 Storing secret... ")
-	if err := secrets.StoreToken(name, value); err != nil {  // Fixed to pass both name and value
+	if err := secrets.StoreToken(name, value); err != nil { // Fixed to pass both name and value
 		warning.Println("⚠️  Warning")
 		warning.Printf("Could not store secret securely: %v\n", err)
 		warning.Println("Please ensure you have the secret saved in a secure location")
@@ -123,7 +123,7 @@ func runSecretsAdd(cmd *cobra.Command, args []string) {
 	fmt.Printf("   Provider: %s\n", color.CyanString(secretsProvider))
 	fmt.Printf("   Project: %s\n", color.CyanString(secretsProject))
 	fmt.Printf("   Config: %s\n", color.CyanString(secretsConfig))
-	
+
 	fmt.Println()
 	color.New(color.FgHiBlack).Println("Tip: Use 'nextdeploy secrets sync' to apply your secrets")
 }

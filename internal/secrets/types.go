@@ -1,6 +1,8 @@
-
 package secrets
 
+import (
+	"gopkg.in/yaml.v3"
+)
 
 type Config struct {
 	Version     string           `yaml:"version"`
@@ -16,7 +18,7 @@ type Config struct {
 	Webhook     WebhookConfig    `yaml:"webhook"`
 	Secrets     []Secret         `yaml:"secrets"`
 	Doppler     Doppler          `yaml:"doppler"`
-	Environment Env        `yaml:"environment"`
+	Environment Env              `yaml:"environment"`
 }
 
 type AppConfig struct {
@@ -41,10 +43,10 @@ type DockerConfig struct {
 }
 
 type DockerBuildConfig struct {
-	Context     string            `yaml:"context"`
+	Context    string            `yaml:"context"`
 	Dockerfile string            `yaml:"dockerfile"`
-	Args        map[string]string `yaml:"args"`
-	NoCache     bool              `yaml:"no_cache"`
+	Args       map[string]string `yaml:"args"`
+	NoCache    bool              `yaml:"no_cache"`
 }
 
 type DeploymentConfig struct {
@@ -62,11 +64,11 @@ type ServerConfig struct {
 }
 
 type ContainerConfig struct {
-	Name        string             `yaml:"name"`
-	Restart     string             `yaml:"restart"`
-	Volumes     []string           `yaml:"volumes"`
-	Ports       []string           `yaml:"ports"`
-	HealthCheck HealthCheckConfig  `yaml:"health_check"`
+	Name        string            `yaml:"name"`
+	Restart     string            `yaml:"restart"`
+	Volumes     []string          `yaml:"volumes"`
+	Ports       []string          `yaml:"ports"`
+	HealthCheck HealthCheckConfig `yaml:"health_check"`
 }
 
 type HealthCheckConfig struct {
@@ -84,7 +86,7 @@ type LoggingConfig struct {
 }
 
 type MonitoringConfig struct {
-	Enabled          bool                  `yaml:"enabled"`
+	Enabled         bool                  `yaml:"enabled"`
 	CPUThreshold    int                   `yaml:"cpu_threshold"`
 	MemoryThreshold int                   `yaml:"memory_threshold"`
 	DiskThreshold   int                   `yaml:"disk_threshold"`
@@ -92,8 +94,8 @@ type MonitoringConfig struct {
 }
 
 type MonitoringAlertConfig struct {
-	Email        string `yaml:"email"`
-	SlackWebhook string `yaml:"slack_webhook"`
+	Email         string `yaml:"email"`
+	SlackWebhook  string `yaml:"slack_webhook"`
 	NotifyOnError bool   `yaml:"notify_on_error"`
 }
 
@@ -140,12 +142,43 @@ type Secret struct {
 }
 
 type Doppler struct {
-	Project string `json:"project"`
-	Config  string `json:"config"`
+	Project string   `json:"project"`
+	Config  string   `json:"config"`
 	Secrets []Secret `json:"secrets"`
-
 }
 type Env struct {
 	Name  string `yaml:"name"`
 	Value string `yaml:"value"`
+}
+
+// ToMap converts Config to map[string]interface{}
+func (c *Config) ToMap() (map[string]interface{}, bool) {
+	// Implementation depends on your Config structure
+	// This is a basic example:
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return nil, false
+	}
+	var m map[string]interface{}
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return nil, false
+	}
+	return m, true
+}
+
+// FromMap populates Config from map[string]interface{}
+func (c *Config) FromMap(m map[string]interface{}) error {
+	data, err := yaml.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return yaml.Unmarshal(data, c)
+}
+
+func (s *Secret) StoreToken(name, value string) error {
+	s.Name = name
+	s.Value = value
+	// Here you would implement the logic to securely store the secret
+	// For example, encrypting it and saving to a file or database
+	return nil
 }

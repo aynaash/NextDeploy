@@ -2,12 +2,12 @@
 * I want this command to push the  latest image to given registry
 * - login to registry
 * - push latest image to BuildAndPushDockerImage
-* - hanlde errors 
-*  use doppler to get secrets 
+* - hanlde errors
+*  use doppler to get secrets
 *
 *
 *
-*/
+ */
 package cmd
 
 import (
@@ -19,6 +19,7 @@ import (
 
 var pushCmd = &cobra.Command{
 	Use:   "push",
+	Short: "Push the latest Docker image to the specified registry",
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := utils.BuildAndPushDockerImage(imageName, registry, true); err != nil {
 			fmt.Println("Error:", err)
