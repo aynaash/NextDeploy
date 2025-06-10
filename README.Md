@@ -3,11 +3,11 @@
 
 ## 🛠️ NextDeploy CLI — Real DevOps for Developers Who care
 
-Sick of being trapped in Vercel’s walled garden? Done fighting opaque CI/CD pipelines and vendor secrets sprawl?
+Sick of being trapped in a walled garden? Done fighting opaque CI/CD pipelines and vendor secrets sprawl?
 
 **NextDeploy CLI** is your escape hatch.
 
-It deploys **Next.js apps to your own VPS** — with real secrets, real Docker, and zero bullsh\*t. You get full-stack control from local dev to live prod using nothing but your terminal and Doppler.
+It deploys **Next.js apps to your own VPS** — with real secrets, real Docker, and zero pain. You get full-stack control from local dev to live prod using nothing but your terminal and Doppler.
 
 ---
 
@@ -20,7 +20,7 @@ It deploys **Next.js apps to your own VPS** — with real secrets, real Docker, 
 * 📊 Streams logs + metrics from your container
 * 🧪 Localtest: run prod-like builds locally using real secrets
 
-One tool. One config. No dashboards. No YAML hell.
+One tool. One config. No dashboards.
 
 ---
 
@@ -29,6 +29,7 @@ One tool. One config. No dashboards. No YAML hell.
 NextDeploy is built **Doppler-first**, because `.env` file juggling in 2025 is amateur hour.
 
 * Load secrets dynamically at deploy time
+* Encrypt secrets in your local machine
 * No hardcoding, no copying, no leaking
 * Full environment scoping: dev, staging, prod
 * Change a secret → restart container → done
@@ -39,13 +40,16 @@ NextDeploy is built **Doppler-first**, because `.env` file juggling in 2025 is a
 ### 🚀 Install It. Use It. Forget the Old Way.
 
 ```bash
-go install github.com/nextdeploy/cli@latest
+go install github.com/aynaash/nextdeploy@latest
 ```
 
 ```bash
 nextdeploy init       # Dockerfile + nextdeploy.yml scaffold  
 nextdeploy build      # Create production image  
-nextdeploy deploy     # Push to your VPS via SSH + Doppler secrets  
+nextdeploy secrets add    # Manage Doppler secrets
+nextdeploy validate      # validate all config files
+nextdeploy localtest   # test your app locally with Doppler secrets to see if it works
+nextdeploy ship     # Push to your VPS via SSH + Doppler secrets  
 ```
 
 Need to debug with prod config before deploying?

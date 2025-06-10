@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/spf13/cobra"
+	"nextdeploy/internal/config"
 	"nextdeploy/internal/detect"
 	"nextdeploy/internal/logger"
-	"nextdeploy/internal/config"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -292,6 +292,8 @@ func (dm *DockerManager) CheckDockerInstalled() error {
 
 // BuildImage builds a Docker image with options
 func (dm *DockerManager) BuildImage(ctx context.Context, dir string, opts BuildOptions) error {
+	// print out the options for debugging
+	dlog.Debug("Build options: %+v", opts)
 	if err := dm.ValidateImageName(opts.ImageName); err != nil {
 		dlog.Error("Invalid image name: %v", err)
 		return fmt.Errorf("invalid image name: %w", err)

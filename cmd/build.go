@@ -9,7 +9,6 @@ import (
 	"nextdeploy/internal/git"
 	"nextdeploy/internal/logger"
 	"nextdeploy/internal/validators"
-	"strings"
 )
 
 var (
@@ -154,38 +153,27 @@ Examples:
 	rootCmd.AddCommand(buildCmd)
 }
 
-// TODO:  fix the image name construction logic to handle registry and tag properly
-func constructImageName(name, registry, tag string) string {
-	//TODO: should read the name from from nextdeploy.yml
-	//TODO: contruct the url name for the docker using dymanic data provided by user
-	fullImage := name
-	if registry != "" {
-		fullImage = strings.TrimSuffix(registry, "/") + "/" + name
-	}
-	return fullImage + ":" + tag
-}
-
-// the build command function
 func buildCmdFunction(cmd *cobra.Command, args []string) error {
 	dm := docker.NewDockerManager(true, nil)
+	imageName := build.ConstructImageName(tag)
 
 	// Construct image name using builder pattern
-	builder := build.New(imageName, registry).
-		WithTag(tag).
-		WithNameStrategy(nameStrategy).
-		WithTimestamp(useTimestamp).
-		WithBranch(branchName)
+	// builder := build.NewImageNameBuilder(imageName).
+	// 	WithTag(tag).
+	// 	WithNameStrategy(nameStrategy).
+	// 	WithTimestamp(useTimestamp).
+	// 	WithBranch(branchName)
+	//
+	// fullImage, err := builder.Build()
+	// if err != nil {
+	// 	return fmt.Errorf("failed to construct image name: %w", err)
+	// }
 
-	fullImage, err := builder.Build()
-	if err != nil {
-		return fmt.Errorf("failed to construct image name: %w", err)
-	}
-
-	cmd.Printf("Building image: %s\n", fullImage)
+	cmd.Printf("Building image: %s\n", imageName)
 
 	// Prepare build options
 	opts := docker.BuildOptions{
-		ImageName: fullImage,
+		ImageName: imageName,
 		NoCache:   noCache,
 		Pull:      pull,
 		Target:    target,
@@ -199,7 +187,7 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("build failed: %w", err)
 	}
 
-	cmd.Printf("Successfully built image: %s\n", fullImage)
+	cmd.Printf("Successfully built image: %s\n", imageName)
 	return nil
 }
 
@@ -238,7 +226,7 @@ func checkBuildCondtionsmet(cmd *cobra.Command, args []string) error {
 
 	// Warn about uncommitted changes
 	if git.IsDirty() {
-		cmd.Printf("Warning: Uncommitted changes present in working directory\n")
+		cmd.Printf("Warning: Uncommitted changes present in working directory.Please commit the changes to build latest version of app\n")
 	}
 
 	return nil
