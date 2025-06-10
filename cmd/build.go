@@ -7,12 +7,13 @@ import (
 	"nextdeploy/internal/build"
 	"nextdeploy/internal/docker"
 	"nextdeploy/internal/git"
+	"nextdeploy/internal/logger"
 	"nextdeploy/internal/validators"
 	"strings"
 )
 
 var (
-	buildlogger = logger("BUILD", "🧱 BUILD")
+	buildlogger = logger.PackageLogger("BUILD", "🧱 BUILD")
 )
 var (
 	imageName    string
