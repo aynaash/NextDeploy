@@ -3,9 +3,9 @@ package config
 import (
 	"bufio"
 	"fmt"
-	"strings"
-	"os"
 	"gopkg.in/yaml.v3"
+	"os"
+	"strings"
 )
 
 // PromptForConfig collects user input for the nextdeploy configuration

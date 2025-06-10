@@ -10,11 +10,6 @@ import (
 	"io"
 )
 
-var (
-	ErrEncryptFailed = errors.New("encryption failed")
-	ErrDecryptFailed = errors.New("decryption failed")
-)
-
 // encrypt data using aes-gcm with provided key
 func Encrypt(plaintext []byte, key []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)

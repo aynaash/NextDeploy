@@ -21,7 +21,7 @@ func checkCaddyInstallation() {
 			fmt.Printf("Error installing Caddy: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Println("Caddy installed successfully")
+		fmt.Println("Cadd3y installed successfully")
 	} else {
 		fmt.Println("Caddy is already installed")
 	}

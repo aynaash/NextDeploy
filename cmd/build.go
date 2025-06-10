@@ -12,6 +12,9 @@ import (
 )
 
 var (
+	buildlogger = logger("BUILD", "🧱 BUILD")
+)
+var (
 	imageName    string
 	registry     string
 	noCache      bool
@@ -152,6 +155,8 @@ Examples:
 
 // TODO:  fix the image name construction logic to handle registry and tag properly
 func constructImageName(name, registry, tag string) string {
+	//TODO: should read the name from from nextdeploy.yml
+	//TODO: contruct the url name for the docker using dymanic data provided by user
 	fullImage := name
 	if registry != "" {
 		fullImage = strings.TrimSuffix(registry, "/") + "/" + name

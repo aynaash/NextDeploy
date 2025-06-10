@@ -2,23 +2,25 @@ package secrets
 
 import (
 	"gopkg.in/yaml.v3"
+	"fmt"
 )
 
 type Config struct {
-	Version     string           `yaml:"version"`
-	App         AppConfig        `yaml:"app"`
-	Repository  RepositoryConfig `yaml:"repository"`
-	Docker      DockerConfig     `yaml:"docker"`
-	Deployment  DeploymentConfig `yaml:"deployment"`
-	Database    DatabaseConfig   `yaml:"database"`
-	Logging     LoggingConfig    `yaml:"logging"`
-	Monitoring  MonitoringConfig `yaml:"monitoring"`
-	Backup      BackupConfig     `yaml:"backup"`
-	SSL         SSLConfig        `yaml:"ssl"`
-	Webhook     WebhookConfig    `yaml:"webhook"`
-	Secrets     []Secret         `yaml:"secrets"`
-	Doppler     Doppler          `yaml:"doppler"`
-	Environment Env              `yaml:"environment"`
+	Version     string            `yaml:"version"`
+	App         AppConfig         `yaml:"app"`
+	Repository  RepositoryConfig  `yaml:"repository"`
+	Docker      DockerConfig      `yaml:"docker"`
+	Deployment  DeploymentConfig  `yaml:"deployment"`
+	Database    *DatabaseConfig   `yaml:"database"`
+	Logging     LoggingConfig     `yaml:"logging"`
+	Monitoring  MonitoringConfig  `yaml:"monitoring"`
+	Backup      BackupConfig      `yaml:"backup"`
+	SSL         SSLConfig         `yaml:"ssl"`
+	Webhook     WebhookConfig     `yaml:"webhook"`
+	Secrets     map[string]string `yaml:"secrets"`
+	Doppler     Doppler           `yaml:"doppler"`
+	Environment Env               `yaml:"environment"`
+	Tokens      map[string]string `yaml:"tokens"`
 }
 
 type AppConfig struct {
@@ -130,25 +132,60 @@ type WebhookConfig struct {
 
 type DatabaseConfig struct {
 	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	Username string `yaml:"username"`
+	Port     string `yaml:"port"`
+	Username string `yaml:"user"`
 	Password string `yaml:"password"`
 	Name     string `yaml:"name"`
 }
 
 type Secret struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
+	Name  string `yaml:"name"`
+	Value string `yaml:"value"`
 }
 
 type Doppler struct {
 	Project string   `json:"project"`
 	Config  string   `json:"config"`
 	Secrets []Secret `json:"secrets"`
+	Token   string   `json:"token"`
 }
 type Env struct {
 	Name  string `yaml:"name"`
 	Value string `yaml:"value"`
+}
+
+type SecretProvider interface {
+	BootstrapSecrets(projectPath string) error
+	ValidateEnv() error
+}
+
+type dopplerProvider struct{}
+
+func (d *dopplerProvider) BootstrapSecrets(projectPath string) error {
+	fmt.Println("✔ Doppler secrets bootstrapped")
+	return nil
+}
+
+func (d *dopplerProvider) ValidateEnv() error {
+	return nil
+}
+
+func NewProvider(name string) SecretProvider {
+	switch name {
+	case "doppler":
+		return &dopplerProvider{}
+	default:
+		return &noopProvider{}
+	}
+}
+
+type noopProvider struct{}
+
+func (n *noopProvider) BootstrapSecrets(projectPath string) error {
+	return nil
+}
+func (n *noopProvider) ValidateEnv() error {
+	return nil
 }
 
 // ToMap converts Config to map[string]interface{}

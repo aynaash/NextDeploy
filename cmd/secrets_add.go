@@ -16,26 +16,28 @@ var (
 	secretsToken    string
 	secretsProject  string
 	secretsConfig   string
+	encryptSecret   bool
 )
 
 var secretsAddCmd = &cobra.Command{
-	Use:   "add",
-	Short: "🔐 Add a secrets provider configuration",
+	Use:   "add [name] [value]",
+	Short: "🔐 Add a new secret",
 	Long: color.New(color.FgHiCyan).Sprintf(`%s
-
-Adds a secrets provider configuration to your NextDeploy project.
+Adds a new secret to your project's secret management system.
 
 Examples:
-  # Add Doppler with interactive prompts
-  nextdeploy secrets add
+  # Add secret with interactive prompts
+  nextdeploy secrets add DB_PASSWORD "mysecurepassword"
 
-  # Add Doppler with all flags
-  nextdeploy secrets add --provider doppler \
+  # Add encrypted secret with all flags
+  nextdeploy secrets add API_KEY "12345" \
+    --provider doppler \
     --token dp.st.xxxxxx \
     --project my-project \
-    --config production
+    --config production \
+    --encrypt
 `, utils.ASCIIArt("Secrets")),
-	Args: cobra.ExactArgs(2), // Add this to match the other add command
+	Args: cobra.ExactArgs(2),
 	Run:  runSecretsAdd,
 }
 
@@ -43,20 +45,22 @@ func init() {
 	secretsAddCmd.Flags().StringVarP(&secretsProvider, "provider", "p", "doppler",
 		"Secrets provider (doppler, aws-secrets, etc.)")
 	secretsAddCmd.Flags().StringVarP(&secretsToken, "token", "t", "",
-		color.YellowString("Provider access token (get from Doppler dashboard)"))
+		"Provider access token")
 	secretsAddCmd.Flags().StringVarP(&secretsProject, "project", "j", "",
-		color.YellowString("Project name in Doppler"))
+		"Project name in secrets provider")
 	secretsAddCmd.Flags().StringVarP(&secretsConfig, "config", "c", "development",
 		"Configuration/environment (dev/staging/prod)")
+	secretsAddCmd.Flags().BoolVarP(&encryptSecret, "encrypt", "e", false,
+		"Encrypt the secret value before storing")
 
 	secretsCmd.AddCommand(secretsAddCmd)
 }
 
 func runSecretsAdd(cmd *cobra.Command, args []string) {
-	name := args[0]  // Get the secret name from args
-	value := args[1] // Get the secret value from args
+	name := args[0]
+	value := args[1]
 
-	// Initialize colorful output
+	// Initialize output styling
 	success := color.New(color.FgGreen, color.Bold)
 	warning := color.New(color.FgYellow)
 	errorMsg := color.New(color.FgRed)
@@ -64,20 +68,65 @@ func runSecretsAdd(cmd *cobra.Command, args []string) {
 
 	header.Println("\n⚡ Adding New Secret")
 
+	// Initialize secret manager
+	sm, err := initSecretManager()
+	if err != nil {
+		errorMsg.Println("❌ Failed to initialize secret manager")
+		log.Fatalf("Error: %v", err)
+	}
+
+	// Store the secret
+	color.New(color.FgHiWhite).Print("\n🔒 Storing secret... ")
+	if err := sm.UpdateSecret(name, value, encryptSecret); err != nil {
+		errorMsg.Println("❌ Failed to store secret")
+		log.Fatalf("Error: %v", err)
+	}
+	success.Println("✓ Stored!")
+
+	// Verify secret was stored
+	color.New(color.FgHiWhite).Print("\n🔍 Verifying secret... ")
+	storedValue, err := sm.GetSecret(name)
+	if err != nil {
+		warning.Println("⚠️  Warning: Could not verify secret")
+		warning.Printf("Error: %v\n", err)
+	} else if storedValue != value {
+		warning.Println("⚠️  Warning: Retrieved value doesn't match")
+	} else {
+		success.Println("✓ Verified!")
+	}
+
+	// Success message
+	success.Printf("\n🎉 Successfully added secret '%s'!\n", color.CyanString(name))
+	if encryptSecret {
+		fmt.Printf("   Encryption: %s\n", color.CyanString("enabled"))
+	}
+	fmt.Printf("   Provider: %s\n", color.CyanString(secretsProvider))
+	if secretsProject != "" {
+		fmt.Printf("   Project: %s\n", color.CyanString(secretsProject))
+	}
+	if secretsConfig != "" {
+		fmt.Printf("   Config: %s\n", color.CyanString(secretsConfig))
+	}
+
+	fmt.Println()
+	color.New(color.FgHiBlack).Println("Tip: Use 'nextdeploy secrets sync' to apply your secrets")
+}
+
+func initSecretManager() (secrets.SecretManager, error) {
 	// Handle interactive mode if flags not provided
 	if secretsToken == "" || secretsProject == "" {
-		warning.Println("\nℹ️  Interactive mode activated (use flags for non-interactive usage)")
+		color.New(color.FgYellow).Println("\nℹ️  Interactive mode activated (use flags for non-interactive usage)")
 
 		if secretsProvider == "" {
 			secretsProvider = utils.PromptWithDefault("Secrets provider", "doppler")
 		}
 
 		if secretsToken == "" {
-			secretsToken = utils.PromptPassword("Doppler Service Token")
+			secretsToken = utils.PromptPassword("Provider Service Token")
 		}
 
-		if secretsProject == "" {
-			secretsProject = utils.Prompt("Doppler Project Name")
+		if secretsProject == "" && secretsProvider == "doppler" {
+			secretsProject = utils.Prompt("Project Name")
 		}
 
 		if secretsConfig == "" {
@@ -87,53 +136,19 @@ func runSecretsAdd(cmd *cobra.Command, args []string) {
 
 	// Validate provider
 	if strings.ToLower(secretsProvider) != "doppler" {
-		errorMsg.Println("\n❌ Unsupported secrets provider")
-		log.Fatalf("Only 'doppler' is currently supported. You provided: %s", secretsProvider)
+		return nil, fmt.Errorf("only 'doppler' provider is currently supported")
 	}
 
-	// Validate token with Doppler
-	color.New(color.FgHiWhite).Print("\n🔍 Validating Doppler credentials... ")
-	valid, err := validateDopplerCredentials(secretsToken, secretsProject, secretsConfig)
-	if err != nil {
-		fmt.Println()
-		errorMsg.Println("❌ Validation failed")
-		log.Fatalf("Doppler validation error: %v", err)
-	}
-	if !valid {
-		fmt.Println()
-		errorMsg.Println("❌ Invalid credentials")
-		log.Fatal("Could not validate Doppler credentials")
-	}
-	success.Println("✓ Validated!")
-	fmt.Printf("   Project: %s\n", color.CyanString(secretsProject))
-	fmt.Printf("   Config: %s\n", color.CyanString(secretsConfig))
+	// Initialize secret manager
+	configPath := secrets.GetConfigPath("nextdeploy.yaml")
+	masterKey := secrets.GetMasterKey()
 
-	// Store the secret value
-	color.New(color.FgHiWhite).Print("\n🔒 Storing secret... ")
-	if err := secrets.StoreToken(name, value); err != nil { // Fixed to pass both name and value
-		warning.Println("⚠️  Warning")
-		warning.Printf("Could not store secret securely: %v\n", err)
-		warning.Println("Please ensure you have the secret saved in a secure location")
-	} else {
-		success.Println("✓ Stored!")
-	}
+	logger := secrets.NewCLILogger()
 
-	// Success message
-	success.Printf("\n🎉 Successfully added secret '%s'!\n", color.CyanString(name))
-	fmt.Printf("   Provider: %s\n", color.CyanString(secretsProvider))
-	fmt.Printf("   Project: %s\n", color.CyanString(secretsProject))
-	fmt.Printf("   Config: %s\n", color.CyanString(secretsConfig))
-
-	fmt.Println()
-	color.New(color.FgHiBlack).Println("Tip: Use 'nextdeploy secrets sync' to apply your secrets")
-}
-
-// validateDopplerCredentials checks if the provided Doppler credentials are valid
-func validateDopplerCredentials(token, project, config string) (bool, error) {
-	// This is a placeholder - implement actual Doppler API validation
-	// For now just check that values aren't empty
-	if token == "" || project == "" || config == "" {
-		return false, nil
-	}
-	return true, nil
+	return secrets.NewSecretManager(
+		configPath,
+		masterKey,
+		logger,
+		secretsProvider == "doppler",
+	)
 }
