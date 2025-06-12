@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/spf13/cobra"
 	"nextdeploy/internal/config"
 	"nextdeploy/internal/detect"
 	"nextdeploy/internal/logger"
@@ -14,6 +13,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
 const (
