@@ -233,3 +233,26 @@ func (c *Config) Validate() error {
 	}
 	return nil
 }
+
+// func (c *Config) PushConfigToDoppler() error {
+// 	if c.Doppler == nil {
+// 		return errors.New("Doppler configuration is not set")
+// 	}
+//
+// 	if c.Doppler.Token == "" {
+// 		return errors.New("Doppler token is required")
+// 	}
+//
+// 	if c.Doppler.Project == "" {
+// 		return errors.New("Doppler project is required")
+// 	}
+//
+// 	if c.Doppler.Config == "" {
+// 		return errors.New("Doppler config is required")
+// 	}
+//
+// 	ylogger.Info("Pushing configuration to Doppler...")
+// 	// Here you would implement the logic to push the configuration to Doppler
+// 	// This is a placeholder for the actual implementation
+// 	return nil
+// }

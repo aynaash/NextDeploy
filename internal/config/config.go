@@ -8,12 +8,10 @@ import (
 )
 
 var (
-	defaultConfig  bool
-	skipPrompts    bool
-	forceOverwrite bool
+	skipPrompts bool
 )
 
-func firstNonEmpty(values ...string) string {
+func FirstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if v != "" {
 			return v
@@ -23,6 +21,8 @@ func firstNonEmpty(values ...string) string {
 }
 
 func HandleConfigSetup(cmd *cobra.Command, reader *bufio.Reader) error {
+	//FIX: remove all prompts and use default values with NOTE to user to customize the generated file
+	defaultConfig := true
 	plog := logger.PackageLogger("Init", "NextDeploy")
 
 	if defaultConfig {

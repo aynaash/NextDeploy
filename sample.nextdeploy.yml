@@ -29,6 +29,8 @@ repository:
 # DOCKER BUILD CONFIGURATION
 # -----
 docker:
+  Username: username  # Your Docker Hub or GitHub username (for image tagging)
+  Password: your_docker_password  # Docker Hub password (if pushing to Docker Hub)
   build:
     context: .  # Directory to build the image from (typically root of repo)
     dockerfile: Dockerfile  # Path to Dockerfile relative to context

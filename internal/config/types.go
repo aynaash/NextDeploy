@@ -46,6 +46,8 @@ type DockerConfig struct {
 	Registry string      `yaml:"registry,omitempty"`
 	Build    DockerBuild `yaml:"build"`
 	Push     bool        `yaml:"push"`
+	Username string      `yaml:"username,omitempty"`
+	Password string      `yaml:"password,omitempty"`
 }
 
 // DockerBuild contains Docker build parameters

@@ -8,7 +8,7 @@ import (
 	"nextdeploy/internal/docker"
 	"nextdeploy/internal/git"
 	"nextdeploy/internal/logger"
-	"nextdeploy/internal/validators"
+	"nextdeploy/internal/registry"
 )
 
 var (
@@ -16,7 +16,6 @@ var (
 )
 var (
 	imageName    string
-	registry     string
 	noCache      bool
 	pull         bool
 	tag          string
@@ -26,6 +25,7 @@ var (
 	nameStrategy string
 	useTimestamp bool
 	branchName   string
+	registryname string
 )
 
 var buildCmd = &cobra.Command{
@@ -71,7 +71,7 @@ Examples:
   - "frontend-app"
   - "api-gateway"`)
 
-	buildCmd.Flags().StringVarP(&registry, "registry", "r", "",
+	buildCmd.Flags().StringVarP(&registryname, "registry", "r", "",
 		`Container registry URL where the image will be pushed
 Examples:
   - "docker.io/myorg" (Docker Hub)
@@ -208,10 +208,15 @@ func checkBuildCondtionsmet(cmd *cobra.Command, args []string) error {
 	if !exists {
 		return fmt.Errorf("dockerfile not found in current directory")
 	}
+	validatorRegistry, err := registry.NewRegistryValidator()
+	if err != nil {
+		return fmt.Errorf("failed to initialize registry validator: %w", err)
+	}
 
 	// Validate registry if provided
-	if registry != "" && !validators.IsValidRegistry(registry) {
-		return fmt.Errorf("invalid registry format: %s", registry)
+	isvalidRegistry := validatorRegistry.IsValidRegistry(registryname)
+	if registryname != "" && !isvalidRegistry {
+		return fmt.Errorf("invalid registry format: %s", registryname)
 	}
 
 	// Set default tag from Git if not provided
