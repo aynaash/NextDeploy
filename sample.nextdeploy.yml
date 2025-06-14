@@ -39,6 +39,8 @@ docker:
     no_cache: false  # Set to true to force a fresh rebuild (useful for clearing old layers)
   image: username/example-app:latest  # Full image tag pushed to registry
   registry: ghcr.io  # Supported: ghcr.io (GitHub), docker.io, ECR (AWS), GCR (Google)
+  username: username  # Docker registry username (if using private registry)
+  password: your_registry_password  # Docker registry password (if using private registry)
   push: true  # Automatically push image after successful build
 
 # Example:

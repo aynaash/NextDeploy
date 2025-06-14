@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"github.com/spf13/cobra"
 	"nextdeploy/internal/logger"
+	"nextdeploy/internal/nextdeploy"
 	"strconv"
 )
 
@@ -27,6 +28,17 @@ func HandleConfigSetup(cmd *cobra.Command, reader *bufio.Reader) error {
 
 	if defaultConfig {
 		// If default config is requested, just generate the sample and exit
+		//FIX: first check if nextdeploy.yml already exists and validate
+		nextdeploy := nextdeploy.New()
+		configExist, err := nextdeploy.ConfigOkay()
+		if err != nil {
+			plog.Error("failed to check configuration: %v", err)
+			return nil
+		}
+		if configExist {
+			plog.Warn("nextdeploy.yml already exists. Please use it to add the config values.")
+			return nil
+		}
 		if err := GenerateSampleConfig(); err != nil {
 			plog.Error("failed to generate sample config: %v", err)
 			return nil

@@ -3,12 +3,13 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"github.com/spf13/cobra"
 	"nextdeploy/internal/build"
 	"nextdeploy/internal/docker"
 	"nextdeploy/internal/git"
 	"nextdeploy/internal/logger"
 	"nextdeploy/internal/registry"
+
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -184,6 +185,7 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 	// Execute build with context
 	ctx := context.Background()
 	if err := dm.BuildImage(ctx, ".", opts); err != nil {
+		buildlogger.Error("Failed to build image: %v", err)
 		return fmt.Errorf("build failed: %w", err)
 	}
 
@@ -208,7 +210,7 @@ func checkBuildCondtionsmet(cmd *cobra.Command, args []string) error {
 	if !exists {
 		return fmt.Errorf("dockerfile not found in current directory")
 	}
-	validatorRegistry, err := registry.NewRegistryValidator()
+	validatorRegistry := registry.NewRegistryValidator()
 	if err != nil {
 		return fmt.Errorf("failed to initialize registry validator: %w", err)
 	}

@@ -218,41 +218,37 @@ func (c *Config) RemoveFailureWebhook(url string) error {
 }
 
 // Validate checks if the configuration is valid
-func (c *Config) Validate() error {
-	if c.App.Name == "" {
+func (c *Config) Validate(Config *Config) error {
+	if Config.App.Name == "" {
 		return errors.New("app name is required")
 	}
-	if c.App.Domain == "" {
+	if Config.App.Domain == "" {
 		return errors.New("app domain is required")
 	}
-	if c.Repository.URL == "" {
+	if Config.Repository.URL == "" {
 		return errors.New("repository URL is required")
 	}
-	if c.Deployment.Server.Host == "" {
+	if Config.Deployment.Server.Host == "" {
 		return errors.New("deployment server host is required")
 	}
 	return nil
 }
 
-// func (c *Config) PushConfigToDoppler() error {
-// 	if c.Doppler == nil {
-// 		return errors.New("Doppler configuration is not set")
-// 	}
-//
-// 	if c.Doppler.Token == "" {
-// 		return errors.New("Doppler token is required")
-// 	}
-//
-// 	if c.Doppler.Project == "" {
-// 		return errors.New("Doppler project is required")
-// 	}
-//
-// 	if c.Doppler.Config == "" {
-// 		return errors.New("Doppler config is required")
-// 	}
-//
-// 	ylogger.Info("Pushing configuration to Doppler...")
-// 	// Here you would implement the logic to push the configuration to Doppler
-// 	// This is a placeholder for the actual implementation
-// 	return nil
-// }
+func (c *Config) ConfigOkay() (bool, error) {
+	if _, err := os.Stat("nextdeploy.yml"); err != nil {
+		if os.IsNotExist(err) {
+			return false, fmt.Errorf("nextdeploy.yml missing - run 'init' first")
+		}
+		return false, fmt.Errorf("config file error: %w", err)
+	}
+	Config, err := Load("nextdeploy.yml")
+	if err != nil {
+		return false, fmt.Errorf("failed to load nextdeploy.yml: %w", err)
+	}
+
+	if err := c.Validate(Config); err != nil {
+		return false, fmt.Errorf("invalid config: %w", err)
+	}
+
+	return true, nil
+}
