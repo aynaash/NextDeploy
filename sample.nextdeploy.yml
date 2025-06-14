@@ -41,6 +41,7 @@ docker:
   registry: ghcr.io  # Supported: ghcr.io (GitHub), docker.io, ECR (AWS), GCR (Google)
   username: username  # Docker registry username (if using private registry)
   password: your_registry_password  # Docker registry password (if using private registry)
+  localImage: ""
   push: true  # Automatically push image after successful build
 
 # Example:

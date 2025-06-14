@@ -14,141 +14,175 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 )
-
-// RegistryValidator provides methods to validate and work with container registries
-type RegistryValidator struct {
-	Registry string
-	Image    string
-	Username string
-	Password string
-	AppName  string
-	cfg      *config.NextDeployConfig
-}
 
 var (
 	rlogger = logger.PackageLogger("RegistryValidator", "🅰️ REGISTRY VALIDATOR")
+
+	// imageNameRegex validates complete Docker image names
+	imageNameRegex = regexp.MustCompile(`^([a-zA-Z0-9\-\.]+(?::[0-9]+)?/)?[a-z0-9]+(?:[._-][a-z0-9]+)*(/[a-z0-9]+(?:[._-][a-z0-9]+)*)*(?::[a-zA-Z0-9_\-\.]+)?$`)
+
+	// tagRegex validates standalone image tags
+	tagRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]+$`)
 )
 
-// NewRegistryValidator creates a new RegistryValidator instance
-func NewRegistryValidator() *RegistryValidator {
-	cfg, err := config.Load()
-	if err != nil {
-		rlogger.Error("Failed to load configuration: %v", err)
-		return nil
-	}
-	// registry values from config
-	registryname := cfg.Docker.Registry
-	username := cfg.Docker.Username
-	password := cfg.Docker.Password
-	image := cfg.Docker.Image
-	appName := cfg.App.Name
-
-	return &RegistryValidator{
-		cfg:      cfg,
-		Registry: registryname,
-		Image:    image,
-		Username: username,
-		Password: password,
-		AppName:  appName,
-	}
+type RegistryValidator struct {
+	cfg      *config.NextDeployConfig
+	registry string
+	image    string
+	username string
+	password string
+	appName  string
 }
 
-// ValidateRegistryConfig validates the entire docker registry configuration
-func (rv *RegistryValidator) ValidateRegistryConfig() error {
-	if rv.Registry == "" {
-		return errors.New("docker registry not configured")
+// New creates a new RegistryValidator instance
+func New(cfg *config.NextDeployConfig) (*RegistryValidator, error) {
+	if cfg == nil {
+		return nil, errors.New("configuration cannot be nil")
 	}
 
-	if !rv.IsValidRegistry(rv.Registry) {
-		return fmt.Errorf("invalid registry format: %s", rv.Registry)
+	rv := &RegistryValidator{
+		cfg:      cfg,
+		registry: cfg.Docker.Registry,
+		image:    cfg.Docker.Image,
+		username: cfg.Docker.Username,
+		password: cfg.Docker.Password,
+		appName:  cfg.App.Name,
 	}
 
-	if rv.Image == "" {
-		return errors.New("docker image name not configured")
+	if err := rv.ValidateConfig(); err != nil {
+		return nil, fmt.Errorf("invalid registry configuration: %w", err)
 	}
 
-	if !rv.IsValidImageName(rv.Image) {
-		return fmt.Errorf("invalid image name format: %s", rv.Image)
+	return rv, nil
+}
+
+// ValidateConfig checks all required registry configuration
+func (rv *RegistryValidator) ValidateConfig() error {
+	if err := validateRequired("registry", rv.registry); err != nil {
+		return err
+	}
+	if !isValidRegistry(rv.registry) {
+		return fmt.Errorf("invalid registry format: %s", rv.registry)
+	}
+
+	if err := validateRequired("image", rv.image); err != nil {
+		return err
+	}
+	if !isValidImageName(rv.image) {
+		return fmt.Errorf("invalid image name format: %s", rv.image)
+	}
+
+	if rv.NeedsAuth() {
+		if err := validateRequired("username", rv.username); err != nil {
+			return err
+		}
+		if err := validateRequired("password", rv.password); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-// IsValidRegistry checks if a registry string is valid
-func (rv *RegistryValidator) IsValidRegistry(registry string) bool {
-	if strings.TrimSpace(registry) == "" ||
-		strings.Contains(registry, " ") ||
-		strings.HasPrefix(registry, "/") ||
-		strings.HasSuffix(registry, "/") {
-		return false
-	}
-
-	_, err := url.ParseRequestURI("https://" + registry)
-	return err == nil
-}
-
-// IsValidImageName checks if an image name is valid according to Docker standards
-func (rv *RegistryValidator) IsValidImageName(image string) bool {
-	// Basic validation - can be enhanced with more specific rules
-	if strings.TrimSpace(image) == "" {
-		return false
-	}
-
-	// Check for invalid characters
-	if strings.ContainsAny(image, " \t\n\r") {
-		return false
-	}
-
-	// Check for valid structure (simplified)
-	parts := strings.Split(image, "/")
-	for _, part := range parts {
-		if part == "" {
-			return false
+// PushImage handles the complete image push workflow
+func (rv *RegistryValidator) PushImage(localImage string) error {
+	if localImage == "" {
+		var err error
+		localImage, err = rv.findLocalImage()
+		if err != nil {
+			return fmt.Errorf("failed to find local image: %w", err)
 		}
 	}
 
-	return true
+	if err := validateLocalImage(localImage); err != nil {
+		return fmt.Errorf("invalid local image: %w", err)
+	}
+
+	targetTag, err := rv.BuildTargetTag()
+	if err != nil {
+		return fmt.Errorf("failed to build target tag: %w", err)
+	}
+
+	if err := rv.tagImage(localImage, targetTag); err != nil {
+		return fmt.Errorf("failed to tag image: %w", err)
+	}
+
+	if err := rv.pushImage(targetTag); err != nil {
+		return fmt.Errorf("failed to push image: %w", err)
+	}
+
+	rlogger.Success("Successfully pushed image %s to %s", localImage, targetTag)
+	return nil
 }
 
-// ValidateImageTag checks if a tag follows best practices
-func (rv *RegistryValidator) ValidateImageTag(tag string) bool {
-	match, _ := regexp.MatchString(`^[a-zA-Z0-9_\-\.]+$`, tag)
-	return match && len(tag) <= 128
-}
-
-// GetFullImageTag constructs the full image tag from registry and image name
-func (rv *RegistryValidator) GetFullImageTag() (string, error) {
+// BuildTargetTag constructs the complete target image tag
+func (rv *RegistryValidator) BuildTargetTag() (string, error) {
 	tag, err := git.GetCommitHash()
 	if err != nil {
-		rlogger.Error("Failed to get commit hash: %v", err)
-		return "", fmt.Errorf("failed to retrieve commit hash: %w", err)
-	}
-	if err := rv.ValidateRegistryConfig(); err != nil {
-		return "", fmt.Errorf("registry config validation failed: %w", err)
+		return "", fmt.Errorf("failed to get commit hash: %w", err)
 	}
 
-	registry := strings.TrimPrefix(rv.Registry, "https://")
-	registry = strings.TrimPrefix(registry, "http://")
-	registry = strings.TrimSuffix(registry, "/")
-
-	if strings.HasPrefix(rv.Image, registry+"/") {
-		return rv.Image, nil
+	if !isValidTag(tag) {
+		return "", fmt.Errorf("invalid tag format: %s", tag)
 	}
-	// The full values are
-	// FIX: image name issue
-	rlogger.Debug("Constructing full image tag with registry: %s, image: %s, tag: %s", registry, rv.Image, tag)
-	fullTag := fmt.Sprintf("%s/%s%s", registry, rv.Image, tag)
-	if !rv.IsValidImageName(fullTag) {
-		return "", fmt.Errorf("invalid full image tag format: %s", fullTag)
+
+	registry := normalizeRegistry(rv.registry)
+	image := stripTag(rv.image)
+
+	fullTag := fmt.Sprintf("%s/%s:%s", registry, image, tag)
+	if !imageNameRegex.MatchString(fullTag) {
+		return "", fmt.Errorf("invalid image tag format: %s", fullTag)
 	}
 
 	return fullTag, nil
 }
 
-// GetRegistryType returns the type of registry (docker, ghcr, ecr, etc.)
-func (rv *RegistryValidator) GetRegistryType() string {
-	reg := strings.ToLower(rv.Registry)
+// GeneratePullSecret creates Kubernetes image pull secret manifest
+func (rv *RegistryValidator) GeneratePullSecret() (string, error) {
+	if !rv.NeedsAuth() {
+		return "", nil
+	}
+
+	authConfig := map[string]interface{}{
+		"auths": map[string]interface{}{
+			rv.registry: map[string]string{
+				"username": rv.username,
+				"password": rv.password,
+				"auth":     base64.StdEncoding.EncodeToString([]byte(rv.username + ":" + rv.password)),
+			},
+		},
+	}
+
+	configJSON, err := json.Marshal(authConfig)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal auth config: %w", err)
+	}
+
+	secretName := strings.ReplaceAll(rv.appName, " ", "-") + "-regcred"
+
+	return fmt.Sprintf(`
+apiVersion: v1
+kind: Secret
+metadata:
+  name: %s
+  creationTimestamp: %s
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: %s
+`, secretName, time.Now().Format(time.RFC3339), base64.StdEncoding.EncodeToString(configJSON)), nil
+}
+
+// NeedsAuth checks if registry requires authentication
+func (rv *RegistryValidator) NeedsAuth() bool {
+	return !strings.HasPrefix(rv.registry, "localhost") &&
+		!strings.HasPrefix(rv.registry, "127.0.0.1")
+}
+
+// RegistryType identifies the registry provider
+func (rv *RegistryValidator) RegistryType() string {
+	reg := strings.ToLower(rv.registry)
 
 	switch {
 	case strings.Contains(reg, "ghcr.io"):
@@ -168,142 +202,112 @@ func (rv *RegistryValidator) GetRegistryType() string {
 	}
 }
 
-// NeedsAuthentication checks if the registry requires authentication
-func (rv *RegistryValidator) NeedsAuthentication() bool {
-	return !strings.HasPrefix(rv.Registry, "localhost") &&
-		!strings.HasPrefix(rv.Registry, "127.0.0.1")
+// Helper methods
+func (rv *RegistryValidator) findLocalImage() (string, error) {
+	cmd := exec.Command("docker", "images", "--format", "{{.Repository}}:{{.Tag}}", stripTag(rv.image))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker images failed: %w\nOutput: %s", err, string(output))
+	}
+
+	images := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, img := range images {
+		if img != "" && isValidImageName(img) {
+			return img, nil
+		}
+	}
+
+	return "", errors.New("no valid local images found")
 }
 
-// ValidateCredentials checks if credentials are provided when needed
-func (rv *RegistryValidator) ValidateCredentials() error {
-	if !rv.NeedsAuthentication() {
-		return nil
-	}
-	if rv.Username == "" || rv.Password == "" {
-		return errors.New("registry credentials required but not provided")
+func (rv *RegistryValidator) tagImage(source, target string) error {
+	rlogger.Info("Tagging %s as %s", source, target)
+
+	cmd := exec.Command("docker", "tag", source, target)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("docker tag failed: %w\nOutput: %s", err, string(output))
 	}
 	return nil
 }
 
-// GetImagePullSecrets returns Kubernetes-style image pull secrets if needed
-func (rv *RegistryValidator) GetImagePullSecrets() (string, error) {
-	if !rv.NeedsAuthentication() {
-		return "", nil
+func (rv *RegistryValidator) pushImage(image string) error {
+	rlogger.Info("Pushing image %s", image)
+
+	cmd := exec.Command("docker", "push", image)
+	stdout, _ := cmd.StdoutPipe()
+	stderr, _ := cmd.StderrPipe()
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("docker push failed to start: %w", err)
 	}
 
-	if err := rv.ValidateCredentials(); err != nil {
-		return "", fmt.Errorf("credentials validation failed: %w", err)
+	go streamOutput(stdout, "stdout")
+	go streamOutput(stderr, "stderr")
+
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("docker push failed: %w", err)
 	}
 
-	encoded := rv.generateDockerConfigJSON()
-	name := strings.ReplaceAll(rv.AppName, " ", "-")
-
-	secret := fmt.Sprintf(`
-apiVersion: v1
-kind: Secret
-metadata:
-  name: %s-regcred
-type: kubernetes.io/dockerconfigjson
-data:
-  .dockerconfigjson: %s
-`, name, encoded)
-
-	return secret, nil
-}
-
-// generateDockerConfigJSON generates the base64-encoded Docker config JSON
-func (rv *RegistryValidator) generateDockerConfigJSON() string {
-	auths := map[string]map[string]map[string]string{
-		"auths": {
-			rv.Registry: {
-				"username": rv.Username,
-				"password": rv.Password,
-			},
-		},
-	}
-
-	jsonBytes, _ := json.Marshal(auths)
-	return base64.StdEncoding.EncodeToString(jsonBytes)
-}
-
-// PushImageToRegistry pushes a local Docker image to the configured registry with proper tagging
-func (rv *RegistryValidator) PushImageToRegistry(localImage, tag string) error {
-	// Step 1: Validate config
-	if err := rv.ValidateRegistryConfig(); err != nil {
-		rlogger.Error("Invalid registry configuration: %v", err)
-		return fmt.Errorf("registry validation failed: %w", err)
-	}
-
-	if !rv.cfg.Docker.Push {
-		rlogger.Info("Image push is disabled by configuration")
-		return nil
-	}
-
-	if err := rv.ValidateCredentials(); err != nil {
-		rlogger.Error("Authentication validation failed: %v", err)
-		return fmt.Errorf("authentication failed: %w", err)
-	}
-
-	// Step 2: Construct registry tag
-	fullTag, err := rv.GetFullImageTag()
-	if err != nil {
-		rlogger.Error("Failed to construct image tag: %v", err)
-		return fmt.Errorf("invalid image tag: %w", err)
-	}
-
-	// Step 3: Tag the local image with the full registry tag
-	rlogger.Info("Tagging image: %s as %s", localImage, fullTag)
-	tagCmd := exec.Command("docker", "tag", localImage, fullTag)
-	if output, err := tagCmd.CombinedOutput(); err != nil {
-		rlogger.Error("Failed to tag image: %v, output: %s", err, string(output))
-		return fmt.Errorf("docker tag failed: %w", err)
-	}
-
-	// Step 4: Push the image and stream the logs
-	rlogger.Info("Pushing image to registry: %s", fullTag)
-	pushCmd := exec.Command("docker", "push", fullTag)
-
-	stdout, err := pushCmd.StdoutPipe()
-	if err != nil {
-		rlogger.Error("Failed to capture push stdout: %v", err)
-		return fmt.Errorf("push stdout pipe failed: %w", err)
-	}
-
-	stderr, err := pushCmd.StderrPipe()
-	if err != nil {
-		rlogger.Error("Failed to capture push stderr: %v", err)
-		return fmt.Errorf("push stderr pipe failed: %w", err)
-	}
-
-	if err := pushCmd.Start(); err != nil {
-		rlogger.Error("Failed to start docker push: %v", err)
-		return fmt.Errorf("docker push start failed: %w", err)
-	}
-
-	// Step 5: Stream output
-	go streamDockerOutput(stdout, "stdout")
-	go streamDockerOutput(stderr, "stderr")
-
-	if err := pushCmd.Wait(); err != nil {
-		rlogger.Error("Docker push failed: %v", err)
-		return fmt.Errorf("docker push error: %w", err)
-	}
-
-	rlogger.Success("Successfully pushed image to registry: %s", fullTag)
 	return nil
 }
 
-func streamDockerOutput(reader io.Reader, label string) {
+func streamOutput(reader io.Reader, label string) {
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.Contains(line, "errorDetail") || strings.Contains(line, "unauthorized") {
+		if strings.Contains(line, "error") {
 			rlogger.Error("[%s] %s", label, line)
 		} else {
-			rlogger.Info("[%s] %s", label, line)
+			rlogger.Debug("[%s] %s", label, line)
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		rlogger.Error("[%s] scanner error: %v", label, err)
+}
+
+// Validation functions
+func validateRequired(name, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("%s is required", name)
 	}
+	return nil
+}
+
+func isValidRegistry(registry string) bool {
+	registry = strings.TrimSpace(registry)
+	return registry != "" &&
+		!strings.Contains(registry, " ") &&
+		!strings.HasPrefix(registry, "/") &&
+		!strings.HasSuffix(registry, "/") &&
+		isValidURL("https://"+registry)
+}
+
+func isValidURL(rawURL string) bool {
+	_, err := url.ParseRequestURI(rawURL)
+	return err == nil
+}
+
+func isValidImageName(image string) bool {
+	return strings.TrimSpace(image) != "" &&
+		!strings.ContainsAny(image, " \t\n\r") &&
+		imageNameRegex.MatchString(image)
+}
+
+func isValidTag(tag string) bool {
+	return len(tag) <= 128 && tagRegex.MatchString(tag)
+}
+
+func validateLocalImage(image string) error {
+	if !isValidImageName(image) && !strings.HasPrefix(image, "sha256:") {
+		return fmt.Errorf("invalid local image reference: %s", image)
+	}
+	return nil
+}
+
+func normalizeRegistry(registry string) string {
+	registry = strings.TrimPrefix(registry, "https://")
+	registry = strings.TrimPrefix(registry, "http://")
+	return strings.TrimSuffix(registry, "/")
+}
+
+func stripTag(image string) string {
+	return strings.Split(image, ":")[0]
 }

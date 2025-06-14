@@ -26,9 +26,13 @@ func init() {
 		Use:   "push",
 		Short: "Push the latest Docker image to the specified registry",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			localImage, _ := cmd.Flags().GetString("image")
-			tag, _ := cmd.Flags().GetString("tag")
-			return reg.PushImageToRegistry(localImage, tag)
+			//	localImage, _ := cmd.Flags().GetString("image")
+			// tag, _ := cmd.Flags().GetString("tag")
+			// if tag == "" {
+			// 	plog.Error("Tag is required for pushing the image")
+			// }
+			// TODO: use tag if provided
+			return reg.PushImageToRegistry()
 		},
 	}
 	pushCmd.Flags().StringVarP(&imagename, "image", "i", "", "Docker image name (required)")
