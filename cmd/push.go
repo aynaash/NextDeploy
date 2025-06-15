@@ -17,7 +17,7 @@ var (
 
 func init() {
 	var err error
-	reg = registry.NewRegistryValidator()
+	reg, err = registry.New()
 	if err != nil {
 		plog.Error("Failed to initialize registry validator: %v", err)
 	}
@@ -32,7 +32,13 @@ func init() {
 			// 	plog.Error("Tag is required for pushing the image")
 			// }
 			// TODO: use tag if provided
-			return reg.PushImageToRegistry()
+			//return reg.PushImageToRegistry()
+			if imagename == "" || registryName == "" {
+				plog.Error("Both --image and --registry flags are required")
+				return nil
+			}
+			plog.Info("Pushing image '%s' to registry '%s'", imagename, registryName)
+			return reg.PushImage(imagename)
 		},
 	}
 	pushCmd.Flags().StringVarP(&imagename, "image", "i", "", "Docker image name (required)")

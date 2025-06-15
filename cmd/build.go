@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"nextdeploy/internal/build"
+	"nextdeploy/internal/config"
 	"nextdeploy/internal/docker"
 	"nextdeploy/internal/git"
 	"nextdeploy/internal/logger"
@@ -190,6 +191,18 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 	}
 
 	cmd.Printf("Successfully built image: %s\n", imageName)
+	// push image if push it set to true
+	config, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	push := config.Docker.Push
+	if !push {
+		cmd.Printf("Skipping image push as 'push' is set to false in configuration\n")
+		return nil
+	}
+	err = dm.PushImage(ctx, imageName)
 	return nil
 }
 
@@ -210,7 +223,8 @@ func checkBuildCondtionsmet(cmd *cobra.Command, args []string) error {
 	if !exists {
 		return fmt.Errorf("dockerfile not found in current directory")
 	}
-	validatorRegistry := registry.NewRegistryValidator()
+	validatorRegistry, err := registry.New()
+
 	if err != nil {
 		return fmt.Errorf("failed to initialize registry validator: %w", err)
 	}

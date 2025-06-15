@@ -346,6 +346,7 @@ func (dm *DockerManager) BuildImage(ctx context.Context, dir string, opts BuildO
 	}
 
 	dlog.Success("Image built successfully: %s", opts.ImageName)
+	// push image
 	return nil
 }
 

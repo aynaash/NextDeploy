@@ -2,6 +2,7 @@ package registry
 
 import (
 	"bufio"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"net/url"
 	"nextdeploy/internal/config"
+	"nextdeploy/internal/docker"
 	"nextdeploy/internal/git"
 	"nextdeploy/internal/logger"
 	"os/exec"
@@ -37,7 +39,11 @@ type RegistryValidator struct {
 }
 
 // New creates a new RegistryValidator instance
-func New(cfg *config.NextDeployConfig) (*RegistryValidator, error) {
+func New() (*RegistryValidator, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load configuration: %w", err)
+	}
 	if cfg == nil {
 		return nil, errors.New("configuration cannot be nil")
 	}
@@ -63,7 +69,7 @@ func (rv *RegistryValidator) ValidateConfig() error {
 	if err := validateRequired("registry", rv.registry); err != nil {
 		return err
 	}
-	if !isValidRegistry(rv.registry) {
+	if !rv.IsValidRegistry(rv.registry) {
 		return fmt.Errorf("invalid registry format: %s", rv.registry)
 	}
 
@@ -232,26 +238,33 @@ func (rv *RegistryValidator) tagImage(source, target string) error {
 
 func (rv *RegistryValidator) pushImage(image string) error {
 	rlogger.Info("Pushing image %s", image)
-
-	cmd := exec.Command("docker", "push", image)
-	stdout, _ := cmd.StdoutPipe()
-	stderr, _ := cmd.StderrPipe()
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("docker push failed to start: %w", err)
-	}
-
-	go streamOutput(stdout, "stdout")
-	go streamOutput(stderr, "stderr")
-
-	if err := cmd.Wait(); err != nil {
+	// push here
+	dm := docker.NewDockerManager(true, nil)
+	context := context.Background()
+	err := dm.PushImage(context, image)
+	if err != nil {
 		return fmt.Errorf("docker push failed: %w", err)
 	}
 
+	// cmd := exec.Command("docker", "push", image)
+	// stdout, _ := cmd.StdoutPipe()
+	// stderr, _ := cmd.StderrPipe()
+
+	// if err := cmd.Start(); err != nil {
+	// 	return fmt.Errorf("docker push failed to start: %w", err)
+	// }
+	//
+	// go streamOutput(stdout, "stdout")
+	// go streamOutput(stderr, "stderr")
+	//
+	// if err := cmd.Wait(); err != nil {
+	// 	return fmt.Errorf("docker push failed: %w", err)
+	// }
+	//
 	return nil
 }
 
-func streamOutput(reader io.Reader, label string) {
+func StreamOutput(reader io.Reader, label string) {
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -271,7 +284,7 @@ func validateRequired(name, value string) error {
 	return nil
 }
 
-func isValidRegistry(registry string) bool {
+func (rv *RegistryValidator) IsValidRegistry(registry string) bool {
 	registry = strings.TrimSpace(registry)
 	return registry != "" &&
 		!strings.Contains(registry, " ") &&
