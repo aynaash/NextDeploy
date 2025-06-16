@@ -8,19 +8,31 @@ import (
 
 // NextDeployConfig represents the complete deployment configuration
 type NextDeployConfig struct {
-	Version     string        `yaml:"version"`
-	App         AppConfig     `yaml:"app"`
-	Repository  Repository    `yaml:"repository"`
-	Docker      DockerConfig  `yaml:"docker"`
-	Deployment  Deployment    `yaml:"deployment"`
-	Database    *Database     `yaml:"database,omitempty"`
-	Monitoring  *Monitoring   `yaml:"monitoring,omitempty"`
-	Secrets     SecretsConfig `yaml:"secrets"`
-	Logging     Logging       `yaml:"logging,omitempty"`
-	Backup      *Backup       `yaml:"backup,omitempty"`
-	SSL         *SSL          `yaml:"ssl,omitempty"`
-	Webhooks    []Webhook     `yaml:"webhooks,omitempty"`
-	Environment []EnvVariable `yaml:"environment,omitempty"`
+	Version     string         `yaml:"version"`
+	App         AppConfig      `yaml:"app"`
+	Repository  Repository     `yaml:"repository"`
+	Docker      DockerConfig   `yaml:"docker"`
+	Deployment  Deployment     `yaml:"deployment"`
+	Database    *Database      `yaml:"database,omitempty"`
+	Monitoring  *Monitoring    `yaml:"monitoring,omitempty"`
+	Secrets     SecretsConfig  `yaml:"secrets"`
+	Logging     Logging        `yaml:"logging,omitempty"`
+	Backup      *Backup        `yaml:"backup,omitempty"`
+	SSL         *SSL           `yaml:"ssl,omitempty"`
+	Webhooks    []Webhook      `yaml:"webhooks,omitempty"`
+	Environment []EnvVariable  `yaml:"environment,omitempty"`
+	Servers     []ServerConfig `yaml:"servers"`
+}
+
+type ServerConfig struct {
+	Name          string `yaml:"name"` // or json/xml depending on your config format
+	Host          string `yaml:"host"`
+	Port          int    `yaml:"port"` // default 22
+	Username      string `yaml:"username"`
+	Password      string `yaml:"password"`                 // Consider using SSH keys instead
+	KeyPath       string `yaml:"key_path"`                 // Path to private key
+	SSHKey        string `yaml:"ssh_key,omitempty"`        // Optional SSH key for authentication
+	KeyPassphrase string `yaml:"key_passphrase,omitempty"` // Optional passphrase for SSH key
 }
 
 // AppConfig contains application-specific settings
