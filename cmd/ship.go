@@ -3,24 +3,37 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
+	"nextdeploy/internal/config"
+	"nextdeploy/internal/git"
 	"nextdeploy/internal/logger"
 	"nextdeploy/internal/server"
 	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
 var (
 	ShipLogs = logger.PackageLogger("ship", "🚢")
 
+	// Color definitions
+	successColor = color.New(color.FgGreen, color.Bold)
+	errorColor   = color.New(color.FgRed, color.Bold)
+	warnColor    = color.New(color.FgYellow, color.Bold)
+	infoColor    = color.New(color.FgCyan, color.Bold)
+	debugColor   = color.New(color.FgMagenta)
+
 	// Command flags
 	forceDeploy bool
 	dryRun      bool
 )
 
-// shipCmd represents the ship command
 var shipCmd = &cobra.Command{
 	Use:   "ship",
 	Short: "Deploy a containerized application to target VPS",
@@ -34,84 +47,92 @@ var shipCmd = &cobra.Command{
 }
 
 func init() {
-	// Add flags to the ship command
 	shipCmd.Flags().StringVarP(&configFile, "config", "c", "nextdeploy.yml", "Path to configuration file")
 	shipCmd.Flags().BoolVar(&forceDeploy, "force", false, "Force deployment even if checks fail")
 	shipCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Simulate deployment without making changes")
-
-	// Add ship command to root
 	rootCmd.AddCommand(shipCmd)
 }
 
-// Ship is the main deployment function
 func Ship(cmd *cobra.Command, args []string) {
-	ShipLogs.Info("Starting deployment process...")
+	ctx := context.Background()
+	out := cmd.OutOrStdout()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+
+	go func() {
+		<-c
+		cancel()
+		fmt.Fprintln(out, "\n🚨 Deployment interrupted by user! 🚨")
+		os.Exit(1)
+	}()
+
+	infoColor.Printf("Starting deployment process at %s\n\n", time.Now().Format(time.RFC1123))
 
 	if dryRun {
-		ShipLogs.Warn("DRY RUN MODE: No changes will be made")
+		warnColor.Println("🚧 DRY RUN MODE: No changes will be made 🚧\n")
 	}
 
-	// Initialize server manager with config and SSH connections
 	serverMgr, err := server.New(
-		server.WithConfig(configFile),
+		server.WithConfig(),
 		server.WithSSH(),
 	)
 	if err != nil {
-		ShipLogs.Error("Failed to initialize server manager: %v", err)
+		errorColor.Printf("Failed to initialize server manager: %v\n", err)
 		os.Exit(1)
 	}
 	defer func() {
 		if err := serverMgr.CloseSSHConnections(); err != nil {
-			ShipLogs.Error("Error closing connections: %v", err)
+			errorColor.Printf("Error closing connections: %v\n", err)
 		}
 	}()
 
-	// Get list of target servers
 	servers := serverMgr.ListServers()
 	if len(servers) == 0 {
-		ShipLogs.Error("No servers configured for deployment")
+		errorColor.Println("No servers configured for deployment")
+		os.Exit(1)
+	}
+	var stream = io.Discard
+
+	if err := runDeployment(ctx, serverMgr, servers, stream); err != nil {
+		errorColor.Printf("Deployment failed: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Execute deployment steps
-	if err := runDeployment(serverMgr, servers); err != nil {
-		ShipLogs.Error("Deployment failed: %v", err)
-		os.Exit(1)
-	}
-
-	ShipLogs.Success("Deployment completed successfully!")
+	successColor.Println("\n🎉 Deployment completed successfully! 🎉")
 }
 
-// runDeployment orchestrates the deployment steps
-func runDeployment(serverMgr *server.ServerStruct, servers []string) error {
-	// Phase 1: Pre-deployment checks
-	if err := verifyServers(serverMgr, servers); err != nil {
+func runDeployment(ctx context.Context, serverMgr *server.ServerStruct, servers []string, stream io.Writer) error {
+	infoColor.Println("\n=== PHASE 1: Pre-deployment checks ===")
+	if err := verifyServers(ctx, serverMgr, servers, stream); err != nil {
 		return fmt.Errorf("pre-deployment checks failed: %w", err)
 	}
 
-	// Phase 2: File transfers
-	if err := transferRequiredFiles(serverMgr, servers[0]); err != nil {
+	infoColor.Println("\n=== PHASE 2: File transfers ===")
+	if err := transferRequiredFiles(ctx, serverMgr, stream, servers[0]); err != nil {
 		return fmt.Errorf("file transfer failed: %w", err)
 	}
 
-	// Phase 3: Container deployment
 	if !dryRun {
-		if err := deployContainers(serverMgr, servers[0]); err != nil {
+		infoColor.Println("\n=== PHASE 3: Container deployment ===")
+		if err := deployContainers(ctx, serverMgr, servers[0], stream); err != nil {
 			return fmt.Errorf("container deployment failed: %w", err)
 		}
 	}
 
-	// Phase 4: Post-deployment verification
-	if err := verifyDeployment(serverMgr, servers[0]); err != nil {
+	infoColor.Println("\n=== PHASE 4: Post-deployment verification ===", stream)
+	if err := verifyDeployment(ctx, serverMgr, servers[0], stream); err != nil {
 		return fmt.Errorf("post-deployment verification failed: %w", err)
 	}
 
 	return nil
 }
 
-// verifyServers checks all target servers are reachable and meet requirements
-func verifyServers(serverMgr *server.ServerStruct, servers []string) error {
-	ShipLogs.Info("Verifying server connectivity and requirements...")
+func verifyServers(ctx context.Context, serverMgr *server.ServerStruct, servers []string, stream io.Writer) error {
+	infoColor.Println("Verifying server connectivity and requirements...")
 
 	var wg sync.WaitGroup
 	errorChan := make(chan error, len(servers))
@@ -121,37 +142,35 @@ func verifyServers(serverMgr *server.ServerStruct, servers []string) error {
 		go func(serverName string) {
 			defer wg.Done()
 
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			serverCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 
-			// Check basic connectivity
-			if err := retryOperation(ctx, 3, 2*time.Second, func() error {
+			infoColor.Printf("  Checking server: %s\n", serverName)
+
+			if err := retryOperation(serverCtx, 3, 2*time.Second, func() error {
 				return serverMgr.PingServer(serverName)
 			}); err != nil {
 				errorChan <- fmt.Errorf("server %s is unreachable: %w", serverName, err)
 				return
 			}
 
-			// Check Docker availability
-			if _, err := serverMgr.ExecuteCommand(ctx, serverName, "docker --version"); err != nil {
+			if _, err := serverMgr.ExecuteCommand(serverCtx, serverName, "docker --version", stream); err != nil {
 				errorChan <- fmt.Errorf("Docker not available on %s: %w", serverName, err)
 				return
 			}
 
-			// Check disk space (example check)
-			output, err := serverMgr.ExecuteCommand(ctx, serverName, "df -h /")
+			output, err := serverMgr.ExecuteCommand(serverCtx, serverName, "df -h /", stream)
 			if err != nil {
 				errorChan <- fmt.Errorf("failed to check disk space on %s: %w", serverName, err)
 				return
 			}
-			ShipLogs.Debug("[%s] Disk space:\n%s", serverName, output)
+			debugColor.Printf("[%s] Disk space:\n%s\n", serverName, output)
 		}(name)
 	}
 
 	wg.Wait()
 	close(errorChan)
 
-	// Collect all errors
 	var errors []error
 	for err := range errorChan {
 		errors = append(errors, err)
@@ -160,53 +179,93 @@ func verifyServers(serverMgr *server.ServerStruct, servers []string) error {
 	if len(errors) > 0 && !forceDeploy {
 		return fmt.Errorf("server verification failed: %v", errors)
 	} else if len(errors) > 0 {
-		ShipLogs.Warn("Proceeding with deployment despite verification issues (force flag set)")
+		warnColor.Println("Proceeding with deployment despite verification issues (force flag set)")
 	}
 
+	successColor.Println("✓ All server checks completed")
 	return nil
 }
 
-// transferRequiredFiles uploads all necessary files to the server
-func transferRequiredFiles(serverMgr *server.ServerStruct, serverName string) error {
+func transferRequiredFiles(ctx context.Context, serverMgr *server.ServerStruct, stream io.Writer, serverName string) error {
 	ShipLogs.Info("Transferring required files to %s...", serverName)
 
 	files := map[string]string{
-		".env.production":    "/app/.env",
-		"docker-compose.yml": "/app/docker-compose.yml",
-		"scripts/start.sh":   "/app/start.sh",
+		"nextdeploy.yml": "nextdeploy.yml",
 	}
+
+	// Use a directory in the user's home folder instead of /app
+	homeDir, err := serverMgr.ExecuteCommand(ctx, serverName, "echo $HOME", stream)
+	infoColor.Printf("User home directory on %s: %s\n", serverName, homeDir)
+	if err != nil {
+		return fmt.Errorf("failed to get user home directory: %w", err)
+	}
+	homeDir = strings.TrimSpace(homeDir)
+	baseDir := filepath.Join(homeDir, "app") // Now using ~/app instead of /app
 
 	var wg sync.WaitGroup
 	errorChan := make(chan error, len(files))
 
-	for local, remote := range files {
+	// Create base directory with proper permissions
+	ShipLogs.Debug("Creating base directory: %s", baseDir)
+	if _, err := serverMgr.ExecuteCommand(ctx, serverName,
+		fmt.Sprintf("mkdir -p %s && chmod 755 %s", baseDir, baseDir), stream); err != nil {
+		return fmt.Errorf("failed to create base directory %s: %w", baseDir, err)
+	}
+
+	for localPath, remotePath := range files {
 		wg.Add(1)
-		go func(localPath, remotePath string) {
+		go func(local, remote string) {
 			defer wg.Done()
 
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			fileCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 			defer cancel()
 
-			if dryRun {
-				ShipLogs.Info("[DRY RUN] Would upload %s to %s:%s", localPath, serverName, remotePath)
+			// Verify local file exists first
+			if _, err := os.Stat(local); os.IsNotExist(err) {
+				errorChan <- fmt.Errorf("local file %s does not exist", local)
 				return
 			}
 
-			if err := retryOperation(ctx, 3, 3*time.Second, func() error {
-				return serverMgr.UploadFile(ctx, serverName, localPath, remotePath)
+			ShipLogs.Debug("Transferring %s to %s:%s", local, serverName, remote)
+
+			// Create full remote path
+			fullRemotePath := filepath.Join(baseDir, remote)
+
+			// Ensure remote directory exists
+			remoteDir := filepath.Dir(fullRemotePath)
+			if remoteDir != baseDir { // Skip if we're already in base dir
+				ShipLogs.Debug("Ensuring remote directory %s exists", remoteDir)
+				if _, err := serverMgr.ExecuteCommand(fileCtx, serverName,
+					fmt.Sprintf("mkdir -p %s && chmod 755 %s", remoteDir, remoteDir), stream); err != nil {
+					errorChan <- fmt.Errorf("failed to create remote directory %s: %w", remoteDir, err)
+					return
+				}
+			}
+
+			// Retry with exponential backoff
+			if err := retryOperation(fileCtx, 3, 5*time.Second, func() error {
+				return serverMgr.UploadFile(fileCtx, serverName, local, fullRemotePath)
 			}); err != nil {
-				errorChan <- fmt.Errorf("failed to upload %s: %w", localPath, err)
+				errorChan <- fmt.Errorf("failed to upload %s: %w", local, err)
 				return
 			}
 
-			ShipLogs.Info("Successfully uploaded %s to %s", localPath, remotePath)
-		}(local, remote)
+			// Set proper permissions
+			if strings.HasSuffix(fullRemotePath, ".sh") {
+				if _, err := serverMgr.ExecuteCommand(fileCtx, serverName,
+					fmt.Sprintf("chmod +x %s", fullRemotePath), stream); err != nil {
+					errorChan <- fmt.Errorf("failed to set executable permissions on %s: %w", fullRemotePath, err)
+					return
+				}
+			}
+
+			ShipLogs.Info("Successfully transferred %s to %s", local, fullRemotePath)
+		}(localPath, remotePath)
 	}
 
 	wg.Wait()
 	close(errorChan)
 
-	// Check for errors
 	for err := range errorChan {
 		if !forceDeploy {
 			return fmt.Errorf("file transfer failed: %w", err)
@@ -217,76 +276,99 @@ func transferRequiredFiles(serverMgr *server.ServerStruct, serverName string) er
 	return nil
 }
 
-// deployContainers handles the container deployment process
-func deployContainers(serverMgr *server.ServerStruct, serverName string) error {
-	ShipLogs.Info("Starting container deployment on %s...", serverName)
+func deployContainers(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
+	infoColor.Printf("Deploying containers on %s...\n", serverName)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	deployCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	// Step 1: Stop existing container if running
-	if _, err := serverMgr.ExecuteCommand(ctx, serverName, "docker compose down"); err != nil {
-		ShipLogs.Warn("Failed to stop existing containers (may not exist): %v", err)
-	}
+	infoColor.Println("  Stopping existing containers...")
+	// TODO:- use blue-green deployment strategy here in the future
+	// login to docker to registry
 
-	// Step 2: Pull new image
-	if err := retryOperation(ctx, 3, 10*time.Second, func() error {
-		_, err := serverMgr.ExecuteCommand(ctx, serverName, "docker compose pull")
-		return err
-	}); err != nil {
-		return fmt.Errorf("failed to pull Docker image: %w", err)
+	// ===========Phase 1: Login to Docker registry===========
+	ShipLogs.Info("Logging in to Docker registry...")
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration to get password and user for logins : %w", err)
 	}
+	password := cfg.Docker.Password
+	username := cfg.Docker.Username
+	loginCommand := fmt.Sprintf("docker login --username %s --password %s", username, password)
+	if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, loginCommand, stream); err != nil {
+		warnColor.Printf("  Warning: Failed to login to Docker registry: %v\n", err)
 
-	// Step 3: Start new containers
-	if _, err := serverMgr.ExecuteCommand(ctx, serverName, "docker compose up -d"); err != nil {
+	}
+	//===========Phase 2: Stop existing containers===========
+	infoColor.Println("  Stopping existing containers...")
+	//TODO:- use blue-green deployment strategy here in the future
+	//
+	// Phase 3: Load the tag for image to be pull and its names
+	image := cfg.Docker.Image
+	ShipLogs.Info("Pulling image: %s", image)
+	if image == "" {
+		return fmt.Errorf("Docker image not specified in configuration")
+	}
+	// TODO: make sure the logic for tags is rigid and highly deterministic
+	imageTag, err := git.GetCommitHash()
+	if err != nil {
+		return fmt.Errorf("failed to get commit hash for image tag: %w", err)
+	}
+	imageWithTag := fmt.Sprintf("%s:%s", image, imageTag)
+	infoColor.Printf("  Using image: %s\n", imageWithTag)
+	pullCommand := fmt.Sprintf("docker pull %s", imageWithTag)
+	if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, pullCommand, stream); err != nil {
+		warnColor.Printf("  Warning: Failed to stop existing containers (may not exist): %v\n", err)
+	}
+	//TODO: implement a mechanism to stop existing containers gracefully
+	infoColor.Println("  Starting new containers...")
+	runCommand := fmt.Sprintf("docker run -d --name %s --restart unless-stopped -p 3000:3000 %s", serverName, imageWithTag)
+	if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, runCommand, stream); err != nil {
+		ShipLogs.Error("Failed to start containers: %v", err)
 		return fmt.Errorf("failed to start containers: %w", err)
 	}
 
-	// Step 4: Verify container is running
-	output, err := serverMgr.ExecuteCommand(ctx, serverName, "docker ps --filter status=running --format '{{.Names}}'")
+	output, err := serverMgr.ExecuteCommand(deployCtx, serverName, "docker ps --filter status=running --format '{{.Names}}'", stream)
 	if err != nil {
 		return fmt.Errorf("failed to check running containers: %w", err)
 	}
 
-	ShipLogs.Info("Running containers:\n%s", output)
+	successColor.Printf("✓ Containers running:\n%s\n", output)
 	return nil
 }
 
-// verifyDeployment checks if deployment was successful
-func verifyDeployment(serverMgr *server.ServerStruct, serverName string) error {
-	ShipLogs.Info("Verifying deployment on %s...", serverName)
+func verifyDeployment(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
+	infoColor.Printf("Verifying deployment on %s...\n", serverName)
+	//TODO: Implement health checks for containers and application
+	// verifyCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	// defer cancel()
+	//
+	// infoColor.Println("  Checking container health...")
+	// output, err := serverMgr.ExecuteCommand(verifyCtx, serverName, "docker ps --filter health=healthy --format '{{.Names}}'", stream)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to check container health: %w", err)
+	// }
+	//
+	// if output == "" {
+	// 	return fmt.Errorf("no healthy containers found")
+	// }
+	//
+	// successColor.Printf("✓ Healthy containers:\n%s\n", output)
+	//
+	// infoColor.Println("  Checking application health endpoint...")
+	// if _, err := serverMgr.ExecuteCommand(verifyCtx, serverName,
+	// 	"curl -sSf http://localhost:3000/health > /dev/null", stream); err != nil {
+	// 	return fmt.Errorf("application health check failed: %w", err)
+	// }
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	// Check container status
-	output, err := serverMgr.ExecuteCommand(ctx, serverName, "docker ps --filter health=healthy --format '{{.Names}}'")
-	if err != nil {
-		return fmt.Errorf("failed to check container health: %w", err)
-	}
-
-	if output == "" {
-		return fmt.Errorf("no healthy containers found")
-	}
-
-	ShipLogs.Info("Healthy containers:\n%s", output)
-
-	// Optional: Check application health endpoint
-	// This would depend on your application's health check endpoint
-	if _, err := serverMgr.ExecuteCommand(ctx, serverName,
-		"curl -sSf http://localhost:3000/health > /dev/null"); err != nil {
-		return fmt.Errorf("application health check failed: %w", err)
-	}
-
+	successColor.Println("✓ Application health check passed")
 	return nil
 }
 
-// retryOperation retries a function with exponential backoff
 func retryOperation(ctx context.Context, maxAttempts int, initialDelay time.Duration, fn func() error) error {
 	var lastErr error
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		// Check if context is done before each attempt
 		select {
 		case <-ctx.Done():
 			if lastErr != nil {
@@ -304,12 +386,11 @@ func retryOperation(ctx context.Context, maxAttempts int, initialDelay time.Dura
 		lastErr = err
 		if attempt < maxAttempts {
 			delay := time.Duration(attempt) * initialDelay
-			ShipLogs.Debug("Attempt %d/%d failed, retrying in %v: %v",
+			debugColor.Printf("    Attempt %d/%d failed, retrying in %v: %v\n",
 				attempt, maxAttempts, delay, err)
 
 			select {
 			case <-time.After(delay):
-				// Continue with next attempt
 			case <-ctx.Done():
 				return fmt.Errorf("context canceled while waiting for retry: %w", lastErr)
 			}

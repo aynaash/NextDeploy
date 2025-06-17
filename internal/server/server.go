@@ -1,31 +1,21 @@
-/*
-This initial version of the server package establishes a solid foundation for SSH and SFTP-based remote server operations. It's modular, readable, and functional—but there are architectural concerns that need to be addressed before scaling:
-
-1. **Tight Coupling with Config** – `WithConfig` loads a config from disk rather than accepting an injected value, which limits testability and flexibility.
-2. **No Retry or Timeout Logic** – SSH and SFTP operations lack retry mechanisms or adaptive backoff strategies. Failures will be brittle in real-world environments.
-3. **No Resource Reaper** – Idle clients are held in memory indefinitely. Add TTL + eviction or LRU caching to prevent memory leaks.
-4. **Error Aggregation is Weak** – Errors are collected in slices and returned as a `fmt.Errorf`, but there's no structured error reporting or logging context (e.g., stack trace, severity).
-5. **Server Preparation Logic is Monolithic** – The shell command installation logic is procedural and embedded. Break it into a plugin-style abstraction per OS/package manager.
-6. **Security** – No audit of allowed SSH commands or shell environments. Can this logic be exploited by malicious input? Review needed.
-
-Overall: good bones, but needs defensive engineering, cleaner abstraction boundaries, and more thought toward long-term extensibility.
-*/
-
 package server
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"github.com/pkg/sftp"
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/knownhosts"
 	"io"
 	"nextdeploy/internal/config"
 	"nextdeploy/internal/logger"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 var (
@@ -67,7 +57,7 @@ func New(opts ...ServerOption) (*ServerStruct, error) {
 }
 
 // WithConfig loads and applies the configuration
-func WithConfig(configPath string) ServerOption {
+func WithConfig() ServerOption {
 	return func(s *ServerStruct) error {
 		cfg, err := config.Load()
 		serverlogger.Debug("Loading configuration from %v", cfg)
@@ -83,8 +73,8 @@ func WithConfig(configPath string) ServerOption {
 // WithSSH initializes SSH connections for all configured servers
 func WithSSH() ServerOption {
 	return func(s *ServerStruct) error {
-		if s.config == nil {
-			return fmt.Errorf("configuration not loaded")
+		if s.config == nil || len(s.config.Servers) == 0 {
+			return fmt.Errorf("The server configuration is not loaded or no servers configured")
 		}
 
 		s.mu.Lock()
@@ -92,6 +82,7 @@ func WithSSH() ServerOption {
 
 		var wg sync.WaitGroup
 		errChan := make(chan error, len(s.config.Servers))
+		serverlogger.Info("The config.Servers value at with withssh function is :%v", s.config.Servers)
 
 		for _, serverCfg := range s.config.Servers {
 			wg.Add(1)
@@ -122,6 +113,23 @@ func WithSSH() ServerOption {
 	}
 }
 
+func (s *ServerStruct) GetDeploymentServer() (string, error) {
+	if s.config == nil || s.config.Deployment.Server.Host == "" {
+		return "", fmt.Errorf("deployment server configuration is not set")
+	}
+	// find the matchin in servers list
+	for _, server := range s.config.Servers {
+		if server.Name == s.config.Deployment.Server.Host {
+			_, err := connectSSH(server)
+			if err != nil {
+				return "", fmt.Errorf("failed to connect to deployment server %s: %w", server.Name, err)
+			}
+			return server.Name, nil
+		}
+	}
+	return "", fmt.Errorf("deployment server %s not found in configuration", s.config.Deployment.Server.Host)
+}
+
 // connectSSH establishes an SSH connection and initializes SFTP client
 func connectSSH(cfg config.ServerConfig) (*SSHClient, error) {
 	if cfg.Port == 0 {
@@ -143,6 +151,14 @@ func connectSSH(cfg config.ServerConfig) (*SSHClient, error) {
 		Auth:            authMethods,
 		HostKeyCallback: hostKeyCallback,
 		Timeout:         15 * time.Second,
+		Config: ssh.Config{
+			KeyExchanges: []string{"curve25519-sha256@libssh.org"},
+			Ciphers:      []string{"chacha20-poly1305@openssh.com"},
+		},
+	}
+
+	if len(authMethods) == 0 {
+		sshConfig.Auth = []ssh.AuthMethod{authMethods[0]}
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
@@ -168,8 +184,31 @@ func connectSSH(cfg config.ServerConfig) (*SSHClient, error) {
 func getAuthMethods(cfg config.ServerConfig) ([]ssh.AuthMethod, error) {
 	var authMethods []ssh.AuthMethod
 
+	if cfg.KeyPath == "" {
+		return nil, fmt.Errorf("no SSH key path provided for server %s", cfg.Name)
+	}
+
+	expandedPath := os.ExpandEnv(cfg.KeyPath)
+	if expandedPath == "" {
+		return nil, fmt.Errorf("Invalid key path:%v", cfg.KeyPath)
+	}
+
 	if cfg.KeyPath != "" {
-		key, err := os.ReadFile(cfg.KeyPath)
+		if strings.HasSuffix(expandedPath, "~") {
+			home, err := os.UserHomeDir()
+			serverlogger.Debug("Home directory: %s", home)
+			serverlogger.Debug("Key path resolution: %s -> %s",
+				cfg.KeyPath,
+				os.ExpandEnv(cfg.KeyPath))
+			if err != nil {
+				return nil, fmt.Errorf("failed to get user home directory: %w", err)
+			}
+			expandedPath = filepath.Join(home, expandedPath[2:])
+
+			serverlogger.Debug("Expanded SSH key path: %s", expandedPath)
+		}
+
+		key, err := os.ReadFile(expandedPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read SSH key file %s: %w", cfg.KeyPath, err)
 		}
@@ -215,7 +254,8 @@ func getHostKeyCallback() (ssh.HostKeyCallback, error) {
 }
 
 // ExecuteCommand runs a command on the specified server with context support
-func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command string) (string, error) {
+// ExecuteCommand runs a command on the specified server with context support and streaming
+func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command string, stream io.Writer) (string, error) {
 	client, err := s.getSSHClient(serverName)
 	if err != nil {
 		return "", err
@@ -230,6 +270,48 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 	}
 	defer session.Close()
 
+	// Set up output pipes
+	stdoutPipe, err := session.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to get stdout pipe: %w", err)
+	}
+
+	stderrPipe, err := session.StderrPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to get stderr pipe: %w", err)
+	}
+
+	// Create a multi-writer to both capture output and stream it
+	output := &bytes.Buffer{}
+	var writers []io.Writer
+
+	if stream != nil {
+		writers = append(writers, stream)
+	}
+	writers = append(writers, output)
+
+	multiWriter := io.MultiWriter(writers...)
+
+	// Start command
+	err = session.Start(command)
+	if err != nil {
+		return "", fmt.Errorf("failed to start command: %w", err)
+	}
+
+	// Stream output in goroutines
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		io.Copy(multiWriter, stdoutPipe)
+	}()
+
+	go func() {
+		defer wg.Done()
+		io.Copy(multiWriter, stderrPipe)
+	}()
+
 	// Set up context cancellation
 	done := make(chan struct{})
 	go func() {
@@ -239,17 +321,20 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 		case <-done:
 		}
 	}()
-	defer close(done)
 
-	output, err := session.CombinedOutput(command)
+	// Wait for command completion
+	err = session.Wait()
+	close(done)
+	wg.Wait()
+
 	client.LastUsed = time.Now()
 
 	if err != nil {
-		return string(output), fmt.Errorf("command failed: %w (output: %s)", err, output)
+		return output.String(), fmt.Errorf("command failed: %w", err)
 	}
 
 	serverlogger.Debug("Executed command on %s: %s", serverName, command)
-	return string(output), nil
+	return output.String(), nil
 }
 
 // UploadFile uploads a file to the remote server using SFTP
@@ -433,7 +518,7 @@ func (s *ServerStruct) ListServers() []string {
 }
 
 // GetServerStatus returns connection status of a server
-func (s *ServerStruct) GetServerStatus(serverName string) (string, error) {
+func (s *ServerStruct) GetServerStatus(serverName string, stream io.Writer) (string, error) {
 	client, err := s.getSSHClient(serverName)
 	if err != nil {
 		return "", err
@@ -448,7 +533,7 @@ func (s *ServerStruct) GetServerStatus(serverName string) (string, error) {
 	}
 	session.Close()
 
-	uptime, err := s.ExecuteCommand(context.Background(), serverName, "uptime")
+	uptime, err := s.ExecuteCommand(context.Background(), serverName, "uptime", stream)
 	if err != nil {
 		return "connected but command failed", nil
 	}
@@ -457,7 +542,8 @@ func (s *ServerStruct) GetServerStatus(serverName string) (string, error) {
 }
 
 // PrepareServer installs required tools on the target server
-func (s *ServerStruct) PrepareServer(ctx context.Context, serverName string) error {
+// PrepareServer installs required tools on the target server with streaming output
+func (s *ServerStruct) PrepareServer(ctx context.Context, serverName string, stream io.Writer) error {
 	client, err := s.getSSHClient(serverName)
 	if err != nil {
 		return fmt.Errorf("failed to get SSH client: %w", err)
@@ -467,83 +553,92 @@ func (s *ServerStruct) PrepareServer(ctx context.Context, serverName string) err
 	defer client.mu.Unlock()
 
 	// Check if preparation is already done
-	if _, err := s.ExecuteCommand(ctx, serverName, "which docker && which caddy && which go"); err == nil {
+	if _, err := s.ExecuteCommand(ctx, serverName, "which docker && which caddy && which go", stream); err == nil {
+		if stream != nil {
+			fmt.Fprintf(stream, "Server already has required tools installed\n")
+		}
 		serverlogger.Info("Server already has required tools installed")
 		return nil
 	}
 
+	if stream != nil {
+		fmt.Fprintf(stream, "Preparing server %s by installing required tools...\n", serverName)
+	}
 	serverlogger.Info("Preparing server %s by installing required tools...", serverName)
 
 	// Determine package manager (apt/yum/dnf)
 	pkgManagerCmd := "command -v apt-get >/dev/null && echo apt || echo yum"
-	pkgManager, err := s.ExecuteCommand(ctx, serverName, pkgManagerCmd)
+	pkgManager, err := s.ExecuteCommand(ctx, serverName, pkgManagerCmd, stream)
 	if err != nil {
 		return fmt.Errorf("failed to detect package manager: %w", err)
 	}
 
 	// Install base dependencies
 	baseDepsCmd := ""
-	switch pkgManager {
+	switch strings.TrimSpace(pkgManager) {
 	case "apt":
 		baseDepsCmd = `sudo apt-get update && 
-			sudo apt-get install -y curl git make gcc build-essential
-			ca-certificates software-properties-common apt-transport-https`
+            sudo apt-get install -y curl git make gcc build-essential
+            ca-certificates software-properties-common apt-transport-https`
 	case "yum":
 		baseDepsCmd = `sudo yum install -y curl git make gcc glibc-static
-			ca-certificates yum-utils device-mapper-persistent-data lvm2`
+            ca-certificates yum-utils device-mapper-persistent-data lvm2`
 	default:
 		return fmt.Errorf("unsupported package manager: %s", pkgManager)
 	}
 
-	if _, err := s.ExecuteCommand(ctx, serverName, baseDepsCmd); err != nil {
+	if _, err := s.ExecuteCommand(ctx, serverName, baseDepsCmd, stream); err != nil {
 		return fmt.Errorf("failed to install base dependencies: %w", err)
 	}
 
 	// Install Docker
 	dockerInstallCmd := `curl -fsSL https://get.docker.com | sudo sh && 
-		sudo usermod -aG docker $USER && 
-		sudo systemctl enable docker && 
-		sudo systemctl start docker`
+        sudo usermod -aG docker $USER && 
+        sudo systemctl enable docker && 
+        sudo systemctl start docker`
 
-	if _, err := s.ExecuteCommand(ctx, serverName, dockerInstallCmd); err != nil {
+	if _, err := s.ExecuteCommand(ctx, serverName, dockerInstallCmd, stream); err != nil {
 		return fmt.Errorf("failed to install Docker: %w", err)
 	}
 
 	// Install Caddy
 	caddyInstallCmd := `sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https && 
-		curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg && 
-		curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list && 
-		sudo apt update && 
-		sudo apt install -y caddy`
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg && 
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list && 
+        sudo apt update && 
+        sudo apt install -y caddy`
 
-	if pkgManager == "yum" {
+	if strings.TrimSpace(pkgManager) == "yum" {
 		caddyInstallCmd = `sudo yum install -y yum-plugin-copr && 
-			sudo yum copr enable -y @caddy/caddy && 
-			sudo yum install -y caddy`
+            sudo yum copr enable -y @caddy/caddy && 
+            sudo yum install -y caddy`
 	}
 
-	if _, err := s.ExecuteCommand(ctx, serverName, caddyInstallCmd); err != nil {
+	if _, err := s.ExecuteCommand(ctx, serverName, caddyInstallCmd, stream); err != nil {
 		return fmt.Errorf("failed to install Caddy: %w", err)
 	}
 
 	// Install Go
 	goInstallCmd := `curl -OL https://golang.org/dl/go1.21.0.linux-amd64.tar.gz && 
-		sudo rm -rf /usr/local/go && 
-		sudo tar -C /usr/local -xzf go1.21.0.linux-amd64.tar.gz && 
-		echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc && 
-		source ~/.bashrc && 
-		rm go1.21.0.linux-amd64.tar.gz`
+        sudo rm -rf /usr/local/go && 
+        sudo tar -C /usr/local -xzf go1.21.0.linux-amd64.tar.gz && 
+        echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc && 
+        source ~/.bashrc && 
+        rm go1.21.0.linux-amd64.tar.gz`
 
-	if _, err := s.ExecuteCommand(ctx, serverName, goInstallCmd); err != nil {
+	if _, err := s.ExecuteCommand(ctx, serverName, goInstallCmd, stream); err != nil {
 		return fmt.Errorf("failed to install Go: %w", err)
 	}
 
 	// Verify installations
 	verifyCmd := `docker --version && caddy version && go version`
-	if _, err := s.ExecuteCommand(ctx, serverName, verifyCmd); err != nil {
+	if _, err := s.ExecuteCommand(ctx, serverName, verifyCmd, stream); err != nil {
 		return fmt.Errorf("verification failed: %w", err)
 	}
 
+	if stream != nil {
+		fmt.Fprintf(stream, "Server preparation completed successfully\n")
+	}
 	serverlogger.Info("Server preparation completed successfully")
 	return nil
 }
