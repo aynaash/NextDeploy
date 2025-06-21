@@ -1,12 +1,14 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
+	"nextdeploy/internal/config"
+	"nextdeploy/internal/logger"
 	"nextdeploy/internal/server"
 	"os"
 	"strings"
@@ -18,13 +20,18 @@ const (
 	caddyConfigDir = "/etc/caddy"
 )
 
+type SSLConfig struct {
+	Domain      string `yaml:"domain"`
+	Email       string `yaml:"email"`
+	Staging     bool   `yaml:"staging"`
+	Wildcard    bool   `yaml:"wildcard"`
+	DNSProvider string `yaml:"dns_provider"`
+	Force       bool   `yaml:"force"`
+}
+
 var (
-	sslDomain      string
-	sslEmail       string
-	sslStaging     bool
-	sslWildcard    bool
-	sslDNSProvider string
-	sslForce       bool
+	sslConfigFile string
+	sslConfig     SSLConfig
 )
 
 var SSLCommand = &cobra.Command{
@@ -37,20 +44,23 @@ var SSLCommand = &cobra.Command{
 - Configuration rollback on failure`,
 	RunE: runSSLCommand,
 }
+var (
+	sslogs = logger.PackageLogger("ssl", "SSL")
+)
 
 func init() {
-	SSLCommand.Flags().StringVarP(&sslDomain, "domain", "d", "", "Domain name for SSL certificate (required)")
-	SSLCommand.Flags().StringVarP(&sslEmail, "email", "e", "", "Email for Let's Encrypt (required)")
-	SSLCommand.Flags().BoolVar(&sslStaging, "staging", false, "Use Let's Encrypt staging server")
-	SSLCommand.Flags().BoolVar(&sslWildcard, "wildcard", false, "Request wildcard certificate (*.domain.com)")
-	SSLCommand.Flags().StringVar(&sslDNSProvider, "dns", "", "DNS provider for DNS-01 challenge (required for wildcards)")
-	SSLCommand.Flags().BoolVar(&sslForce, "force", false, "Force reconfiguration even if certificate exists")
-
-	SSLCommand.MarkFlagRequired("domain")
-	SSLCommand.MarkFlagRequired("email")
+	rootCmd.AddCommand(SSLCommand)
 }
 
 func runSSLCommand(cmd *cobra.Command, args []string) error {
+	// Load configuration from YAML file
+
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+	sslogs.Debug("Loaded configuration", "config", cfg)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
@@ -76,11 +86,11 @@ func runSSLCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check if certificate already exists
-	if !sslForce {
+	if !sslConfig.Force {
 		if exists, err := checkCertificateExists(ctx, serverMgr, serverName); err != nil {
 			return fmt.Errorf("certificate check failed: %w", err)
 		} else if exists {
-			color.Green("✓ SSL certificate already configured for %s", sslDomain)
+			color.Green("✓ SSL certificate already configured for %s", sslConfig.Domain)
 			return nil
 		}
 	}
@@ -137,21 +147,34 @@ func runSSLCommand(cmd *cobra.Command, args []string) error {
 		color.Green("✓ %s completed", step.name)
 	}
 
-	color.Green("\n✅ SSL setup completed successfully for %s", sslDomain)
+	color.Green("\n✅ SSL setup completed successfully for %s", sslConfig.Domain)
+	return nil
+}
+
+func loadSSLConfig() error {
+	data, err := os.ReadFile(sslConfigFile)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	if err := yaml.Unmarshal(data, &sslConfig); err != nil {
+		return fmt.Errorf("failed to parse YAML config: %w", err)
+	}
+
 	return nil
 }
 
 func validateInputs() error {
-	if sslWildcard && sslDNSProvider == "" {
+	if sslConfig.Wildcard && sslConfig.DNSProvider == "" {
 		return fmt.Errorf("DNS provider must be specified for wildcard certificates")
 	}
 
-	if !strings.Contains(sslDomain, ".") {
+	if !strings.Contains(sslConfig.Domain, ".") {
 		return fmt.Errorf("invalid domain format")
 	}
 
 	// Basic email validation
-	if !strings.Contains(sslEmail, "@") {
+	if !strings.Contains(sslConfig.Email, "@") {
 		return fmt.Errorf("invalid email format")
 	}
 
@@ -161,7 +184,7 @@ func validateInputs() error {
 func checkCertificateExists(ctx context.Context, serverMgr *server.ServerStruct, serverName string) (bool, error) {
 	// Check Caddy's certificate storage
 	cmd := fmt.Sprintf("sudo test -f /var/lib/caddy/certificates/acme-v02.api.letsencrypt.org-directory/%s/%s.crt && echo exists",
-		strings.ReplaceAll(sslDomain, "*", "_wildcard"), sslDomain)
+		strings.ReplaceAll(sslConfig.Domain, "*", "_wildcard"), sslConfig.Domain)
 
 	output, err := serverMgr.ExecuteCommand(ctx, serverName, cmd, nil)
 	if err != nil {
@@ -175,7 +198,7 @@ func createWorkingDir(ctx context.Context, serverMgr *server.ServerStruct, serve
 	cmds := []string{
 		fmt.Sprintf("sudo mkdir -p %s", sslMetadataDir),
 		fmt.Sprintf("sudo chown $(whoami): %s", sslMetadataDir),
-		fmt.Sprintf("mkdir -p %s/%s", sslMetadataDir, sslDomain),
+		fmt.Sprintf("mkdir -p %s/%s", sslMetadataDir, sslConfig.Domain),
 	}
 
 	for _, cmd := range cmds {
@@ -188,23 +211,23 @@ func createWorkingDir(ctx context.Context, serverMgr *server.ServerStruct, serve
 
 func removeWorkingDir(ctx context.Context, serverMgr *server.ServerStruct, serverName string) error {
 	_, err := serverMgr.ExecuteCommand(ctx, serverName,
-		fmt.Sprintf("rm -rf %s/%s", sslMetadataDir, sslDomain), nil)
+		fmt.Sprintf("rm -rf %s/%s", sslMetadataDir, sslConfig.Domain), nil)
 	return err
 }
 
 func configureCaddyfile(ctx context.Context, serverMgr *server.ServerStruct, serverName string) error {
 	// Generate Caddyfile configuration
 	config := generateCaddyConfig()
-	tempFile := fmt.Sprintf("%s/%s/Caddyfile", sslMetadataDir, sslDomain)
+	tempFile := fmt.Sprintf("%s/%s/Caddyfile", sslMetadataDir, sslConfig.Domain)
 
 	// Upload temporary config
-	if err := serverMgr.UploadFile(ctx, serverName, tempFile, strings.NewReader(config)); err != nil {
+	if err := serverMgr.UploadFile(ctx, serverName, tempFile, config); err != nil {
 		return fmt.Errorf("failed to upload Caddyfile: %w", err)
 	}
 
 	// Move to final location
 	cmd := fmt.Sprintf("sudo mv %s %s/Caddyfile.%s && sudo chown caddy:caddy %s/Caddyfile.%s",
-		tempFile, caddyConfigDir, sslDomain, caddyConfigDir, sslDomain)
+		tempFile, caddyConfigDir, sslConfig.Domain, caddyConfigDir, sslConfig.Domain)
 
 	if _, err := serverMgr.ExecuteCommand(ctx, serverName, cmd, nil); err != nil {
 		return fmt.Errorf("failed to move Caddyfile: %w", err)
@@ -212,7 +235,7 @@ func configureCaddyfile(ctx context.Context, serverMgr *server.ServerStruct, ser
 
 	// Include in main Caddyfile
 	includeCmd := fmt.Sprintf(`echo "import %s/Caddyfile.%s" | sudo tee -a %s/Caddyfile`,
-		caddyConfigDir, sslDomain, caddyConfigDir)
+		caddyConfigDir, sslConfig.Domain, caddyConfigDir)
 
 	_, err := serverMgr.ExecuteCommand(ctx, serverName, includeCmd, nil)
 	return err
@@ -220,16 +243,16 @@ func configureCaddyfile(ctx context.Context, serverMgr *server.ServerStruct, ser
 
 func generateCaddyConfig() string {
 	acmeServer := "https://acme-v02.api.letsencrypt.org/directory"
-	if sslStaging {
+	if sslConfig.Staging {
 		acmeServer = "https://acme-staging-v02.api.letsencrypt.org/directory"
 	}
 
-	config := fmt.Sprintf("%s {\n", sslDomain)
-	config += fmt.Sprintf("  tls %s {\n", sslEmail)
+	config := fmt.Sprintf("%s {\n", sslConfig.Domain)
+	config += fmt.Sprintf("  tls %s {\n", sslConfig.Email)
 	config += "    protocols tls1.2 tls1.3\n"
 
-	if sslWildcard {
-		config += fmt.Sprintf("    dns %s\n", sslDNSProvider)
+	if sslConfig.Wildcard {
+		config += fmt.Sprintf("    dns %s\n", sslConfig.DNSProvider)
 	} else {
 		config += "    http\n"
 	}
@@ -243,9 +266,9 @@ func generateCaddyConfig() string {
 
 func rollbackCaddyfile(ctx context.Context, serverMgr *server.ServerStruct, serverName string) error {
 	cmds := []string{
-		fmt.Sprintf("sudo rm -f %s/Caddyfile.%s", caddyConfigDir, sslDomain),
+		fmt.Sprintf("sudo rm -f %s/Caddyfile.%s", caddyConfigDir, sslConfig.Domain),
 		fmt.Sprintf(`sudo sed -i '/import %s\/Caddyfile.%s/d' %s/Caddyfile`,
-			caddyConfigDir, sslDomain, caddyConfigDir),
+			caddyConfigDir, sslConfig.Domain, caddyConfigDir),
 	}
 
 	for _, cmd := range cmds {
@@ -264,7 +287,7 @@ func reloadCaddy(ctx context.Context, serverMgr *server.ServerStruct, serverName
 
 func verifyHTTPS(ctx context.Context, serverMgr *server.ServerStruct, serverName string) error {
 	// Simple curl check - could be enhanced with proper TLS verification
-	url := fmt.Sprintf("https://%s", strings.TrimPrefix(sslDomain, "*."))
+	url := fmt.Sprintf("https://%s", strings.TrimPrefix(sslConfig.Domain, "*."))
 	cmd := fmt.Sprintf(`curl -sSI %s | grep -i "HTTP/.*200"`, url)
 
 	_, err := serverMgr.ExecuteCommand(ctx, serverName, cmd, os.Stdout)
@@ -273,12 +296,12 @@ func verifyHTTPS(ctx context.Context, serverMgr *server.ServerStruct, serverName
 
 func saveMetadata(ctx context.Context, serverMgr *server.ServerStruct, serverName string) error {
 	meta := CertificateMetadata{
-		Domain:      sslDomain,
-		Email:       sslEmail,
+		Domain:      sslConfig.Domain,
+		Email:       sslConfig.Email,
 		CreatedAt:   time.Now().Format(time.RFC3339),
-		Wildcard:    sslWildcard,
-		Staging:     sslStaging,
-		DNSProvider: sslDNSProvider,
+		Wildcard:    sslConfig.Wildcard,
+		Staging:     sslConfig.Staging,
+		DNSProvider: sslConfig.DNSProvider,
 	}
 
 	jsonData, err := json.MarshalIndent(meta, "", "  ")
@@ -286,8 +309,8 @@ func saveMetadata(ctx context.Context, serverMgr *server.ServerStruct, serverNam
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	filename := fmt.Sprintf("%s/%s/metadata.json", sslMetadataDir, sslDomain)
-	return serverMgr.UploadFile(ctx, serverName, filename, bytes.NewReader(jsonData))
+	filename := fmt.Sprintf("%s/%s/metadata.json", sslMetadataDir, sslConfig.Domain)
+	return serverMgr.UploadFile(ctx, serverName, filename, string(jsonData))
 }
 
 type CertificateMetadata struct {
