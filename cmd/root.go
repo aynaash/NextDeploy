@@ -14,10 +14,10 @@ import (
 )
 
 var (
-	green   = color.New(color.FgGreen).SprintFunc()
-	yellow  = color.New(color.FgYellow).SprintFunc()
-	red     = color.New(color.FgRed).SprintFunc()
-	bold    = color.New(color.Bold).SprintFunc()
+	green  = color.New(color.FgGreen).SprintFunc()
+	yellow = color.New(color.FgYellow).SprintFunc()
+	red    = color.New(color.FgRed).SprintFunc()
+	bold   = color.New(color.Bold).SprintFunc()
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -80,7 +80,7 @@ func Execute() {
 	fmt.Println(strings.Repeat("─", 60))
 	fmt.Printf("%s %s\n",
 		cyan("Need help?"),
-		yellow("Visit https://nextdeploy.one/doc"),
+		yellow("Visit https://nextdeploy.one/docs"),
 	)
 	fmt.Println(strings.Repeat("─", 60))
 	fmt.Println()

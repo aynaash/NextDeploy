@@ -22,13 +22,10 @@ func FirstNonEmpty(values ...string) string {
 }
 
 func HandleConfigSetup(cmd *cobra.Command, reader *bufio.Reader) error {
-	//FIX: remove all prompts and use default values with NOTE to user to customize the generated file
 	defaultConfig := true
 	plog := logger.PackageLogger("Init", "NextDeploy")
 
 	if defaultConfig {
-		// If default config is requested, just generate the sample and exit
-		//FIX: first check if nextdeploy.yml already exists and validate
 		nextdeploy := nextdeploy.New()
 		configExist, err := nextdeploy.ConfigOkay()
 		if err != nil {

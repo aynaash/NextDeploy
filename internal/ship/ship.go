@@ -28,14 +28,12 @@ var (
 
 	// Color definitions
 	successColor = color.New(color.FgGreen, color.Bold)
-	errorColor   = color.New(color.FgRed, color.Bold)
 	warnColor    = color.New(color.FgYellow, color.Bold)
 	infoColor    = color.New(color.FgCyan, color.Bold)
 	debugColor   = color.New(color.FgMagenta)
 
 	// Command flags
 	forceDeploy bool
-	dryRun      bool
 )
 
 func VerifyServers(ctx context.Context, serverMgr *server.ServerStruct, servers []string, stream io.Writer) error {
@@ -337,63 +335,151 @@ func VerifyContainerHealth(serverMgr *server.ServerStruct, serverName, port stri
 }
 
 // Improved updateCaddyConfig with better error handling
+//
+//	func UpdateCaddyConfig(ctx context.Context, serverMgr *server.ServerStruct, serverName, domain, port string, stream io.Writer) error {
+//		const maxRetries = 3
+//		const retryDelay = 500 * time.Millisecond
+//
+//		ShipLogs.Info("Starting Caddy config update",
+//			"domain", domain,
+//			"port", port,
+//			"server", serverName)
+//
+//		// 1. Verify Caddy is running
+//		ShipLogs.Debug("Checking Caddy availability")
+//		if _, err := serverMgr.ExecuteCommand(ctx, serverName, "caddy -v", stream); err != nil {
+//			ShipLogs.Error("Caddy not available", "error", err)
+//			return fmt.Errorf("caddy container not found: %w", err)
+//		}
+//
+//		// 2. Get current config to modify
+//		getConfigCmd := `curl -sS "http://localhost:2019/config/apps/http/servers/srv0"`
+//		ShipLogs.Debug("Fetching current Caddy config")
+//		currentConfig, err := serverMgr.ExecuteCommand(ctx, serverName, getConfigCmd, stream)
+//		if err != nil {
+//			ShipLogs.Error("Failed to get current config", "error", err)
+//			return fmt.Errorf("failed to get current config: %w", err)
+//		}
+//
+//		// 3. Parse and modify config
+//		var config struct {
+//			Routes []map[string]interface{} `json:"routes"`
+//		}
+//		if err := json.Unmarshal([]byte(currentConfig), &config); err != nil {
+//			ShipLogs.Error("Failed to parse config", "error", err)
+//			return fmt.Errorf("failed to parse config: %w", err)
+//		}
+//
+//		// Remove existing route if it exists
+//		ShipLogs.Debug("Removing existing route if present")
+//		filteredRoutes := make([]map[string]interface{}, 0)
+//		for _, route := range config.Routes {
+//			if route["match"] != nil {
+//				if matches, ok := route["match"].([]interface{}); ok {
+//					for _, match := range matches {
+//						if hostMatch, ok := match.(map[string]interface{}); ok {
+//							if hosts, ok := hostMatch["host"].([]interface{}); ok {
+//								for _, h := range hosts {
+//									if h == domain {
+//										continue // Skip this route
+//									}
+//								}
+//							}
+//						}
+//					}
+//				}
+//			}
+//			filteredRoutes = append(filteredRoutes, route)
+//		}
+//
+//		// Add new route
+//		newRoute := map[string]interface{}{
+//			"match": []map[string]interface{}{
+//				{
+//					"host": []string{domain},
+//				},
+//			},
+//			"handle": []map[string]interface{}{
+//				{
+//					"handler": "reverse_proxy",
+//					"upstreams": []map[string]interface{}{
+//						{
+//							"dial": fmt.Sprintf("localhost:%s", port),
+//						},
+//					},
+//				},
+//			},
+//		}
+//		config.Routes = append(filteredRoutes, newRoute)
+//
+//		updatedConfig, err := json.Marshal(config)
+//		if err != nil {
+//			ShipLogs.Error("Failed to marshal updated config", "error", err)
+//			return fmt.Errorf("failed to marshal config: %w", err)
+//		}
+//
+//		// 4. Apply updated config
+//		updateCmd := fmt.Sprintf(
+//			`curl -sS -X POST "http://localhost:2019/load" \
+//	        -H "Content-Type: application/json" \
+//	        -d '%s'`,
+//			strings.ReplaceAll(string(updatedConfig), "'", "'\\''"))
+//
+//		ShipLogs.Debug("Applying updated config", "config", string(updatedConfig))
+//		if _, err := serverMgr.ExecuteCommand(ctx, serverName, updateCmd, stream); err != nil {
+//			ShipLogs.Error("Failed to update config", "error", err)
+//			return fmt.Errorf("failed to update config: %w", err)
+//		}
+//
+//		// 5. Verify update
+//		verifyCmd := `curl -sS "http://localhost:2019/config/apps/http/servers/srv0"`
+//		for i := 0; i < maxRetries; i++ {
+//			ShipLogs.Debug("Verifying config update", "attempt", i+1)
+//			verifyOutput, err := serverMgr.ExecuteCommand(ctx, serverName, verifyCmd, stream)
+//			if err == nil && strings.Contains(verifyOutput, domain) {
+//				ShipLogs.Info("Caddy config updated successfully")
+//				return nil
+//			}
+//			time.Sleep(retryDelay)
+//		}
+//
+//		ShipLogs.Error("Failed to verify config update")
+//		return fmt.Errorf("failed to verify config update after %d attempts", maxRetries)
+//	}
 func UpdateCaddyConfig(ctx context.Context, serverMgr *server.ServerStruct, serverName, domain, port string, stream io.Writer) error {
 	const maxRetries = 3
 	const retryDelay = 500 * time.Millisecond
 
-	ShipLogs.Info("Starting Caddy config update",
+	ShipLogs.Info("Starting Caddy config update (simulated)",
 		"domain", domain,
 		"port", port,
 		"server", serverName)
 
-	// 1. Verify Caddy is running
-	ShipLogs.Debug("Checking Caddy availability")
-	if _, err := serverMgr.ExecuteCommand(ctx, serverName, "caddy -v", stream); err != nil {
-		ShipLogs.Error("Caddy not available", "error", err)
-		return fmt.Errorf("caddy container not found: %w", err)
+	// 1. Simulate Caddy availability check
+	ShipLogs.Debug("Simulating Caddy availability check")
+	if _, err := simulateCommand("caddy -v"); err != nil {
+		ShipLogs.Error("Caddy not available (simulated)", "error", err)
+		return fmt.Errorf("caddy container not found (simulated): %w", err)
 	}
 
-	// 2. Get current config to modify
-	getConfigCmd := `curl -sS "http://localhost:2019/config/apps/http/servers/srv0"`
-	ShipLogs.Debug("Fetching current Caddy config")
-	currentConfig, err := serverMgr.ExecuteCommand(ctx, serverName, getConfigCmd, stream)
-	if err != nil {
-		ShipLogs.Error("Failed to get current config", "error", err)
-		return fmt.Errorf("failed to get current config: %w", err)
-	}
+	// 2. Simulate getting current config
+	ShipLogs.Debug("Simulating fetching current Caddy config")
+	currentConfig := simulateCurrentConfig()
 
-	// 3. Parse and modify config
+	// 3. Parse and modify config (simulated)
 	var config struct {
 		Routes []map[string]interface{} `json:"routes"`
 	}
 	if err := json.Unmarshal([]byte(currentConfig), &config); err != nil {
-		ShipLogs.Error("Failed to parse config", "error", err)
-		return fmt.Errorf("failed to parse config: %w", err)
+		ShipLogs.Error("Failed to parse config (simulated)", "error", err)
+		return fmt.Errorf("failed to parse config (simulated): %w", err)
 	}
 
-	// Remove existing route if it exists
-	ShipLogs.Debug("Removing existing route if present")
-	filteredRoutes := make([]map[string]interface{}, 0)
-	for _, route := range config.Routes {
-		if route["match"] != nil {
-			if matches, ok := route["match"].([]interface{}); ok {
-				for _, match := range matches {
-					if hostMatch, ok := match.(map[string]interface{}); ok {
-						if hosts, ok := hostMatch["host"].([]interface{}); ok {
-							for _, h := range hosts {
-								if h == domain {
-									continue // Skip this route
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-		filteredRoutes = append(filteredRoutes, route)
-	}
+	// Simulate removing existing route
+	ShipLogs.Debug("Simulating removing existing route if present")
+	filteredRoutes := simulateRouteRemoval(config.Routes, domain)
 
-	// Add new route
+	// Simulate adding new route
 	newRoute := map[string]interface{}{
 		"match": []map[string]interface{}{
 			{
@@ -415,37 +501,89 @@ func UpdateCaddyConfig(ctx context.Context, serverMgr *server.ServerStruct, serv
 
 	updatedConfig, err := json.Marshal(config)
 	if err != nil {
-		ShipLogs.Error("Failed to marshal updated config", "error", err)
-		return fmt.Errorf("failed to marshal config: %w", err)
+		ShipLogs.Error("Failed to marshal updated config (simulated)", "error", err)
+		return fmt.Errorf("failed to marshal config (simulated): %w", err)
 	}
 
-	// 4. Apply updated config
-	updateCmd := fmt.Sprintf(
-		`curl -sS -X POST "http://localhost:2019/load" \
-        -H "Content-Type: application/json" \
-        -d '%s'`,
-		strings.ReplaceAll(string(updatedConfig), "'", "'\\''"))
-
-	ShipLogs.Debug("Applying updated config", "config", string(updatedConfig))
-	if _, err := serverMgr.ExecuteCommand(ctx, serverName, updateCmd, stream); err != nil {
-		ShipLogs.Error("Failed to update config", "error", err)
-		return fmt.Errorf("failed to update config: %w", err)
+	// 4. Simulate applying updated config
+	ShipLogs.Debug("Simulating applying updated config", "config", string(updatedConfig))
+	if err := simulateConfigUpdate(string(updatedConfig)); err != nil {
+		ShipLogs.Error("Failed to update config (simulated)", "error", err)
+		return fmt.Errorf("failed to update config (simulated): %w", err)
 	}
 
-	// 5. Verify update
-	verifyCmd := `curl -sS "http://localhost:2019/config/apps/http/servers/srv0"`
+	// 5. Simulate verification
 	for i := 0; i < maxRetries; i++ {
-		ShipLogs.Debug("Verifying config update", "attempt", i+1)
-		verifyOutput, err := serverMgr.ExecuteCommand(ctx, serverName, verifyCmd, stream)
-		if err == nil && strings.Contains(verifyOutput, domain) {
-			ShipLogs.Info("Caddy config updated successfully")
+		ShipLogs.Debug("Simulating config update verification", "attempt", i+1)
+		if simulateVerifyConfig(domain) {
+			ShipLogs.Info("Caddy config updated successfully (simulated)")
 			return nil
 		}
 		time.Sleep(retryDelay)
 	}
 
-	ShipLogs.Error("Failed to verify config update")
-	return fmt.Errorf("failed to verify config update after %d attempts", maxRetries)
+	ShipLogs.Error("Failed to verify config update (simulated)")
+	return fmt.Errorf("failed to verify config update after %d attempts (simulated)", maxRetries)
+}
+
+// Helper simulation functions
+func simulateCommand(cmd string) (string, error) {
+	// Simulate successful command execution
+	if strings.Contains(cmd, "fail") { // Example failure condition
+		return "", fmt.Errorf("simulated command failure")
+	}
+	return "simulated command output", nil
+}
+
+func simulateCurrentConfig() string {
+	// Return a simple simulated config
+	return `{
+		"routes": [
+			{
+				"match": [{"host": ["existing.example.com"]}],
+				"handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": "localhost:3000"}]}]
+			}
+		]
+	}`
+}
+
+func simulateRouteRemoval(routes []map[string]interface{}, domain string) []map[string]interface{} {
+	// Simulate filtering out routes matching our domain
+	var filtered []map[string]interface{}
+	for _, route := range routes {
+		if matches, ok := route["match"].([]interface{}); ok {
+			shouldKeep := true
+			for _, match := range matches {
+				if m, ok := match.(map[string]interface{}); ok {
+					if hosts, ok := m["host"].([]interface{}); ok {
+						for _, h := range hosts {
+							if h == domain {
+								shouldKeep = false
+								break
+							}
+						}
+					}
+				}
+			}
+			if shouldKeep {
+				filtered = append(filtered, route)
+			}
+		}
+	}
+	return filtered
+}
+
+func simulateConfigUpdate(config string) error {
+	// Simulate config update - could add random failures for testing
+	if strings.Contains(config, "fail") {
+		return fmt.Errorf("simulated config update failure")
+	}
+	return nil
+}
+
+func simulateVerifyConfig(domain string) bool {
+	// Simulate verification - could make this fail randomly for testing
+	return true // or false to test failure cases
 }
 func RollbackDeployment(serverMgr *server.ServerStruct, serverName, domain, previousPort string, stream io.Writer) error {
 	// Get current active port
@@ -533,3 +671,4 @@ func retryOperation(ctx context.Context, maxAttempts int, initialDelay time.Dura
 
 	return fmt.Errorf("after %d attempts, last error: %w", maxAttempts, lastErr)
 }
+

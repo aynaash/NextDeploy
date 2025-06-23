@@ -352,6 +352,7 @@ func (dm *DockerManager) BuildImage(ctx context.Context, dir string, opts BuildO
 
 // PushImage pushes a Docker image to registry
 func (dm *DockerManager) PushImage(ctx context.Context, imageName string) error {
+	//TODO: add logic for image push to variaty of registries
 	if err := dm.ValidateImageName(imageName); err != nil {
 		dlog.Error("Invalid image name: %v", err)
 		return fmt.Errorf("invalid image name: %w", err)
@@ -508,14 +509,53 @@ func createDockerignore() error {
 		".DS_Store",
 		"Thumbs.db",
 	}
+
 	// Check if file already exists
 	if _, err := os.Stat(".dockerignore"); err == nil {
-		// File exists, don't overwrite unless forced
-		if !forceOverwrite && !skipPrompts {
-			return fmt.Errorf(".dockerignore already exists (use --force to overwrite)")
+		// Read existing content
+		existingContent, err := os.ReadFile(".dockerignore")
+		if err != nil {
+			return fmt.Errorf("failed to read existing .dockerignore: %w", err)
 		}
+
+		// Split existing content into lines
+		existingLines := strings.Split(string(existingContent), "\n")
+
+		// Create a map for existing patterns for quick lookup
+		existingPatterns := make(map[string]bool)
+		for _, line := range existingLines {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				existingPatterns[line] = true
+			}
+		}
+
+		// Add only new patterns that don't exist already
+		var newPatterns []string
+		for _, line := range patterns {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				newPatterns = append(newPatterns, line)
+			} else if !existingPatterns[line] {
+				newPatterns = append(newPatterns, line)
+			}
+		}
+
+		// Combine existing content with new patterns
+		content := string(existingContent)
+		if len(content) > 0 && !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		content += strings.Join(newPatterns, "\n")
+
+		// Write the merged file
+		if err := os.WriteFile(".dockerignore", []byte(content), 0644); err != nil {
+			return fmt.Errorf("failed to write .dockerignore: %w", err)
+		}
+		return nil
 	}
-	// Write the file
+
+	// Write the file if it doesn't exist
 	content := strings.Join(patterns, "\n")
 	if err := os.WriteFile(".dockerignore", []byte(content), 0644); err != nil {
 		return fmt.Errorf("failed to write .dockerignore: %w", err)

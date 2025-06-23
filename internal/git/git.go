@@ -8,6 +8,32 @@ import (
 	"strings"
 )
 
+type RepositoryInfo struct {
+	CommitHash string
+	BranchName string
+	IsDirty    bool
+}
+
+func GetRepositoryInfo() (*RepositoryInfo, error) {
+	hash, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
+	if err != nil {
+		return nil, err
+	}
+
+	branch, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		return nil, err
+	}
+
+	dirty, _ := exec.Command("git", "status", "--porcelain").Output()
+
+	return &RepositoryInfo{
+		CommitHash: strings.TrimSpace(string(hash)),
+		BranchName: strings.TrimSpace(string(branch)),
+		IsDirty:    len(strings.TrimSpace(string(dirty))) > 0,
+	}, nil
+}
+
 // GetCurrentBranch returns the name of the current Git branch in the working directory.
 // Returns an error if the directory is not a Git repository or if the command fails.
 func GetCurrentBranch() (string, error) {

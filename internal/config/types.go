@@ -22,6 +22,21 @@ type NextDeployConfig struct {
 	Webhooks    []Webhook      `yaml:"webhooks,omitempty"`
 	Environment []EnvVariable  `yaml:"environment,omitempty"`
 	Servers     []ServerConfig `yaml:"servers"`
+	SSLConfig   *SSLConfig     `yaml:"ssl_config,omitempty"`
+}
+type SSLConfig struct {
+	Domain      string `yaml:"domain"`
+	Email       string `yaml:"email"`
+	Staging     bool   `yaml:"staging"`
+	Wildcard    bool   `yaml:"wildcard"`
+	DNSProvider string `yaml:"dns_provider"`
+	Force       bool   `yaml:"force"`
+	SSL         struct {
+		Enabled   bool   `yaml:"enabled"`
+		Provider  string `yaml:"provider"`
+		Email     string `yaml:"email"`
+		AutoRenew bool   `yaml:"auto_renew"`
+	} `yaml:"ssl"`
 }
 
 type ServerConfig struct {
@@ -54,12 +69,20 @@ type Repository struct {
 
 // DockerConfig contains containerization settings
 type DockerConfig struct {
-	Image    string      `yaml:"image"`
-	Registry string      `yaml:"registry,omitempty"`
-	Build    DockerBuild `yaml:"build"`
-	Push     bool        `yaml:"push"`
-	Username string      `yaml:"username,omitempty"`
-	Password string      `yaml:"password,omitempty"`
+	Image        string      `yaml:"image"`
+	Registry     string      `yaml:"registry,omitempty"`
+	Build        DockerBuild `yaml:"build"`
+	Push         bool        `yaml:"push"`
+	Username     string      `yaml:"username,omitempty"`
+	Password     string      `yaml:"password,omitempty"`
+	AlwaysPull   bool        `yaml:"alwaysPull,omitempty"`
+	Strategy     string      `yaml:"strategy,omitempty"` // e.g., "branch-commit", "timestamp"
+	AutoPush     bool        `yaml:"autoPush,omitempty"` // Automatically push after build
+	BuildArgs    []string    `yaml:"buildArgs,omitempty"`
+	Platform     string      `yaml:"platform,omitempty"`     // e.g., "linux/amd64"
+	NoCache      bool        `yaml:"noCache,omitempty"`      // Disable cache for BuildArg
+	BuildContext string      `yaml:"buildContext,omitempty"` // Context for Docker build
+	Target       string      `yaml:"target,omitempty"`       // Dockerfile target stage
 }
 
 // DockerBuild contains Docker build parameters
@@ -182,11 +205,16 @@ type Storage struct {
 
 // SSL contains certificate management
 type SSL struct {
-	Enabled   bool     `yaml:"enabled"`
-	Provider  string   `yaml:"provider"`
-	Domains   []string `yaml:"domains"`
-	Email     string   `yaml:"email"`
-	AutoRenew bool     `yaml:"autoRenew"`
+	Enabled     bool     `yaml:"enabled"`
+	Provider    string   `yaml:"provider"`
+	Domains     []string `yaml:"domains"`
+	Email       string   `yaml:"email"`
+	Wildcard    bool     `yaml:"wildcard"`
+	DNSProvider string   `yaml:"dns_provider"`
+	Staging     bool     `yaml:"staging"`
+	Force       bool     `yaml:"force"`
+	AutoRenew   bool     `yaml:"auto_renew"`
+	Domain      string   `yaml:"domain,omitempty"`
 }
 
 // Webhook defines deployment webhooks

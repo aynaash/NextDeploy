@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/spf13/cobra"
-	"nextdeploy/internal/docker"
 	"nextdeploy/internal/config"
+	"nextdeploy/internal/docker"
 	"nextdeploy/internal/logger"
 	"os"
 )
@@ -13,7 +13,7 @@ import (
 func RunInitCommand(cmd *cobra.Command, args []string) error {
 	dm := docker.NewDockerManager(true, nil)
 	reader := bufio.NewReader(os.Stdin)
-	log := logger.DefaultLogger()
+	log := logger.PackageLogger("Initialization", "Initialization")
 
 	//	cmd.Println("🚀 NextDeploy Initialization")
 	log.Info("🚀 NextDeploy Initialization")

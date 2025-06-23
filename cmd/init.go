@@ -14,13 +14,6 @@ func (pm PackageManager) String() string {
 	return string(pm)
 }
 
-var (
-	forceOverwrite bool
-	skipPrompts    bool
-	defaultConfig  bool
-	devConfig      bool
-)
-
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize Next.js deployment configuration",
@@ -33,14 +26,5 @@ var initCmd = &cobra.Command{
 }
 
 func init() {
-	initCmd.Flags().BoolVarP(&forceOverwrite, "force", "f", false,
-		"Overwrite existing files without prompting")
-	initCmd.Flags().BoolVarP(&skipPrompts, "yes", "y", false,
-		"Skip all prompts and generate sample configuration file:Make sure to add the actual values")
-	initCmd.Flags().BoolVar(&defaultConfig, "default-config", false,
-		"Generate with default configuration only")
-	initCmd.Flags().BoolVar(&devConfig, "y", true,
-		"Generate with sample data and edit in the yaml file")
-
 	rootCmd.AddCommand(initCmd)
 }

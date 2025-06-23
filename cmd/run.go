@@ -31,8 +31,6 @@ and runs the Docker container with environment variables from Doppler.`,
 }
 
 func init() {
-	runimageCmd.Flags().StringVarP(&configFile, "config", "c", "config.yaml", "Path to YAML config file")
-	runimageCmd.Flags().StringVarP(&tag, "tag", "t", "", "Custom tag for the Docker image")
 	rootCmd.AddCommand(runimageCmd)
 }
 
@@ -44,14 +42,10 @@ func runImage() {
 		os.Exit(1)
 	}
 
-	// Get tag (from flag or git)
-	imageTag := tag
-	if imageTag == "" {
-		imageTag, err = git.GetCommitHash()
-		if err != nil {
-			fmt.Printf("Error getting git commit hash: %v\n", err)
-			os.Exit(1)
-		}
+	imageTag, err := git.GetCommitHash()
+	if err != nil {
+		fmt.Printf("Error getting git commit hash: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Download Doppler secrets

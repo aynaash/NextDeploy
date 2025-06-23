@@ -3,12 +3,13 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"nextdeploy/internal/build"
 	"nextdeploy/internal/config"
 	"nextdeploy/internal/docker"
 	"nextdeploy/internal/git"
 	"nextdeploy/internal/logger"
-	"nextdeploy/internal/registry"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -16,198 +17,162 @@ import (
 var (
 	buildlogger = logger.PackageLogger("BUILD", "🧱 BUILD")
 )
-var (
-	imageName    string
-	noCache      bool
-	pull         bool
-	tag          string
-	target       string
-	platform     string
-	buildArgs    []string
-	nameStrategy string
-	useTimestamp bool
-	branchName   string
-	registryname string
-)
 
 var buildCmd = &cobra.Command{
 	Use:   "build",
 	Short: "Build Docker image from the Dockerfile",
-	Long: `Builds a Docker image based on the provided Dockerfile in the current directory.
-	Build Docker image with flexible naming strategies.
+	Long: `Builds a Docker image with smart defaults and configuration.
+
+The command automatically:
+- Detects your Git repository state
+- Uses appropriate naming conventions
+- Applies environment-specific settings
+- Handles caching appropriately
+
+Configuration:
+  Create a 'nextdeploy.yml' file to customize behavior:
+
+  docker:
+    image: "my-app"             # Base image name
+    registry: "ghcr.io/myorg"   # Container registry
+    strategy: "branch-commit"   # Naming strategy
+    alwaysPull: true            # Always pull base images
+    platform: "linux/amd64"     # Target platform
 
 Examples:
-  # Build with default naming (commit hash + timestamp)
+  # Basic build (auto-detects everything)
   nextdeploy build
 
-  # Build for specific branch with commit hash
-  nextdeploy build --name-strategy branch-commit
+  # Build for production (uses different defaults)
+  NEXTDEPLOY_ENV=production nextdeploy build
 
-  # Build with custom registry and simple 'latest' tag
-  nextdeploy build --registry docker.io/myorg --name-strategy simple
-
-  # Build with specific branch name override
-  nextdeploy build --name-strategy branch-commit --branch feat/new-auth
-
-  # Build with all custom options
-  nextdeploy build \
-    --image customer-portal \
-    --registry ghcr.io/mycompany \
-    --name-strategy branch-commit \
-    --branch main \
-    --no-cache \
-    --pull
-
-  # Build with semantic version tag (if implemented)
-  nextdeploy build --name-strategy semver --tag v1.2.3`,
-	PreRunE: checkBuildCondtionsmet,
+`,
+	PreRunE: checkBuildConditionsMet,
 	RunE:    buildCmdFunction,
 }
 
+type DockerConfig struct {
+	Image    string
+	Registry string
+	Strategy string // "commit-hash", "branch-commit", or "simple"
+}
+
+func GenerateImageName(config DockerConfig, gitInfo *git.RepositoryInfo, env string) string {
+	// Start with registry if provided
+	var parts []string
+	if config.Registry != "" {
+		parts = append(parts, config.Registry)
+	}
+
+	// Add image name or default
+	imageName := config.Image
+	if imageName == "" {
+		imageName = "app"
+	}
+	parts = append(parts, imageName)
+
+	// Generate tag based on strategy
+	tag := ""
+	switch config.Strategy {
+	case "branch-commit":
+		sanitizedBranch := strings.ReplaceAll(gitInfo.BranchName, "/", "-")
+		tag = fmt.Sprintf("%s-%s", sanitizedBranch, gitInfo.CommitHash)
+	case "simple":
+		tag = "latest"
+	default: // "commit-hash" or fallback
+		tag = gitInfo.CommitHash
+	}
+
+	// Add timestamp for production builds
+	if env == "production" {
+		tag = fmt.Sprintf("%s-%s", tag, time.Now().Format("20060102-150405"))
+	}
+
+	// Append tag
+	if tag != "" {
+		parts = append(parts, tag)
+	}
+
+	return strings.Join(parts, ":")
+}
+
 func init() {
-	// Image Configuration Flags
-	buildCmd.Flags().StringVarP(&imageName, "image", "i", "nextjs-app",
-		`Base name for the Docker image (without registry)
-Examples:
-  - "user-service"
-  - "frontend-app"
-  - "api-gateway"`)
-
-	buildCmd.Flags().StringVarP(&registryname, "registry", "r", "",
-		`Container registry URL where the image will be pushed
-Examples:
-  - "docker.io/myorg" (Docker Hub)
-  - "ghcr.io/company" (GitHub Container Registry)
-  - "123456789012.dkr.ecr.region.amazonaws.com" (AWS ECR)
-  - "localhost:5000" (Local registry)`)
-
-	buildCmd.Flags().StringVarP(&tag, "tag", "t", "",
-		`Tag for the Docker image (auto-generated if empty)
-Default behavior:
-  - Uses Git commit hash (short format)
-  - Appends timestamp if --timestamp=true
-Examples:
-  - "v1.2.3" (semantic version)
-  - "prod-20240101" (environment-date)
-  - "feature-auth-abc123" (branch-commit)`)
-
-	// Naming Strategy Flags
-	buildCmd.Flags().StringVar(&nameStrategy, "name-strategy", "commit-hash",
-		`Image tagging strategy:
-  commit-hash   : Uses Git commit hash (default)
-  branch-commit : Includes branch name and commit hash
-  semver        : For semantic versioning (requires --tag)
-  simple        : Uses static "latest" tag
-Examples:
-  - "--name-strategy branch-commit"
-  - "--name-strategy simple"`)
-
-	buildCmd.Flags().BoolVar(&useTimestamp, "timestamp", true,
-		`Append timestamp to auto-generated tags
-Format: YYYYMMDD-HHMMSS
-Examples:
-  - "main-abc123-20240101-142536"
-  - "feat-auth-def456-20240101"`)
-
-	buildCmd.Flags().StringVar(&branchName, "branch", "",
-		`Override current Git branch name for tagging
-Note: Automatically sanitized (special chars replaced with '-')
-Examples:
-  - "--branch release/v1.2.0" becomes "release-v1.2.0"
-  - "--branch feat/new-auth"`)
-
-	// Build Optimization Flags
-	buildCmd.Flags().BoolVar(&noCache, "no-cache", false,
-		`Force a clean build by disabling cache
-Use cases:
-  - When dependency versions have changed
-  - For production builds where reproducibility is critical`)
-
-	buildCmd.Flags().BoolVar(&pull, "pull", false,
-		`Always attempt to pull newer base images
-Recommended for:
-  - CI/CD pipelines
-  - Ensuring latest security updates`)
-
-	// Advanced Build Flags
-	buildCmd.Flags().StringVar(&target, "target", "",
-		`Build specific stage from multi-stage Dockerfile
-Examples:
-  - "--target builder"
-  - "--target production"`)
-
-	buildCmd.Flags().StringVar(&platform, "platform", "",
-		`Set target platform for multi-architecture builds
-Format: os/arch[/variant]
-Examples:
-  - "--platform linux/amd64"
-  - "--platform linux/arm64"
-  - "--platform windows/amd64"`)
-
-	buildCmd.Flags().StringArrayVar(&buildArgs, "build-arg", []string{},
-		`Set build-time variables (can be repeated)
-Format: KEY=VALUE
-Examples:
-  - "--build-arg VERSION=1.2.3"
-  - "--build-arg ENV=production"
-  - "--build-arg NODE_ENV=production"`)
-
+	// No flags needed - everything comes from config or auto-detection
 	rootCmd.AddCommand(buildCmd)
 }
 
 func buildCmdFunction(cmd *cobra.Command, args []string) error {
-	dm := docker.NewDockerManager(true, nil)
-	imageName := build.ConstructImageName(tag)
-
-	// Construct image name using builder pattern
-	// builder := build.NewImageNameBuilder(imageName).
-	// 	WithTag(tag).
-	// 	WithNameStrategy(nameStrategy).
-	// 	WithTimestamp(useTimestamp).
-	// 	WithBranch(branchName)
-	//
-	// fullImage, err := builder.Build()
-	// if err != nil {
-	// 	return fmt.Errorf("failed to construct image name: %w", err)
-	// }
-
-	cmd.Printf("Building image: %s\n", imageName)
-
-	// Prepare build options
-	opts := docker.BuildOptions{
-		ImageName: imageName,
-		NoCache:   noCache,
-		Pull:      pull,
-		Target:    target,
-		Platform:  platform,
-		BuildArgs: buildArgs,
-	}
-
-	// Execute build with context
-	ctx := context.Background()
-	if err := dm.BuildImage(ctx, ".", opts); err != nil {
-		buildlogger.Error("Failed to build image: %v", err)
-		return fmt.Errorf("build failed: %w", err)
-	}
-
-	cmd.Printf("Successfully built image: %s\n", imageName)
-	// push image if push it set to true
-	config, err := config.Load()
+	// Load configuration
+	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	push := config.Docker.Push
-	if !push {
-		cmd.Printf("Skipping image push as 'push' is set to false in configuration\n")
-		return nil
+	// Initialize components
+	dm := docker.NewDockerManager(true, nil)
+	gitInfo, err := git.GetRepositoryInfo()
+	// Log out the repository info
+	//TODO: Add small logic for printing out information in a nice formatedd way
+	buildlogger.Info("Repository Info: %v", gitInfo)
+	if err != nil {
+		return fmt.Errorf("failed to get git info: %w", err)
 	}
-	err = dm.PushImage(ctx, imageName)
+
+	// Determine environment (dev/prod)
+	env := os.Getenv("NODE_ENV")
+	if env == "" {
+		env = "development"
+	}
+	var builArgs []string
+	for k, v := range cfg.Docker.BuildArgs {
+		builArgs = append(builArgs, fmt.Sprintln("--build-arg=%s=%s", k, v))
+	}
+
+	// Logout the git info and env
+	buildlogger.Info("Git Info: %s, Branch: %s, Dirty: %t", gitInfo.CommitHash, gitInfo.BranchName, gitInfo.IsDirty)
+
+	//imagename := GenerateImageName(cfg.Docker, gitInfo, env)
+	imagename := cfg.Docker.Image + ":" + gitInfo.CommitHash
+	// Auto-configure build options based on environment
+	opts := docker.BuildOptions{
+		ImageName: imagename,
+		NoCache:   env == "production", // No cache in production
+		Pull:      cfg.Docker.AlwaysPull || env == "production",
+		Target:    cfg.Docker.Target,
+		Platform:  cfg.Docker.Platform,
+		BuildArgs: cfg.Docker.BuildArgs,
+	}
+
+	// Build options for image are
+	buildlogger.Debug("Build Options: %v", opts)
+	// Log what we're doing
+	cmd.Printf("Building %s image for %s environment\n", opts.ImageName, env)
+	if opts.NoCache {
+		cmd.Println("Cache disabled (production build)")
+	}
+
+	// Execute build
+	ctx := context.Background()
+	if err := dm.BuildImage(ctx, ".", opts); err != nil {
+		buildlogger.Error("Build failed: %v", err)
+		return fmt.Errorf("build failed: %w", err)
+	}
+
+	cmd.Printf("Successfully built: %s\n", opts.ImageName)
+
+	// Handle push if configured
+	if cfg.Docker.Push {
+		cmd.Println("Pushing image to registry...")
+		if err := dm.PushImage(ctx, opts.ImageName); err != nil {
+			return fmt.Errorf("push failed: %w", err)
+		}
+		cmd.Println("Image pushed successfully")
+	}
+
 	return nil
 }
 
-// Function to check all build condtions are met before building
-func checkBuildCondtionsmet(cmd *cobra.Command, args []string) error {
+func checkBuildConditionsMet(cmd *cobra.Command, args []string) error {
 	dm := docker.NewDockerManager(true, nil)
 
 	// Validate Docker installation
@@ -216,38 +181,15 @@ func checkBuildCondtionsmet(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check for Dockerfile
-	exists, err := dm.DockerfileExists(".")
-	if err != nil {
+	if exists, err := dm.DockerfileExists("."); err != nil {
 		return fmt.Errorf("failed to check for Dockerfile: %w", err)
-	}
-	if !exists {
-		return fmt.Errorf("dockerfile not found in current directory")
-	}
-	validatorRegistry, err := registry.New()
-
-	if err != nil {
-		return fmt.Errorf("failed to initialize registry validator: %w", err)
+	} else if !exists {
+		return fmt.Errorf("no Dockerfile found in current directory")
 	}
 
-	// Validate registry if provided
-	isvalidRegistry := validatorRegistry.IsValidRegistry(registryname)
-	if registryname != "" && !isvalidRegistry {
-		return fmt.Errorf("invalid registry format: %s", registryname)
-	}
-
-	// Set default tag from Git if not provided
-	if tag == "" {
-		hash, err := git.GetCommitHash()
-		if err != nil {
-			return fmt.Errorf("failed to get git commit hash: %w", err)
-		}
-		tag = hash
-		cmd.Printf("Using Git commit hash as tag: %s\n", tag)
-	}
-
-	// Warn about uncommitted changes
+	// Check for uncommitted changes (warning only)
 	if git.IsDirty() {
-		cmd.Printf("Warning: Uncommitted changes present in working directory.Please commit the changes to build latest version of app\n")
+		cmd.Printf("Warning: Building with uncommitted changes\n")
 	}
 
 	return nil
