@@ -6,6 +6,7 @@ import (
 	"nextdeploy/internal/git"
 	"nextdeploy/internal/logger"
 	"nextdeploy/internal/nextdeploy"
+	"nextdeploy/internal/secrets"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,8 +17,7 @@ type Config struct {
 }
 
 var (
-	runLogger  = logger.PackageLogger("RunImage", "🚀 Run Image")
-	configFile string
+	runLogger = logger.PackageLogger("RunImage", "🚀 Run Image")
 )
 
 var runimageCmd = &cobra.Command{
@@ -47,13 +47,46 @@ func runImage() {
 		fmt.Printf("Error getting git commit hash: %v\n", err)
 		os.Exit(1)
 	}
-
-	// Download Doppler secrets
-	err = downloadDopplerSecrets()
+	sm := secrets.NewSecretManager()
+	if sm.IsDopplerEnabled() {
+		// TODO: integrate a nicer doppler secret management logic
+		runLogger.Info("Doppler is enabled, downloading secrets...")
+		err = downloadDopplerSecrets()
+		if err != nil {
+			fmt.Printf("Error downloading Doppler secrets: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		runLogger.Warn("Doppler is not enabled, skipping secrets download.")
+	}
+	// log out the current working directory
+	//FIX: remove this piece of code later
+	key := "b05cc8ce133628e0bacd7dc5852d16078f464785a428d65de180e0309bbe27ca"
+	// FIX: remove logic below later
+	// log out the content of the nextdeploy.yml file
+	err = sm.EncryptFile("nextdeploy.yml", []byte(key))
 	if err != nil {
-		fmt.Printf("Error downloading Doppler secrets: %v\n", err)
+		runLogger.Debug("Error encrypting content")
+	}
+
+	// log out the encoded content
+
+	runLogger.Debug("The generated master looks this:%s", key)
+	cwd, err := sm.PrepareAppContext()
+	if err != nil {
+		runLogger.Error("Error preparing app run context")
+	}
+
+	// the cwd is the current working directory
+	runLogger.Debug("Current working directory: %s", cwd)
+	configFile, err := sm.ProcessConfigFile(cwd, key)
+	runLogger.Debug("The config fil decrypted looks like this:", configFile)
+	runLogger.Debug("Current working directory: %s", cwd)
+	if err != nil {
+		fmt.Printf("Error preparing app context: %v\n", err)
 		os.Exit(1)
 	}
+	// Load secrets
 
 	// Run Docker container
 	fullImage := fmt.Sprintf("%s:%s", config.Docker.Image, imageTag)

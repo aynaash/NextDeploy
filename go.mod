@@ -12,13 +12,16 @@ require (
 )
 
 require (
+	al.essio.dev/pkg/shellescape v1.5.1 // indirect
 	github.com/bep/clocks v0.5.0 // indirect
 	github.com/bep/godartsass/v2 v2.5.0 // indirect
 	github.com/bep/golibsass v1.2.0 // indirect
 	github.com/bep/logg v0.4.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/clbanning/mxj/v2 v2.7.0 // indirect
+	github.com/danieljoos/wincred v1.2.2 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
+	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/gohugoio/hashstructure v0.5.0 // indirect
 	github.com/gohugoio/hugo v0.147.8 // indirect
 	github.com/gohugoio/locales v0.14.0 // indirect
@@ -39,6 +42,7 @@ require (
 	github.com/spf13/cast v1.8.0 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/tdewolff/parse/v2 v2.8.1 // indirect
+	github.com/zalando/go-keyring v0.2.6 // indirect
 	golang.org/x/crypto v0.38.0 // indirect
 	golang.org/x/exp v0.0.0-20221031165847-c99f073a8326 // indirect
 	golang.org/x/net v0.40.0 // indirect

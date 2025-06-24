@@ -40,14 +40,14 @@ type SSLConfig struct {
 }
 
 type ServerConfig struct {
-	Name          string `yaml:"name"` // or json/xml depending on your config format
+	Name          string `yaml:"name"`
 	Host          string `yaml:"host"`
-	Port          int    `yaml:"port"` // default 22
+	Port          int    `yaml:"port"`
 	Username      string `yaml:"username"`
-	Password      string `yaml:"password"`                 // Consider using SSH keys instead
-	KeyPath       string `yaml:"key_path"`                 // Path to private key
-	SSHKey        string `yaml:"ssh_key,omitempty"`        // Optional SSH key for authentication
-	KeyPassphrase string `yaml:"key_passphrase,omitempty"` // Optional passphrase for SSH key
+	Password      string `yaml:"password"`
+	KeyPath       string `yaml:"key_path"`
+	SSHKey        string `yaml:"ssh_key,omitempty"`
+	KeyPassphrase string `yaml:"key_passphrase,omitempty"`
 }
 
 // AppConfig contains application-specific settings
@@ -76,13 +76,13 @@ type DockerConfig struct {
 	Username     string      `yaml:"username,omitempty"`
 	Password     string      `yaml:"password,omitempty"`
 	AlwaysPull   bool        `yaml:"alwaysPull,omitempty"`
-	Strategy     string      `yaml:"strategy,omitempty"` // e.g., "branch-commit", "timestamp"
-	AutoPush     bool        `yaml:"autoPush,omitempty"` // Automatically push after build
+	Strategy     string      `yaml:"strategy,omitempty"`
+	AutoPush     bool        `yaml:"autoPush,omitempty"`
 	BuildArgs    []string    `yaml:"buildArgs,omitempty"`
-	Platform     string      `yaml:"platform,omitempty"`     // e.g., "linux/amd64"
-	NoCache      bool        `yaml:"noCache,omitempty"`      // Disable cache for BuildArg
-	BuildContext string      `yaml:"buildContext,omitempty"` // Context for Docker build
-	Target       string      `yaml:"target,omitempty"`       // Dockerfile target stage
+	Platform     string      `yaml:"platform,omitempty"`
+	NoCache      bool        `yaml:"noCache,omitempty"`
+	BuildContext string      `yaml:"buildContext,omitempty"`
+	Target       string      `yaml:"target,omitempty"`
 }
 
 // DockerBuild contains Docker build parameters

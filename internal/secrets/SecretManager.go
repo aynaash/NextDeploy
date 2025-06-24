@@ -1,529 +1,829 @@
 package secrets
 
+// TODO: 🔥 Refactor into smaller packages: keymgmt, store, envcrypto, providers, migration.
+// TODO: ✅ Inject interfaces for crypto engine and persistence (CryptoEngine, SecretStore).
+// TODO: 🚨 Harden key management — avoid generating new keys per call, introduce key rotation policy.
+// TODO: 🔐 Secure memory wiping for keys/secrets after usage (as much as Go allows).
+// TODO: ⚙️ Write comprehensive unit tests with mocks for all interfaces.
+// // TODO: 🌐 Add remote sync option — replicate secrets to remote backup or vault.
+// TODO: 📄 Add support for secret expiration + auto-purge.
+// TODO: 🧠 Integrate memory-based secret leases (e.g., valid for N mins).
+// TODO: 🧪 Add CLI and test suite with full e2e coverage for: encrypt → store → rotate → export.
+
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/zalando/go-keyring"
+	"golang.org/x/crypto/hkdf"
+	"io"
+	"nextdeploy/internal/config"
+
+	"nextdeploy/internal/logger"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
-
-	"gopkg.in/yaml.v3"
+	"sync"
+	"time"
 )
 
-type (
-	SecretManager interface {
-		GetSecret(path string) (string, error)
-		UpdateSecret(path, value string, encrypt bool) error
-		DeleteSecret(path string) error
-		EncryptValue(value string) (string, error)
-		DecryptValue(encryptedValue string) (string, error)
-		ListSecrets() ([]string, error)
-		LoadConfig() (*Config, error)
-		StoreToken(name, value string) error
-		GetToken(name string) (string, error)
-		SyncWithDoppler() error
-	}
-
-	DopplerManager interface {
-		GetSecret(path string) (string, error)
-		VerifySecrets(config *Config) error
-		UpdateSecret(path, value string, encrypt bool) error
-		PushSecrets(config *Config) error
-	}
-
-	Logger interface {
-		Debug(msg string, args ...interface{})
-		Info(msg string, args ...interface{})
-		Error(msg string, args ...interface{})
-	}
+var (
+	ErrInvalidSecretFormat   = errors.New("invalid secret format")
+	ErrUnsupportedPlatform   = errors.New("unsupported platform")
+	ErrKeyGenerationFailed   = errors.New("key generation failed")
+	ErrSecretAlreadyExists   = errors.New("secret already exists")
+	ErrPermissionDenied      = errors.New("permission denied")
+	ErrInvalidProvider       = errors.New("invalid secret provider")
+	ErrProviderNotConfigured = errors.New("provider not configured")
 )
 
-type secretsManager struct {
-	configPath string
-	masterKey  []byte
-	config     *Config
-	doppler    DopplerManager
-	logger     Logger
+var (
+	SLogs = logger.PackageLogger("Secrets", "🔐 Secrets Manager")
+)
+
+type SecretManager struct {
+	cfg     *config.NextDeployConfig
+	secrets map[string]*Secret
+	// TODO: 🚨 Replace this naive cache with persistent key storage or KMS integration.
+	keyCache map[string][]byte // Cache for derived keys
+	// TODO: ✅ Split provider manager into separate encryption and storage providers.
+	manager *SecretsProviderManager
+	// TODO: ✍️ Document locking strategy clearly — what's protected and what's not.
+	mu sync.RWMutex // Mutex for thread-safe access
+}
+type Secret struct {
+	Value       string `json:"value"`
+	Version     int    `json:"version"`
+	CreatedAt   int64  `json:"created_at"`
+	ModifiedAt  int64  `json:"modified_at"`
+	IsEncrypted bool   `json:"is_encrypted"`
 }
 
-func NewSecretManager(configPath, masterKey string, logger Logger, useDoppler bool) (SecretManager, error) {
-	// Print out the  inputs
-	fmt.Printf("Creating SecretManager with configPath: %s, masterKey: %s, useDoppler: %t\n", configPath, masterKey, useDoppler)
-	if logger == nil {
-		return nil, fmt.Errorf("logger cannot be nil")
-	}
+type SecretsProviderManager struct {
+	providers map[string]SecretsProvider
+}
+type SecretsProvider interface {
+	GetSecret(key string) (string, error)
+	SetSecret(key, value string) error
+	DeleteSecret(key string) error
+	ListSecrets() ([]string, error)
+	Encrypt(data []byte, key string) ([]byte, error)
+	Decrypt(data []byte, key string) ([]byte, error)
+	GenerateMasterkey() (string, error)
+	GenerateMasterkeyLinux() (string, error)
+	DeriveKey(key string) ([]byte, error)
+	ValidateSecretFormat(secret string) error
+}
 
-	derivedKey, err := DeriveKey(masterKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to derive key: %w", err)
-	}
+type Option func(*SecretManager)
 
-	cfg, err := loadConfig(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
+func WithConfig(cfg *config.NextDeployConfig) Option {
+	return func(sm *SecretManager) {
+		sm.cfg = cfg
 	}
+}
 
-	var doppler DopplerManager
-	if useDoppler {
-		doppler, err = NewDopplerManager(&cfg.Doppler, logger)
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize Doppler manager: %w", err)
+func WithProvider(name string, provider SecretsProvider) Option {
+	return func(sm *SecretManager) {
+		if sm.manager == nil {
+			sm.manager = &SecretsProviderManager{
+				providers: make(map[string]SecretsProvider),
+			}
 		}
+		sm.manager.providers[name] = provider
+	}
+}
+
+func NewSecretManager(opts ...Option) *SecretManager {
+	sm := &SecretManager{
+		secrets:  make(map[string]*Secret),
+		keyCache: make(map[string][]byte),
 	}
 
-	return &secretsManager{
-		configPath: configPath,
-		config:     cfg,
-		masterKey:  derivedKey,
-		doppler:    doppler,
-		logger:     logger,
-	}, nil
+	for _, opt := range opts {
+		opt(sm)
+	}
+
+	if sm.cfg == nil {
+		cfg, err := config.Load()
+		if err != nil {
+			SLogs.Error("Failed to load configuration: %v", err)
+			return nil
+		}
+		sm.cfg = cfg
+	}
+
+	return sm
 }
 
-func (s *secretsManager) LoadConfig() (*Config, error) {
-	return loadConfig(s.configPath)
+// Add this to your secrets package (likely near the provider-related methods)
+
+// IsDopplerEnabled checks if Doppler is configured as a secrets provider
+func (sm *SecretManager) IsDopplerEnabled() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if sm.manager == nil {
+		return false
+	}
+
+	_, exists := sm.manager.providers["doppler"]
+	return exists
 }
 
-func loadConfig(configPath string) (*Config, error) {
-	data, err := os.ReadFile(configPath)
+// You might also want to add a Doppler-specific provider check:
+func (sm *SecretManager) GetDopplerProvider() (SecretsProvider, bool) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if sm.manager == nil {
+		return nil, false
+	}
+
+	provider, exists := sm.manager.providers["doppler"]
+	return provider, exists
+}
+
+// TODO: ✅ Allow selection of which .env files to encrypt via pattern or CLI arg.
+// TODO: 🔐 Don't overwrite original files by default — add backup logic or prompt.
+// TODO: ⚠️ Add versioning or checksum for encrypted file verification.
+func (sm *SecretManager) EncryptEnvFile() (map[string]string, error) {
+	cwd, err := os.Getwd()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+		return nil, fmt.Errorf("failed to get current working directory: %w", err)
 	}
 
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	files, err := filepath.Glob(filepath.Join(cwd, "*.env"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to find .env files: %w", err)
 	}
-	return &cfg, nil
+
+	if len(files) == 0 {
+		SLogs.Warn("No .env files found in the current directory")
+		return nil, nil
+	}
+
+	results := make(map[string]string)
+	for _, file := range files {
+		SLogs.Info("Encrypting .env file: %s", file)
+
+		content, err := os.ReadFile(file)
+		if err != nil {
+			SLogs.Error("Failed to read .env file %s: %v", file, err)
+			continue
+		}
+		var masterKey string
+
+		key, err := sm.GeneratePlatformKey()
+		if err != nil {
+			SLogs.Error("Failed to generate master key: %v", err)
+			return nil, fmt.Errorf("%w: %v", ErrKeyGenerationFailed, err)
+		}
+		masterKey = key
+		encrypted, err := Encrypt(content, []byte(masterKey))
+		if err != nil {
+			SLogs.Error("Failed to encrypt file %s: %v", file, err)
+			return nil, fmt.Errorf("%w: %v", ErrEncryptionFailed, err)
+		}
+
+		encryptedFile := file + ".enc"
+		if err := os.WriteFile(encryptedFile, encrypted, 0600); err != nil {
+			SLogs.Error("Failed to write encrypted file %s: %v", encryptedFile, err)
+			return nil, err
+		}
+
+		results[file] = encryptedFile
+	}
+
+	return results, nil
 }
 
-func (s *secretsManager) saveConfig(cfg *Config) error {
-	data, err := yaml.Marshal(cfg)
+func (sm *SecretManager) GeneratePlatformKey() (string, error) {
+	currentOS := runtime.GOOS
+	switch currentOS {
+	case "linux", "darwin": // Linux or macOS
+		return sm.derivePlatformKey("linux-mac-salt")
+	case "windows": // Windows
+		return sm.derivePlatformKey("windows-salt")
+	default:
+		return "", fmt.Errorf("%w: %s", ErrUnsupportedPlatform, currentOS)
+	}
+}
+
+func (sm *SecretManager) derivePlatformKey(salt string) (string, error) {
+	masterkey, err := sm.getOrCreateMasterKey()
 	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
+		return "", fmt.Errorf("failed to get or create master key: %w", err)
 	}
-
-	configDir := filepath.Dir(s.configPath)
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
+	h := hkdf.New(sha256.New, masterkey, []byte(salt), nil)
+	deriveky := make([]byte, 32) // AES-256 key NonceSize
+	if _, err := io.ReadFull(h, deriveky); err != nil {
+		return "", fmt.Errorf("failed to derive key: %w", err)
 	}
+	return base64.StdEncoding.EncodeToString(deriveky), nil
+}
 
-	if err := os.WriteFile(s.configPath, data, 0600); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
+func (sm *SecretManager) getOrCreateMasterKey() ([]byte, error) {
+	// Try to load existing key
+	key, err := sm.loadMasterKey()
+	if err == nil {
+		return key, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("failed to load master key: %w", err)
+	}
+	// generate new key if none exists
+	newKey, err := sm.GenerateMasterKey()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate new master key: %w", err)
+	}
+	return []byte(newKey), nil
+}
+
+func (sm *SecretManager) loadMasterKey() ([]byte, error) {
+	// platform specifc secure storage
+	switch runtime.GOOS {
+	case "linux", "darwin":
+		return sm.loadUnixKey()
+	case "windows":
+		key, err := sm.GenerateMasterKey()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate master key for Windows: %w", err)
+		}
+
+		return []byte(key), nil
+	default:
+		return nil, ErrUnsupportedPlatform
+	}
+}
+
+func (sm *SecretManager) storeMasterKey(key []byte) error {
+	// platform specific secure storage
+	switch runtime.GOOS {
+	case "linux", "darwin":
+		return sm.storeUnixKey(key)
+	case "windows":
+		return sm.storeWindowsKey(key)
+	default:
+		return ErrUnsupportedPlatform
+	}
+}
+
+func (sm *SecretManager) storeUnixKey(key []byte) error {
+	appname := sm.cfg.App.Name
+	user := os.Getenv("USER")
+	err := keyring.Set(appname, user, string(key))
+	if err != nil {
+		return fmt.Errorf("failed to store master key in keyring: %w", err)
 	}
 	return nil
 }
-
-func (s *secretsManager) GetSecret(path string) (string, error) {
-	cfg, err := s.LoadConfig()
+func (sm *SecretManager) loadUnixKey() ([]byte, error) {
+	appname := sm.cfg.App.Name
+	user := os.Getenv("USER")
+	key, err := keyring.Get(appname, user)
 	if err != nil {
-		return "", fmt.Errorf("failed to load config: %w", err)
+		return nil, fmt.Errorf("failed to load master key from"+" keyring: %w", err)
 	}
-
-	if s.doppler != nil {
-		return s.doppler.GetSecret(path)
-	}
-
-	value, err := getNestedValue(cfg, path)
+	return []byte(key), nil
+}
+func (sm *SecretManager) storeWindowsKey(key []byte) error {
+	encrypted, err := winutil.Encrypt([]byte(key))
 	if err != nil {
-		return "", fmt.Errorf("failed to get secret: %w", err)
+		return fmt.Errorf("failed to encrypt master key for Windows: %w", err)
 	}
+	appname := sm.cfg.App.Name
+	err = key
+	keyring.set(appname, "windows", string(encrypted))
+	if err != nil {
+		return fmt.Errorf("failed to store master key in Windows keyring: %w", err)
+	}
+	return nil
 
-	if strings.HasPrefix(value, "encrypted:") {
-		return s.DecryptValue(strings.TrimPrefix(value, "encrypted:"))
-	}
-	return value, nil
 }
 
-func (s *secretsManager) UpdateSecret(path, value string, encrypt bool) error {
-	cfg, err := s.LoadConfig()
+func (sm *SecretManager) loadWindowsKey() ([]byte, error) {
+	appname := sm.cfg.App.Name
+	encrypted, err := keyring.get(appname, "windows")
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return nil, fmt.Errorf("failed to load master key from Windows keyring: %w", err)
+	}
+	key, err := winutil.Decrypt([]byte(encrypted))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt master key for Windows: %w", err)
+	}
+	return key, nil
+}
+
+// PrepareAppContext prepares the application context by decrypting configuration and environment files
+func (sm *SecretManager) PrepareAppContext() (string, error) {
+	// TODO: ✂️ Split into smaller interfaces: StorageProvider, CryptoProvider, ValidationProvider.
+	// Get and validate working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	// Generate encryption key
+	key, err := sm.GeneratePlatformKey()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate encryption key: %w", err)
+	}
+
+	// Process nextdeploy.yml
+	ndConfig, err := sm.ProcessConfigFile(cwd, key)
+	if err != nil {
+		return "", fmt.Errorf("config processing failed: %w", err)
+	}
+
+	// Process environment files
+	envFiles, err := sm.processEnvFiles(cwd, key, ndConfig)
+	if err != nil {
+		return "", fmt.Errorf("env file processing failed: %w", err)
+	}
+
+	// Prepare cleanup defer function
+	var filesToCleanup []string
+	for _, envFile := range envFiles {
+		filesToCleanup = append(filesToCleanup, envFile.DecryptedPath)
+	}
+	filesToCleanup = append(filesToCleanup, ndConfig.DecryptedPath)
+	defer sm.cleanupDecryptedFiles(filesToCleanup)
+
+	SLogs.Info("Application context prepared successfully")
+	return cwd, nil
+}
+
+// processConfigFile handles the decryption of the configuration file
+func (sm *SecretManager) ProcessConfigFile(cwd, key string) (*ConfigFile, error) {
+	const configFileName = "nextdeploy.yml"
+	encryptedPath := filepath.Join(cwd, configFileName+".enc")
+
+	// Verify config file exists
+	if _, err := os.Stat(encryptedPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("encrypted config file not found: %w", err)
+	}
+
+	// Read and decrypt config
+	encContent, err := os.ReadFile(encryptedPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read encrypted config: %w", err)
+	}
+
+	decryptedContent, err := Decrypt(encContent, []byte(key))
+	if err != nil {
+		return nil, fmt.Errorf("config decryption failed: %w", err)
+	}
+
+	// Write decrypted file
+	decryptedPath := filepath.Join(cwd, configFileName)
+	if err := secureWriteFile(decryptedPath, decryptedContent); err != nil {
+		return nil, fmt.Errorf("failed to write decrypted config: %w", err)
+	}
+
+	SLogs.Info("Config file decrypted to %s", decryptedPath)
+	return &ConfigFile{
+		EncryptedPath: encryptedPath,
+		DecryptedPath: decryptedPath,
+		Content:       decryptedContent,
+	}, nil
+}
+
+// processEnvFiles handles the decryption of all environment files
+func (sm *SecretManager) processEnvFiles(cwd, key string, config *ConfigFile) ([]*EnvFile, error) {
+	var processedFiles []*EnvFile
+
+	// Find all encrypted env files
+	files, err := filepath.Glob(filepath.Join(cwd, "*.env.enc"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to find env files: %w", err)
+	}
+
+	if len(files) == 0 {
+		SLogs.Warn("No encrypted .env files found in directory")
+		return nil, nil
+	}
+
+	// Process each file
+	for _, file := range files {
+		envFile, err := sm.processSingleEnvFile(file, key)
+		if err != nil {
+			SLogs.Error("Failed to process %s: %v", file, err)
+			continue
+		}
+		processedFiles = append(processedFiles, envFile)
+	}
+
+	return processedFiles, nil
+}
+
+// processSingleEnvFile handles decryption of a single environment file
+func (sm *SecretManager) processSingleEnvFile(path, key string) (*EnvFile, error) {
+	SLogs.Debug("Processing env file: %s", path)
+
+	encContent, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read failed: %w", err)
+	}
+
+	decryptedContent, err := Decrypt(encContent, []byte(key))
+	if err != nil {
+		return nil, fmt.Errorf("decryption failed: %w", err)
+	}
+
+	decryptedPath := strings.TrimSuffix(path, ".enc")
+	if err := secureWriteFile(decryptedPath, decryptedContent); err != nil {
+		return nil, fmt.Errorf("write failed: %w", err)
+	}
+
+	SLogs.Info("Decrypted env file written to %s", decryptedPath)
+	return &EnvFile{
+		EncryptedPath: path,
+		DecryptedPath: decryptedPath,
+		Content:       decryptedContent,
+	}, nil
+}
+
+// secureWriteFile safely writes content to a file
+func secureWriteFile(path string, content []byte) error {
+	// TODO: 🧼 Memory wipe old temp file securely before overwriting, if applicable.
+	// TODO: 🧪 Check file integrity post-write (hash comparison).
+	// 1. Write to temp file first
+	tempPath := path + ".tmp"
+	if err := os.WriteFile(tempPath, content, 0600); err != nil {
+		return err
+	}
+
+	// 2. Verify the temp file
+	if _, err := os.Stat(tempPath); os.IsNotExist(err) {
+		return errors.New("temp file not created")
+	}
+
+	// 3. Rename (atomic operation)
+	return os.Rename(tempPath, path)
+}
+
+// cleanupDecryptedFiles removes decrypted files
+func (sm *SecretManager) cleanupDecryptedFiles(paths []string) {
+	// TODO: 🔐 Use secure delete (overwrite + unlink) if applicable.
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		if err := os.Remove(path); err != nil {
+			SLogs.Warn("Failed to cleanup %s: %v", path, err)
+		} else {
+			SLogs.Debug("Cleaned up decrypted file: %s", path)
+		}
+	}
+}
+
+// Secure file writing helper
+// Supporting types
+type ConfigFile struct {
+	EncryptedPath string
+	DecryptedPath string
+	Content       []byte
+}
+
+type EnvFile struct {
+	EncryptedPath string
+	DecryptedPath string
+	Content       []byte
+}
+
+func (sm *SecretManager) GenerateMasterKey() (string, error) {
+	//TODO: this should check for existence of a master key
+	//     -- if not in existence save key some where save
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return "", fmt.Errorf("%w: %v", ErrKeyGenerationFailed, err)
+	}
+	return hex.EncodeToString(key), nil
+}
+
+// GenerateWindowsKey generates a key for Windows platforms
+func (sm *SecretManager) GenerateWindowsKey() (string, error) {
+	// Windows-specific key generation logic could go here
+	// For now, we'll use the same approach as other platforms
+	return sm.GenerateMasterKey()
+}
+
+// SetSecret stores a secret with optional encryption
+func (sm *SecretManager) SetSecret(name, value string, encrypt bool) error {
+	// TODO: ❗ Enforce naming rules, avoid reserved/system keys.
+	// TODO: 🔐 Store encryption metadata (alg version, salt, iv) with each secret.
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if _, exists := sm.secrets[name]; exists {
+		return ErrSecretAlreadyExists
+	}
+
+	secret := &Secret{
+		Value:       value,
+		Version:     1,
+		CreatedAt:   time.Now().Unix(),
+		ModifiedAt:  time.Now().Unix(),
+		IsEncrypted: encrypt,
 	}
 
 	if encrypt {
-		encryptedValue, err := s.EncryptValue(value)
+		key, err := sm.GeneratePlatformKey()
 		if err != nil {
-			return fmt.Errorf("encryption failed: %w", err)
+			return err
 		}
-		value = "encrypted:" + encryptedValue
+		encrypted, err := Encrypt([]byte(value), []byte(key))
+		if err != nil {
+			return err
+		}
+		secret.Value = string(encrypted)
 	}
 
-	if s.doppler != nil {
-		return s.doppler.UpdateSecret(path, value, encrypt)
-	}
-
-	if err := setNestedValue(cfg, path, value); err != nil {
-		return fmt.Errorf("failed to set secret: %w", err)
-	}
-
-	return s.saveConfig(cfg)
+	sm.secrets[name] = secret
+	return nil
 }
 
-func (s *secretsManager) DeleteSecret(path string) error {
-	cfg, err := s.LoadConfig()
+// GetSecret retrieves a secret, decrypting if necessary
+func (sm *SecretManager) GetSecret(name string) (string, error) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	secret, exists := sm.secrets[name]
+	if !exists {
+		// Try external providers
+		if sm.manager != nil {
+			for _, provider := range sm.manager.providers {
+				if value, err := provider.GetSecret(name); err == nil {
+					return value, nil
+				}
+			}
+		}
+		return "", ErrSecretNotFound
+	}
+
+	if !secret.IsEncrypted {
+		return secret.Value, nil
+	}
+
+	key, err := sm.GeneratePlatformKey()
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return "", err
 	}
 
-	if s.doppler != nil {
-		//FIX: add doppler delete secret
-		// return s.doppler.DeleteSecret(path)
-		return fmt.Errorf("Doppler integration not configured for delete operation")
-	}
-
-	if err := deleteNestedValue(cfg, path); err != nil {
-		return fmt.Errorf("failed to delete secret: %w", err)
-	}
-
-	return s.saveConfig(cfg)
-}
-
-func (s *secretsManager) EncryptValue(value string) (string, error) {
-	encrypted, err := Encrypt([]byte(value), s.masterKey)
+	decrypted, err := Decrypt([]byte(secret.Value), []byte(key))
 	if err != nil {
-		return "", fmt.Errorf("encryption failed: %w", err)
-	}
-	return base64.StdEncoding.EncodeToString(encrypted), nil
-}
-
-func (s *secretsManager) DecryptValue(encryptedValue string) (string, error) {
-	data, err := base64.StdEncoding.DecodeString(encryptedValue)
-	if err != nil {
-		return "", fmt.Errorf("bled to create secret manager:/ase64 decode failed: %w", err)
+		return "", fmt.Errorf("%w: %v", ErrDecryptionFailed, err)
 	}
 
-	decrypted, err := Decrypt(data, s.masterKey)
-	if err != nil {
-		return "", fmt.Errorf("decryption failed: %w", err)
-	}
 	return string(decrypted), nil
 }
 
-func (s *secretsManager) SyncWithDoppler() error {
-	if s.doppler == nil {
-		return fmt.Errorf("Doppler integration not configured")
+func (sm *SecretManager) PrepareSecretsContext() error {
+	sm.mu.Lock()
+	//ensure config is load properly on sm
+	defer sm.mu.Unlock()
+	if sm.cfg == nil {
+		return fmt.Errorf("configuration is not set")
 	}
-
-	cfg, err := s.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if err := s.doppler.VerifySecrets(cfg); err != nil {
-		return fmt.Errorf("secrets verification failed: %w", err)
-	}
-
-	s.logger.Info("Successfully synced with Doppler")
-	return nil
-}
-
-func (s *secretsManager) StoreToken(name, value string) error {
-	cfg, err := s.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if cfg.Tokens == nil {
-		cfg.Tokens = make(map[string]string)
-	}
-
-	cfg.Tokens[name] = value
-	return s.saveConfig(cfg)
-}
-
-func (s *secretsManager) GetToken(name string) (string, error) {
-	cfg, err := s.LoadConfig()
-	if err != nil {
-		return "", fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if token, exists := cfg.Tokens[name]; exists {
-		return token, nil
-	}
-	return "", fmt.Errorf("token not found: %s", name)
-}
-func (s *secretsManager) ListSecrets() ([]string, error) {
-	cfg, err := s.LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	var secrets []string
-
-	// Add repository secret
-	if cfg.Repository.WebhookSecret != "" {
-		secrets = append(secrets, "repository.webhook_secret")
-	}
-
-	// Add database secrets
-	if cfg.Database.Username != "" {
-		secrets = append(secrets, "database.username")
-	}
-	if cfg.Database.Password != "" {
-		secrets = append(secrets, "database.password")
-	}
-
-	// Add other secrets
-	for name := range cfg.Secrets {
-		//secrets = append(secrets, "secrets."+strings.ToUpper(name))
-		//secrets = append(secrets, "secrets:"+name)
-		fmt.Printf("Adding secret: %s\n", name)
-
-	}
-
-	return secrets, nil
-}
-
-type dopplerManager struct {
-	project string
-	config  string
-	token   string
-	logger  Logger
-}
-
-func NewDopplerManager(cfg *Doppler, logger Logger) (DopplerManager, error) {
-	// print out the inputs
-	// check for nils to avoid panics
-	if logger == nil {
-		return nil, fmt.Errorf("logger cannot be nil")
-	}
-	if cfg == nil {
-		return nil, fmt.Errorf("Doppler config cannot be nil")
-	}
-	if cfg.Project == "" || cfg.Config == "" || cfg.Token == "" {
-		return nil, fmt.Errorf("Doppler project, config, and token are required")
-	}
-	// Print out the inputs
-	fmt.Printf("Creating DopplerManager with project: %s, config: %s, token: %s\n", cfg.Project, cfg.Config, cfg.Token)
-	if cfg == nil {
-		return nil, fmt.Errorf("Doppler config is required")
-	}
-
-	requiredFields := []struct {
-		value string
-		name  string
-	}{
-		{cfg.Project, "project"},
-		{cfg.Config, "config"},
-		{cfg.Token, "token"},
-	}
-
-	for _, field := range requiredFields {
-		if field.value == "" {
-			return nil, fmt.Errorf("Doppler %s is required", field.name)
+	// ensure manager is initialized
+	if sm.manager == nil {
+		sm.manager = &SecretsProviderManager{
+			providers: make(map[string]SecretsProvider),
 		}
 	}
 
-	return &dopplerManager{
-		project: cfg.Project,
-		config:  cfg.Config,
-		token:   cfg.Token,
-		logger:  logger,
-	}, nil
-}
-
-func (dm *dopplerManager) PushSecrets(cfg *Config) error {
-	dm.logger.Info("Pushing secrets to Doppler project %s, config %s", dm.project, dm.config)
-
-	secretGroups := []struct {
-		secrets map[string]string
-		prefix  string
-	}{
-		{cfg.Secrets, ""},
-		{cfg.Docker.Build.Args, "DOCKER_"},
-	}
-
-	for _, group := range secretGroups {
-		for name, value := range group.secrets {
-			if value == "" {
-				dm.logger.Debug("Skipping empty secret %s", name)
-				continue
-			}
-
-			fullName := strings.ToUpper(group.prefix + name)
-			if err := dm.UpdateSecret(fullName, value, false); err != nil {
-				return fmt.Errorf("failed to push secret %s: %w", fullName, err)
-			}
-			dm.logger.Info("Pushed secret %s", fullName)
+	for _, provider := range sm.manager.providers {
+		if err := provider.ValidateSecretFormat(""); err != nil {
+			return fmt.Errorf("invalid secret format: %w", err)
 		}
 	}
 
 	return nil
 }
 
-func (dm *dopplerManager) VerifySecrets(cfg *Config) error {
-	cmd := exec.Command("doppler", "secrets", "download",
-		"--project", dm.project,
-		"--config", dm.config,
-		"--format", "json",
-		"--no-file",
-	)
+// RotateSecrets re-encrypts all secrets with a new key
+func (sm *SecretManager) RotateSecrets() error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
-	if dm.token != "" {
-		cmd.Env = append(os.Environ(), "DOPPLER_TOKEN="+dm.token)
-	}
-
-	output, err := cmd.CombinedOutput()
+	newKey, err := sm.GeneratePlatformKey()
 	if err != nil {
-		return fmt.Errorf("doppler command failed: %w\nOutput: %s", err, string(output))
+		return err
 	}
 
-	var secrets map[string]interface{}
-	if err := json.Unmarshal(output, &secrets); err != nil {
+	for name, secret := range sm.secrets {
+		if !secret.IsEncrypted {
+			continue
+		}
+
+		// Decrypt with old key
+		oldKey, err := sm.getCachedKey(name)
+		if err != nil {
+			SLogs.Warn("Failed to get cached key for %s: %v", name, err)
+			continue
+		}
+
+		decrypted, err := Decrypt([]byte(secret.Value), []byte(oldKey))
+		if err != nil {
+			SLogs.Warn("Failed to decrypt secret %s: %v", name, err)
+			continue
+		}
+
+		// Encrypt with new key
+		encrypted, err := Encrypt(decrypted, []byte(newKey))
+		if err != nil {
+			SLogs.Warn("Failed to re-encrypt secret %s: %v", name, err)
+			continue
+		}
+
+		secret.Value = string(encrypted)
+		secret.Version++
+		secret.ModifiedAt = time.Now().Unix()
+		sm.keyCache[name] = []byte(newKey)
+	}
+
+	return nil
+}
+
+// ImportSecrets imports secrets from a JSON file
+func (sm *SecretManager) ImportSecrets(filePath string) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read import file: %w", err)
+	}
+
+	var secrets map[string]*Secret
+	if err := json.Unmarshal(data, &secrets); err != nil {
 		return fmt.Errorf("failed to parse secrets: %w", err)
 	}
 
-	requiredSecrets := map[string]bool{
-		"DATABASE_PASSWORD":         true,
-		"DATABASE_USERNAME":         true,
-		"REPOSITORY_WEBHOOK_SECRET": true,
-	}
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
-	for secret := range requiredSecrets {
-		if _, exists := secrets[secret]; !exists {
-			return fmt.Errorf("required secret %s is missing", secret)
-		}
+	for name, secret := range secrets {
+		sm.secrets[name] = secret
 	}
 
 	return nil
 }
 
-func (dm *dopplerManager) UpdateSecret(name, value string, encrypt bool) error {
-	cmd := exec.Command("doppler", "secrets", "set",
-		fmt.Sprintf("%s=%s", name, value),
-		"--project", dm.project,
-		"--config", dm.config,
-		"--silent",
-	)
+// ExportSecrets exports secrets to a JSON file
+func (sm *SecretManager) ExportSecrets(filePath string) error {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
 
-	if dm.token != "" {
-		cmd.Env = append(os.Environ(), "DOPPLER_TOKEN="+dm.token)
-	}
-
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to set secret: %w\nOutput: %s", err, string(output))
-	}
-
-	dm.logger.Debug("Updated secret %s in Doppler", name)
-	return nil
-}
-
-func (dm *dopplerManager) GetSecret(name string) (string, error) {
-	cmd := exec.Command("doppler", "secrets", "get", name,
-		"--project", dm.project,
-		"--config", dm.config,
-		"--plain",
-	)
-
-	if dm.token != "" {
-		cmd.Env = append(os.Environ(), "DOPPLER_TOKEN="+dm.token)
-	}
-
-	output, err := cmd.CombinedOutput()
+	data, err := json.MarshalIndent(sm.secrets, "", "  ")
 	if err != nil {
-		return "", fmt.Errorf("failed to get secret: %w\nOutput: %s", err, string(output))
+		return fmt.Errorf("failed to marshal secrets: %w", err)
 	}
 
-	return strings.TrimSpace(string(output)), nil
-}
-func (dm *dopplerManager) ListSecrets() ([]string, error) {
-	return nil, fmt.Errorf("ListSecrets not implemented for DopplerManager")
-
-}
-func (dm *dopplerManager) GetToken(name string) (string, error) {
-	return "", fmt.Errorf("GetToken not implemented for DopplerManager")
-}
-
-func (dm *dopplerManager) DeleteSecret(name string) error {
-	cmd := exec.Command("doppler", "secrets", "delete", name,
-		"--project", dm.project,
-		"--config", dm.config,
-		"--silent",
-	)
-
-	if dm.token != "" {
-		cmd.Env = append(os.Environ(), "DOPPLER_TOKEN="+dm.token)
+	if err := os.WriteFile(filePath, data, 0600); err != nil {
+		return fmt.Errorf("failed to write secrets file: %w", err)
 	}
 
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to delete secret: %w\nOutput: %s", err, string(output))
-	}
-
-	dm.logger.Debug("Deleted secret %s from Doppler", name)
 	return nil
 }
 
-// Helper functions
-func getNestedValue(cfg *Config, path string) (string, error) {
-	parts := strings.Split(path, ".")
-	if len(parts) == 0 {
-		return "", fmt.Errorf("invalid path")
+func (sm *SecretManager) EncryptFile(filename string, key []byte) error {
+	// read the file content
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("failed to read nextdeploy.yml: %w", err)
 	}
-
-	switch parts[0] {
-	case "repository":
-		if len(parts) == 2 && parts[1] == "webhook_secret" {
-			return cfg.Repository.WebhookSecret, nil
-		}
-	case "database":
-		if len(parts) == 2 {
-			switch parts[1] {
-			case "password":
-				return cfg.Database.Password, nil
-			case "username":
-				return cfg.Database.Username, nil
-			}
-		}
-	case "secrets":
-		if len(parts) == 2 {
-			if secret, exists := cfg.Secrets[parts[1]]; exists {
-				return secret, nil
-			}
-		}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return fmt.Errorf("failed to create cipher: %w", err)
 	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return fmt.Errorf("failed to create GCM: %w", err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return fmt.Errorf("failed to generate nonce: %w", err)
+	}
+	ciphertext := gcm.Seal(nonce, nonce, content, nil)
+	// Write the encrypted content to a new file
+	err = os.WriteFile(filename+".enc", ciphertext, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write encrypted file: %w", err)
+	}
+	//TODO here we should remove the original file or add to git ingore to untracted by git
+	SLogs.Info("Encrypted file written to %s.enc", filename)
+	return nil
 
-	return "", fmt.Errorf("path not found: %s", path)
 }
 
-func setNestedValue(cfg *Config, path, value string) error {
-	parts := strings.Split(path, ".")
-	if len(parts) == 0 {
-		return fmt.Errorf("invalid path")
+func (sm *SecretManager) DecryptFile(filename string, key []byte) error {
+	if !strings.HasSuffix(filename, ".enc") {
+		return fmt.Errorf("file %s is not an encrypted file", filename)
 	}
-
-	switch parts[0] {
-	case "repository":
-		if len(parts) == 2 && parts[1] == "webhook_secret" {
-			cfg.Repository.WebhookSecret = value
-			return nil
-		}
-	case "database":
-		if len(parts) == 2 {
-			switch parts[1] {
-			case "password":
-				cfg.Database.Password = value
-				return nil
-			case "username":
-				cfg.Database.Username = value
-				return nil
-			}
-		}
-	case "secrets":
-		if len(parts) == 2 {
-			if cfg.Secrets == nil {
-				cfg.Secrets = make(map[string]string)
-			}
-			cfg.Secrets[parts[1]] = value
-			return nil
-		}
+	// Read the encrypted file content
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("failed to read encrypted file %s: %w", filename, err)
 	}
-
-	return fmt.Errorf("path not found: %s", path)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return fmt.Errorf("failed to create cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return fmt.Errorf("failed to create GCM: %w", err)
+	}
+	nonceSize := gcm.NonceSize()
+	if len(content) < nonceSize {
+		return fmt.Errorf("encrypted file %s is too short", filename)
+	}
+	nonce, ciphertext := content[:nonceSize], content[nonceSize:]
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt file %s: %w", filename, err)
+	}
+	// Write the decrypted content to a new filename
+	decryptedFilename := strings.TrimSuffix(filename, ".enc")
+	if err := os.WriteFile(decryptedFilename, plaintext, 0644); err != nil {
+		return fmt.Errorf("failed to write decrypted file %s: %w", decryptedFilename, err)
+	}
+	SLogs.Info("Decrypted file written to %s", decryptedFilename)
+	return nil
 }
 
-func deleteNestedValue(cfg *Config, path string) error {
-	return setNestedValue(cfg, path, "")
+// getCachedKey retrieves a cached key or generates a new one
+func (sm *SecretManager) getCachedKey(name string) (string, error) {
+	if key, exists := sm.keyCache[name]; exists {
+		return string(key), nil
+	}
+
+	key, err := sm.GeneratePlatformKey()
+	if err != nil {
+		return "", err
+	}
+
+	sm.keyCache[name] = []byte(key)
+	return key, nil
+}
+
+// MigrateToProvider migrates secrets to an external provider
+func (sm *SecretManager) MigrateToProvider(providerName string) error {
+	if sm.manager == nil {
+		return ErrProviderNotConfigured
+	}
+
+	provider, exists := sm.manager.providers[providerName]
+	if !exists {
+		return fmt.Errorf("%w: %s", ErrInvalidProvider, providerName)
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	for name, secret := range sm.secrets {
+		value := secret.Value
+		if secret.IsEncrypted {
+			key, err := sm.getCachedKey(name)
+			if err != nil {
+				SLogs.Warn("Failed to get key for %s during migration: %v", name, err)
+				continue
+			}
+
+			decrypted, err := Decrypt([]byte(value), []byte(key))
+			if err != nil {
+				SLogs.Warn("Failed to decrypt %s during migration: %v", name, err)
+				continue
+			}
+			value = string(decrypted)
+		}
+
+		if err := provider.SetSecret(name, value); err != nil {
+			return fmt.Errorf("failed to migrate secret %s: %w", name, err)
+		}
+	}
+
+	return nil
+}
+
+// ValidateSecret checks if a secret meets complexity requirements
+func (sm *SecretManager) ValidateSecret(name, value string) error {
+	if len(value) < 12 {
+		return errors.New("secret must be at least 12 characters long")
+	}
+
+	// Add more validation rules as needed
+	return nil
+}
+
+// SecureCompare performs constant-time comparison of secrets
+func (sm *SecretManager) SecureCompare(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }

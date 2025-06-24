@@ -231,25 +231,25 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 	}
 	if tag != "" {
 		image = fmt.Sprintf("%s:%s", image, tag)
-		infoColor.Printf("  Using image tag: %s\n", image)
+		ShipLogs.Debug("  Using image tag: %s\n", image)
 	} else {
-		infoColor.Printf("  Using image without tag: %s\n", image)
+		ShipLogs.Debug("  Using image without tag: %s\n", image)
 	}
 	if image == "" && cfg.Docker.Image != "" {
 		image = cfg.Docker.Image
-		infoColor.Printf("  Using image from configuration: %s\n", image)
+		ShipLogs.Debug("  Using image from configuration: %s\n", image)
 	} else if image == "" {
 		return fmt.Errorf("docker image not specified in configuration or command line")
 	} else {
-		infoColor.Printf("  Using image: %s\n", image)
+		ShipLogs.Debug("  Using image: %s\n", image)
 	}
-	fullImageName := fmt.Sprintf("%s:%s", image, tag)
+	ShipLogs.Debug("Image without tag is:%s", image)
 
-	ShipLogs.Debug("Full image name: %s", fullImageName)
-
+	ShipLogs.Debug("Full image name: %s", image)
 	pullCommand := fmt.Sprintf("docker pull %s", image)
+
 	if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, pullCommand, stream); err != nil {
-		return fmt.Errorf("failed to pull Docker image %s: %w", image, err)
+		return fmt.Errorf("failed to pull Docker image %s  === %w", image, err)
 	}
 	// Check if image is specified
 	if image == "" {
@@ -671,4 +671,3 @@ func retryOperation(ctx context.Context, maxAttempts int, initialDelay time.Dura
 
 	return fmt.Errorf("after %d attempts, last error: %w", maxAttempts, lastErr)
 }
-

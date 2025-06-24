@@ -132,7 +132,8 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 	buildlogger.Info("Git Info: %s, Branch: %s, Dirty: %t", gitInfo.CommitHash, gitInfo.BranchName, gitInfo.IsDirty)
 
 	//imagename := GenerateImageName(cfg.Docker, gitInfo, env)
-	imagename := cfg.Docker.Image + ":" + gitInfo.CommitHash
+	tag, _ := git.GetCommitHash()
+	imagename := cfg.Docker.Image + ":" + tag
 	// Auto-configure build options based on environment
 	opts := docker.BuildOptions{
 		ImageName: imagename,

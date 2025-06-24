@@ -1,5 +1,41 @@
 package detect
 
+// TODO(yussuf): Rename plog from "cmd" to "detect" to better reflect this package's context.
+//   - Use: logger.PackageLogger("detect", "📦 DETECT")
+
+// TODO(yussuf): Split logger instances (plog, dlog, slog) if not all are used here.
+//   - If this file only detects package managers, remove dlog/slog to avoid noise.
+
+// TODO(yussuf): Move indicator definitions into a `var indicators = ...` block outside the function.
+//   - Keeps `DetectPackageManager()` smaller and more readable.
+//   - Possibly expose as a constant or unexported var for testability or override.
+
+// TODO(yussuf): Add file existence check helper:
+//   - func fileExists(path string) bool
+//   - Cleans up repeated os.Stat logic and avoids clutter in detection loop.
+
+// TODO(yussuf): Refactor score weighting logic for readability:
+//   - Abstract into: `scoreManager(scores map[PackageManager]int, manager PackageManager, weight int)`
+//   - Reduces cognitive load while reading scoring rules.
+
+// TODO(yussuf): Avoid hardcoded string weights inside `package.json` check:
+//   - Create constants for `"pnpm"` and `"yarn"` match scores.
+//   - Improves maintainability if scoring logic changes.
+
+// TODO(yussuf): Move `.env` variable scoring outside the function or document clearly:
+//   - Document supported env vars and why they influence scoring.
+//   - Possibly expose via optional `WithEnvDetection` flag/config.
+
+// TODO(yussuf): Add tie-breaker logic or warning in case of tied scores:
+//   - Currently, first highest wins — add fallback preference ordering or warning log.
+
+// TODO(yussuf): Add `DetectPackageManager()` unit tests:
+//   - With fake file systems or using a temp dir with mock files.
+//   - Ensure coverage of scoring, env detection, tie-breaker logic.
+
+// TODO(yussuf): Add godoc comment above `DetectPackageManager()`:
+//   - // DetectPackageManager inspects a project directory to determine the Node.js package manager used.
+//   - Explain heuristics, expected inputs, and output.
 import (
 	"fmt"
 	"nextdeploy/internal/logger"

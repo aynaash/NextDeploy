@@ -14,10 +14,12 @@ import (
 )
 
 var (
-	green  = color.New(color.FgGreen).SprintFunc()
-	yellow = color.New(color.FgYellow).SprintFunc()
-	red    = color.New(color.FgRed).SprintFunc()
-	bold   = color.New(color.Bold).SprintFunc()
+	green   = color.New(color.FgGreen).SprintFunc()
+	yellow  = color.New(color.FgYellow).SprintFunc()
+	red     = color.New(color.FgRed).SprintFunc()
+	bold    = color.New(color.Bold).SprintFunc()
+	cyan    = color.New(color.BgCyan).SprintFunc()
+	magenta = color.New(color.BgHiMagenta).SprintFunc()
 )
 
 // rootCmd represents the base command when called without any subcommands
