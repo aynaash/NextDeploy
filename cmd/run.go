@@ -64,10 +64,16 @@ func runImage() {
 	} else {
 		runLogger.Warn("Doppler is not enabled, skipping secrets download.")
 	}
-	key := sm.GetKey()
+	keyPath := sm.GetKey()
+
+	key, err := os.ReadFile(keyPath)
+	if err != nil {
+		runLogger.Error("Error reading file for key master key")
+		os.Exit(1)
+	}
 
 	// Get the key for decrypting the file
-	cwd, err := sm.PrepareAppContext(key)
+	cwd, err := sm.PrepareAppContext(string(key))
 	if err != nil {
 		runLogger.Error("Error preparing app run context:%s", err)
 		os.Exit(1)

@@ -128,6 +128,7 @@ func (sm *SecretManager) DecryptFile(filename string, key []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to read encrypted file %s: %w", filename, err)
 	}
+	SLogs.Debug("The key passed to new cipher function is:%s", key)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return fmt.Errorf("failed to create cipher: %w", err)
@@ -255,7 +256,6 @@ func (sm *SecretManager) ProcessConfigFile(cwd, key string) (*ConfigFile, error)
 	}
 
 	// Read and decrypt config
-
 	err := sm.DecryptFile("nextdeploy.yml.enc", []byte(key))
 	if err != nil {
 		return nil, fmt.Errorf("config decryption failed: %w", err)
