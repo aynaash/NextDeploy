@@ -1,13 +1,2 @@
-/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/ssh.md
-/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/dns-algo.md
-/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/cmd/prepare.go
-/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/internal/caddy/caddy.go
-/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/cmd/setup-ssl.go
-/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/caddy2.md
-/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/cmd/init.go
-/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/internal/initialcommand/init.go
-/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/internal/config/config.go
-/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/internal/nextdeploy/yaml.go
-/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/cmd/root.go
-/home/elitebook/go/pkg/mod/github.com/spf13/cobra@v1.9.1/command.go
-/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/cmd/build.go
+/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/internal/secrets/SecretManager.go
+/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/cmd/run.go

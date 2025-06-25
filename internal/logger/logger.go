@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -15,7 +16,8 @@ import (
 type LogLevel int
 
 const (
-	LevelDebug LogLevel = iota
+	LevelTrace LogLevel = iota
+	LevelDebug
 	LevelInfo
 	LevelWarn
 	LevelSuccess
@@ -24,54 +26,76 @@ const (
 )
 
 var levelNames = map[LogLevel]string{
+	LevelTrace:   "TRACE",
 	LevelDebug:   "DEBUG",
-	LevelInfo:    "INFO",
-	LevelWarn:    "WARN",
+	LevelInfo:    "INFO ",
+	LevelWarn:    "WARN ",
 	LevelError:   "ERROR",
 	LevelFatal:   "FATAL",
-	LevelSuccess: "SUCCESS",
+	LevelSuccess: "GOOD ",
 }
 
 var levelColors = map[LogLevel]string{
-	LevelDebug:   "\033[36m",   // Cyan
-	LevelInfo:    "\033[32m",   // Green
-	LevelWarn:    "\033[33m",   // Yellow
-	LevelError:   "\033[31m",   // Red
-	LevelFatal:   "\033[31;1m", // Bright Red
-	LevelSuccess: "\033[32;1m", // Bright Green
+	LevelTrace:   "\033[38;5;245m", // Gray
+	LevelDebug:   "\033[38;5;14m",  // Bright Cyan
+	LevelInfo:    "\033[38;5;12m",  // Bright Blue
+	LevelWarn:    "\033[38;5;11m",  // Bright Yellow
+	LevelError:   "\033[38;5;9m",   // Bright Red
+	LevelFatal:   "\033[48;5;9m",   // Red background
+	LevelSuccess: "\033[38;5;10m",  // Bright Green
 }
 
 var levelEmojis = map[LogLevel]string{
-	LevelDebug:   "🐛",
-	LevelInfo:    "ℹ️",
-	LevelWarn:    "⚠️",
-	LevelError:   "❌",
-	LevelFatal:   "💀",
-	LevelSuccess: "✅",
+	LevelTrace:   "🔍",
+	LevelDebug:   "🐞",
+	LevelInfo:    "ℹ️ ",
+	LevelWarn:    "⚠️ ",
+	LevelError:   "💥",
+	LevelFatal:   "☠️ ",
+	LevelSuccess: "✨",
+}
+
+var levelBanners = map[LogLevel]string{
+	LevelTrace:   "▁▁▁▁▁",
+	LevelDebug:   "▂▂▂▂▂",
+	LevelInfo:    "▃▃▃▃▃",
+	LevelWarn:    "▅▅▅▅▅",
+	LevelError:   "▆▆▆▆▆",
+	LevelFatal:   "▇▇▇▇▇",
+	LevelSuccess: "▔▔▔▔▔",
 }
 
 // Logger is the main logger struct
 type Logger struct {
-	mu         sync.Mutex
-	minLevel   LogLevel
-	logger     *log.Logger
-	showCaller bool
-	packageMap map[string]string
+	mu            sync.Mutex
+	minLevel      LogLevel
+	logger        *log.Logger
+	showCaller    bool
+	showTimestamp bool
+	showBanner    bool
+	packageMap    map[string]string
+	colorEnabled  bool
+	timeFormat    string
+	indentLevel   int
 }
 
 // New creates a new Logger instance
 func New(out io.Writer, prefix string, flag int, minLevel LogLevel) *Logger {
 	return &Logger{
-		minLevel:   minLevel,
-		logger:     log.New(out, prefix, flag),
-		showCaller: true,
-		packageMap: make(map[string]string),
+		minLevel:      minLevel,
+		logger:        log.New(out, prefix, 0), // We handle flags ourselves
+		showCaller:    true,
+		showTimestamp: true,
+		showBanner:    true,
+		packageMap:    make(map[string]string),
+		colorEnabled:  true,
+		timeFormat:    "2006-01-02 15:04:05.000",
 	}
 }
 
 // DefaultLogger creates a logger with default settings
 func DefaultLogger() *Logger {
-	return New(os.Stdout, "", log.Ldate|log.Ltime, LevelDebug)
+	return New(os.Stdout, "", 0, LevelDebug)
 }
 
 // SetLevel sets the minimum log level
@@ -95,11 +119,56 @@ func (l *Logger) EnableCallerInfo(enable bool) {
 	l.showCaller = enable
 }
 
+// EnableTimestamp enables/disables timestamp
+func (l *Logger) EnableTimestamp(enable bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.showTimestamp = enable
+}
+
+// EnableBanner enables/disables the level banner
+func (l *Logger) EnableBanner(enable bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.showBanner = enable
+}
+
+// EnableColor enables/disables color output
+func (l *Logger) EnableColor(enable bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.colorEnabled = enable
+}
+
+// SetTimeFormat sets the timestamp format (default: "2006-01-02 15:04:05.000")
+func (l *Logger) SetTimeFormat(format string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.timeFormat = format
+}
+
 // RegisterPackage registers a package with a custom emoji/name
 func (l *Logger) RegisterPackage(pkg string, displayName string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.packageMap[pkg] = displayName
+}
+
+// Indent increases the indentation level
+func (l *Logger) Indent() *Logger {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return &Logger{
+		minLevel:      l.minLevel,
+		logger:        l.logger,
+		showCaller:    l.showCaller,
+		showTimestamp: l.showTimestamp,
+		showBanner:    l.showBanner,
+		packageMap:    l.packageMap,
+		colorEnabled:  l.colorEnabled,
+		timeFormat:    l.timeFormat,
+		indentLevel:   l.indentLevel + 1,
+	}
 }
 
 // Log logs a message at a specific level
@@ -137,20 +206,54 @@ func (l *Logger) Log(level LogLevel, msg string, args ...interface{}) {
 	levelName := levelNames[level]
 	levelColor := levelColors[level]
 	levelEmoji := levelEmojis[level]
+	levelBanner := levelBanners[level]
 	resetColor := "\033[0m"
 
-	formattedMsg := fmt.Sprintf(msg, args...)
-	logLine := fmt.Sprintf("%s%s%s %s %s%s",
-		levelColor, levelName, resetColor,
-		levelEmoji,
-		pkgDisplay,
-		formattedMsg)
-
-	if callerInfo != "" {
-		logLine += fmt.Sprintf(" \033[90m(%s)\033[0m", callerInfo)
+	if !l.colorEnabled {
+		levelColor = ""
+		resetColor = ""
 	}
 
-	l.logger.Println(logLine)
+	formattedMsg := fmt.Sprintf(msg, args...)
+
+	// Add indentation
+	indent := strings.Repeat("  ", l.indentLevel)
+	formattedMsg = indent + strings.Replace(formattedMsg, "\n", "\n"+indent, -1)
+
+	var logLine strings.Builder
+
+	// Timestamp
+	if l.showTimestamp {
+		logLine.WriteString(fmt.Sprintf("\033[90m%s\033[0m ", time.Now().Format(l.timeFormat)))
+	}
+
+	// Level banner
+	if l.showBanner {
+		logLine.WriteString(fmt.Sprintf("%s%s%s ", levelColor, levelBanner, resetColor))
+	}
+
+	// Level info
+	logLine.WriteString(fmt.Sprintf("%s%s%s %s ", levelColor, levelName, resetColor, levelEmoji))
+
+	// Package display
+	if pkgDisplay != "" {
+		logLine.WriteString(fmt.Sprintf("%s", pkgDisplay))
+	}
+
+	// Message
+	logLine.WriteString(formattedMsg)
+
+	// Caller info
+	if callerInfo != "" {
+		logLine.WriteString(fmt.Sprintf(" \033[90m(%s)\033[0m", callerInfo))
+	}
+
+	l.logger.Println(logLine.String())
+}
+
+// Trace logs a trace message (most verbose)
+func (l *Logger) Trace(msg string, args ...interface{}) {
+	l.Log(LevelTrace, msg, args...)
 }
 
 // Debug logs a debug message
@@ -190,10 +293,14 @@ func (l *Logger) WithPrefix(prefix string) *Logger {
 	defer l.mu.Unlock()
 
 	newLogger := &Logger{
-		minLevel:   l.minLevel,
-		logger:     log.New(l.logger.Writer(), prefix, l.logger.Flags()),
-		showCaller: l.showCaller,
-		packageMap: l.packageMap,
+		minLevel:      l.minLevel,
+		logger:        log.New(l.logger.Writer(), prefix, 0),
+		showCaller:    l.showCaller,
+		showTimestamp: l.showTimestamp,
+		showBanner:    l.showBanner,
+		packageMap:    make(map[string]string),
+		colorEnabled:  l.colorEnabled,
+		timeFormat:    l.timeFormat,
 	}
 
 	// Copy the package map
@@ -211,62 +318,155 @@ func PackageLogger(pkgName string, displayName string) *Logger {
 	return logger.WithPrefix(pkgName)
 }
 
-// Timed logs the duration of a function execution
+// Timed logs the duration of a function execution with a spinner animation
 func (l *Logger) Timed(label string, fn func()) {
 	start := time.Now()
-	l.Info("⏳ Starting %s...", label)
+	done := make(chan bool)
+
+	go func() {
+		spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		i := 0
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				l.mu.Lock()
+				levelColor := levelColors[LevelInfo]
+				resetColor := "\033[0m"
+				if !l.colorEnabled {
+					levelColor = ""
+					resetColor = ""
+				}
+				msg := fmt.Sprintf("%s%s%s %s %s...", levelColor, levelNames[LevelInfo], resetColor, spinner[i], label)
+				if l.showTimestamp {
+					msg = fmt.Sprintf("\033[90m%s\033[0m %s", time.Now().Format(l.timeFormat), msg)
+				}
+				l.logger.Print("\r" + msg)
+				l.mu.Unlock()
+				i = (i + 1) % len(spinner)
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	}()
+
 	fn()
-	l.Info("✅ Completed %s in %v", label, time.Since(start))
+	close(done)
+
+	// Clear the spinner line
+	l.logger.Print("\r\033[K")
+
+	duration := time.Since(start)
+	l.Success(fmt.Sprintf("Completed %s in %v", label, duration.Round(time.Millisecond)))
 }
 
-// JSON logs data in JSON format (simplified version)
-func (l *Logger) JSON(level LogLevel, data map[string]interface{}) {
+// JSON logs data in pretty-printed JSON format
+func (l *Logger) JSON(level LogLevel, data interface{}) {
 	if level < l.minLevel {
 		return
 	}
 
-	var sb strings.Builder
-	sb.WriteString("{")
-	first := true
-	for k, v := range data {
-		if !first {
-			sb.WriteString(", ")
-		}
-		sb.WriteString(fmt.Sprintf("\"%s\": \"%v\"", k, v))
-		first = false
+	jsonData, err := json.MarshalIndent(data, strings.Repeat("  ", l.indentLevel), "  ")
+	if err != nil {
+		l.Error("Failed to marshal JSON: %v", err)
+		return
 	}
-	sb.WriteString("}")
 
-	l.Log(level, sb.String())
+	l.Log(level, string(jsonData))
 }
 
-// func main() {
-// 	// Create a default logger
-// 	log := logger.DefaultLogger()
-//
-// 	// Create a package-specific logger
-// 	pkgLog := logger.PackageLogger("network", "🌐 NETWORK")
-//
-// 	log.Info("Starting application...")
-// 	log.Debug("Debug information: %s", "some debug data")
-// 	log.Warn("This is a warning")
-//
-// 	pkgLog.Info("Connected to server")
-// 	pkgLog.Error("Connection failed: %s", "timeout")
-//
-// 	// Measure execution time
-// 	log.Timed("expensive operation", func() {
-// 		// Simulate work
-// 		time.Sleep(500 * time.Millisecond)
-// 	})
-//
-// 	// Log JSON data
-// 	log.JSON(logger.LevelInfo, map[string]interface{}{
-// 		"user":    "john_doe",
-// 		"id":      12345,
-// 		"status":  "active",
-// 	})
-//
-// 	// Fatal example (commented out to prevent exit)
-// 	// log.Fatal("Critical error, exiting")
-// }
+// Table logs tabular data
+func (l *Logger) Table(level LogLevel, headers []string, rows [][]string) {
+	if level < l.minLevel {
+		return
+	}
+
+	// Calculate column widths
+	colWidths := make([]int, len(headers))
+	for i, h := range headers {
+		colWidths[i] = len(h)
+	}
+
+	for _, row := range rows {
+		for i, cell := range row {
+			if len(cell) > colWidths[i] {
+				colWidths[i] = len(cell)
+			}
+		}
+	}
+
+	// Build the table
+	var table strings.Builder
+
+	// Header
+	table.WriteString("\n")
+	for i, h := range headers {
+		table.WriteString(fmt.Sprintf(" %-*s ", colWidths[i], h))
+		if i < len(headers)-1 {
+			table.WriteString("│")
+		}
+	}
+
+	// Separator
+	table.WriteString("\n")
+	for i, w := range colWidths {
+		table.WriteString(strings.Repeat("─", w+2))
+		if i < len(colWidths)-1 {
+			table.WriteString("┼")
+		}
+	}
+	table.WriteString("\n")
+
+	// Rows
+	for _, row := range rows {
+		for i, cell := range row {
+			table.WriteString(fmt.Sprintf(" %-*s ", colWidths[i], cell))
+			if i < len(row)-1 {
+				table.WriteString("│")
+			}
+		}
+		table.WriteString("\n")
+	}
+
+	l.Log(level, table.String())
+}
+
+// Progress creates a progress bar
+func (l *Logger) Progress(level LogLevel, current, total int, label string) {
+	if level < l.minLevel {
+		return
+	}
+
+	const barWidth = 30
+	progress := float64(current) / float64(total)
+	filled := int(barWidth * progress)
+
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+
+	levelColor := levelColors[level]
+	resetColor := "\033[0m"
+	if !l.colorEnabled {
+		levelColor = ""
+		resetColor = ""
+	}
+
+	msg := fmt.Sprintf("%s [%s] %3.0f%% %s", label, bar, progress*100, levelEmojis[level])
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	var logLine strings.Builder
+
+	if l.showTimestamp {
+		logLine.WriteString(fmt.Sprintf("\033[90m%s\033[0m ", time.Now().Format(l.timeFormat)))
+	}
+
+	logLine.WriteString(fmt.Sprintf("%s%s%s %s %s",
+		levelColor, levelNames[level], resetColor,
+		levelEmojis[level], msg))
+
+	l.logger.Print("\r" + logLine.String())
+	if current >= total {
+		l.logger.Println()
+	}
+}
