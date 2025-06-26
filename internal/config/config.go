@@ -2,10 +2,11 @@ package config
 
 import (
 	"bufio"
-	"github.com/spf13/cobra"
+	"nextdeploy/internal/failfast"
 	"nextdeploy/internal/logger"
-	"nextdeploy/internal/nextdeploy"
 	"strconv"
+
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -26,20 +27,8 @@ func HandleConfigSetup(cmd *cobra.Command, reader *bufio.Reader) error {
 	plog := logger.PackageLogger("Init", "NextDeploy")
 
 	if defaultConfig {
-		nextdeploy := nextdeploy.New()
-		configExist, err := nextdeploy.ConfigOkay()
-		if err != nil {
-			plog.Error("failed to check configuration: %v", err)
-			return nil
-		}
-		if configExist {
-			plog.Warn("nextdeploy.yml already exists. Please use it to add the config values.")
-			return nil
-		}
-		if err := GenerateSampleConfig(); err != nil {
-			plog.Error("failed to generate sample config: %v", err)
-			return nil
-		}
+		err := GenerateSampleConfig()
+		failfast.Failfast(err, failfast.Error, "Failed to generate sample configuration file")
 		plog.Success("✅ nextdeploy.yml created")
 		return nil
 	}

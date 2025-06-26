@@ -50,7 +50,7 @@ func VerifyServers(ctx context.Context, serverMgr *server.ServerStruct, servers 
 			serverCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 
-			infoColor.Printf("  Checking server: %s\n", serverName)
+			ShipLogs.Info("  Checking server: %s\n", serverName)
 
 			if err := retryOperation(serverCtx, 3, 2*time.Second, func() error {
 				return serverMgr.PingServer(serverName)
@@ -182,7 +182,7 @@ func TransferRequiredFiles(ctx context.Context, serverMgr *server.ServerStruct, 
 }
 
 func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
-	infoColor.Printf("Deploying containers on %s...\n", serverName)
+	ShipLogs.Info("Deploying containers on %s...\n", serverName)
 
 	deployCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -279,6 +279,7 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 		ShipLogs.Error("Failed to start containers: %v", err)
 		return fmt.Errorf("failed to start new %s container %w", newColor, err)
 	}
+	//do caddy reload
 
 	//===========Phase 5: Check contaier heath =============
 	if err := VerifyContainerHealth(serverMgr, serverName, newContainerPort, stream); err != nil {
@@ -307,6 +308,14 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 		if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, cleanupCommand, stream); err != nil {
 			warnColor.Printf("  Warning: Failed to clean up old container %s: %v\n", oldContainerName, err)
 		}
+	}
+
+	// ==========Phase 8: Reload caddy =============
+	reloadCommand := "sudo systemctl reload caddy"
+	if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, reloadCommand, stream); err != nil {
+		warnColor.Printf("  Warning: Failed to reload Caddy service: %v\n", err)
+	} else {
+		successColor.Println("✓ Caddy service reloaded successfully")
 	}
 
 	successColor.Printf("✓ Containers running:\n%s\n", output)

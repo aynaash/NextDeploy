@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"github.com/spf13/cobra"
+	"nextdeploy/internal/failfast"
 	"nextdeploy/internal/git"
 	"nextdeploy/internal/logger"
 	"nextdeploy/internal/nextdeploy"
@@ -37,63 +38,38 @@ func init() {
 func runImage() {
 	// Read config file
 	config, err := nextdeploy.Load("nextdeploy.yml")
-	if err != nil {
-		fmt.Printf("Error reading config: %v\n", err)
-		os.Exit(1)
-	}
+	failfast.Failfast(err, failfast.Error, "Failed to load configuration file")
 
 	imageTag, err := git.GetCommitHash()
-	if err != nil {
-		fmt.Printf("Error getting git commit hash: %v\n", err)
-		os.Exit(1)
-	}
+	failfast.Failfast(err, failfast.Error, "Failed to get git commit hash")
 	sm, err := secrets.NewSecretManager()
-	if err != nil {
-		fmt.Printf("Error initializing SecretManager: %v\n", err)
-		os.Exit(1)
-	}
+	failfast.Failfast(err, failfast.Error, "Failed to initialize SecretManager")
 	runLogger.Debug("SecretManager initialized successfully")
 	if sm.IsDopplerEnabled() {
 		// TODO: integrate a nicer doppler secret management logic
 		runLogger.Info("Doppler is enabled, downloading secrets...")
 		err = downloadDopplerSecrets()
-		if err != nil {
-			fmt.Printf("Error downloading Doppler secrets: %v\n", err)
-			os.Exit(1)
-		}
+		failfast.Failfast(err, failfast.Error, "Failed to download Doppler secrets")
 	} else {
 		runLogger.Warn("Doppler is not enabled, skipping secrets download.")
 	}
 	keyPath := sm.GetKey()
 
 	key, err := os.ReadFile(keyPath)
-	if err != nil {
-		runLogger.Error("Error reading file for key master key")
-		os.Exit(1)
-	}
-
+	failfast.Failfast(err, failfast.Error, "Failed to read key file")
 	// Get the key for decrypting the file
 	cwd, err := sm.PrepareAppContext(string(key))
-	if err != nil {
-		runLogger.Error("Error preparing app run context:%s", err)
-		os.Exit(1)
-	}
-
+	failfast.Failfast(err, failfast.Error, "Failed to prepare app context")
 	// the cwd is the current working directory
 	runLogger.Debug("Current working directory: %s", cwd)
-	if err != nil {
-		fmt.Printf("Error preparing app context: %v\n", err)
-		os.Exit(1)
-	}
+	failfast.Failfast(err, failfast.Error, "Failed to prepare app context")
 	// Load secrets
 
 	// Run Docker container
 	fullImage := fmt.Sprintf("%s:%s", config.Docker.Image, imageTag)
+	runLogger.Debug("Full Docker image to run: %s", fullImage)
 	err = runDockerContainer(fullImage)
-	if err != nil {
-		fmt.Printf("Error running Docker container: %v\n", err)
-		os.Exit(1)
-	}
+	failfast.Failfast(err, failfast.Error, "Failed to run Docker container")
 
 	fmt.Println("Docker container started successfully")
 }
@@ -101,32 +77,25 @@ func runImage() {
 func downloadDopplerSecrets() error {
 	cmd := exec.Command("doppler", "secrets", "download", "--no-file", "--format", "env")
 	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("doppler command failed: %w", err)
-	}
+	failfast.Failfast(err, failfast.Error, "Failed to download secrets from Doppler")
 
 	err = os.WriteFile(".env", output, 0644)
-	if err != nil {
-		return fmt.Errorf("could not write .env file: %w", err)
-	}
+	failfast.Failfast(err, failfast.Error, "Failed to write secrets to .env file")
 
 	return nil
 }
 
 func runDockerContainer(image string) error {
 	absPath, err := filepath.Abs(".env")
-	if err != nil {
-		return fmt.Errorf("could not get absolute path for .env: %w", err)
-	}
+	runLogger.Debug("Absolute path for .env file: %s", absPath)
+	failfast.Failfast(err, failfast.Error, "Failed to get absolute path for .env file")
 
 	cmd := exec.Command("docker", "run", "-p", "3000:3000", "--env-file", absPath, image)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	err = cmd.Run()
-	if err != nil {
-		return fmt.Errorf("docker run failed: %w", err)
-	}
+	failfast.Failfast(err, failfast.Error, "Failed to run Docker container")
 	runLogger.Success("Docker container started with image: %s", image)
 
 	return nil

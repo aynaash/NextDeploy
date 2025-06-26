@@ -3,9 +3,8 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"github.com/fatih/color"
-	"github.com/spf13/cobra"
 	"io"
+	"nextdeploy/internal/failfast"
 	"nextdeploy/internal/logger"
 	"nextdeploy/internal/server"
 	"os"
@@ -13,6 +12,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/fatih/color"
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -150,13 +152,11 @@ func verifyServerPrerequisites(ctx context.Context, serverMgr *server.ServerStru
 			return ctx.Err()
 		default:
 			if stream != nil {
-				color.New(color.FgCyan).Fprintf(stream, "➤ %s\n", check.message)
+				PrepLogs.Debug("Running prerequisite check: %s", check.command)
 			}
 
 			output, err := serverMgr.ExecuteCommand(ctx, serverName, check.command, stream)
-			if err != nil {
-				return fmt.Errorf("prerequisite check failed: %w", err)
-			}
+			failfast.Failfast(err, failfast.Error, fmt.Sprintf("Failed to run prerequisite check: %s", check.command))
 
 			if verbose {
 				PrepLogs.Debug("Check %q output:\n%s", check.command, output)
@@ -172,9 +172,7 @@ func installRequiredPackages(ctx context.Context, serverMgr *server.ServerStruct
 
 	// First determine package manager - trim any whitespace from output
 	pkgManager, err := serverMgr.ExecuteCommand(ctx, serverName, "command -v apt-get >/dev/null && echo apt || echo yum", stream)
-	if err != nil {
-		return fmt.Errorf("failed to detect package manager: %w", err)
-	}
+	failfast.Failfast(err, failfast.Error, "Failed to determine package manager")
 
 	// Clean up the package manager string
 	pkgManager = strings.TrimSpace(pkgManager)
@@ -196,9 +194,8 @@ func installRequiredPackages(ctx context.Context, serverMgr *server.ServerStruct
 func installWithApt(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
 	// Check and install base packages only if missing
 	basePkgs := []string{"curl", "git", "make", "gcc", "build-essential"}
-	if err := installIfMissing(ctx, serverMgr, serverName, basePkgs, stream); err != nil {
-		return fmt.Errorf("base packages installation failed: %w", err)
-	}
+	err := installIfMissing(ctx, serverMgr, serverName, basePkgs, stream)
+	failfast.Failfast(err, failfast.Error, "Failed to install base packages")
 
 	// Docker installation check
 	if !isInstalled(ctx, serverMgr, serverName, "docker", stream) {
@@ -397,9 +394,7 @@ func verifyInstallation(ctx context.Context, serverMgr *server.ServerStruct, ser
 			}
 
 			output, err := serverMgr.ExecuteCommand(ctx, serverName, check.command, stream)
-			if err != nil {
-				return fmt.Errorf("%s verification failed: %w", check.tool, err)
-			}
+			failfast.Failfast(err, failfast.Error, fmt.Sprintf("Failed to check %s installation", check.tool))
 
 			if verbose {
 				PrepLogs.Debug("%s version: %s", check.tool, output)

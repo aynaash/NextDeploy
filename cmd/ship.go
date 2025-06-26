@@ -4,14 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"nextdeploy/internal/failfast"
 	"nextdeploy/internal/logger"
 	"nextdeploy/internal/server"
 	"nextdeploy/internal/ship"
 	"os"
 	"os/signal"
-	"time"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
@@ -21,18 +20,9 @@ const (
 )
 
 var (
-	ShipLogs = logger.PackageLogger("ship", "🚢")
-
-	// Color definitions
-	successColor = color.New(color.FgGreen, color.Bold)
-	errorColor   = color.New(color.FgRed, color.Bold)
-	warnColor    = color.New(color.FgYellow, color.Bold)
-	infoColor    = color.New(color.FgCyan, color.Bold)
-	debugColor   = color.New(color.FgMagenta)
-
+	ShipLogs = logger.PackageLogger("ship::", "🚢::")
 	// Command flags
-	forceDeploy bool
-	dryRun      bool
+	dryRun bool
 )
 
 var shipCmd = &cobra.Command{
@@ -52,7 +42,6 @@ func init() {
 }
 
 func Ship(cmd *cobra.Command, args []string) {
-	out := cmd.OutOrStdout()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -63,65 +52,64 @@ func Ship(cmd *cobra.Command, args []string) {
 	go func() {
 		<-c
 		cancel()
-		fmt.Fprintln(out, "\n🚨 Deployment interrupted by user! 🚨")
+		ShipLogs.Debug("Received interrupt signal, cleaning up...")
 		os.Exit(1)
 	}()
-
-	infoColor.Printf("Starting deployment process at %s\n\n", time.Now().Format(time.RFC1123))
+	ShipLogs.Debug("Starting deployment process...")
 
 	if dryRun {
-		warnColor.Println("🚧 DRY RUN MODE: No changes will be made 🚧\n")
+		ShipLogs.Warn("🚧 DRY RUN MODE: No changes will be made 🚧\n")
 	}
 
 	serverMgr, err := server.New(
 		server.WithConfig(),
 		server.WithSSH(),
 	)
-	if err != nil {
-		errorColor.Printf("Failed to initialize server manager: %v\n", err)
-		os.Exit(1)
-	}
+	failfast.Failfast(err, failfast.Error, "Failed to initialize server manager")
 	defer func() {
 		if err := serverMgr.CloseSSHConnections(); err != nil {
-			errorColor.Printf("Error closing connections: %v\n", err)
+			ShipLogs.Error("Error closing connections: %v\n", err)
 		}
 	}()
 
 	servers := serverMgr.ListServers()
 	if len(servers) == 0 {
-		errorColor.Println("No servers configured for deployment")
+		ShipLogs.Debug("No servers configured for deployment")
 		os.Exit(1)
 	}
 	var stream = io.Discard
 
 	if err := runDeployment(ctx, serverMgr, servers, stream); err != nil {
-		errorColor.Printf("Deployment failed: %v\n", err)
+		failfast.Failfast(err, failfast.Error, "Deployment failed")
 		os.Exit(1)
 	}
 
-	successColor.Println("\n🎉 Deployment completed successfully! 🎉")
+	ShipLogs.Success("\n🎉 Deployment completed successfully! 🎉")
 }
 
 func runDeployment(ctx context.Context, serverMgr *server.ServerStruct, servers []string, stream io.Writer) error {
-	infoColor.Println("\n=== PHASE 1: Pre-deployment checks ===")
+	ShipLogs.Info("=== PHASE 1: Pre-deployment checks ===")
 	if err := ship.VerifyServers(ctx, serverMgr, servers, stream); err != nil {
+		failfast.Failfast(err, failfast.Error, "Pre-deployment checks failed")
 		return fmt.Errorf("pre-deployment checks failed: %w", err)
 	}
 
-	infoColor.Println("\n=== PHASE 2: File transfers ===")
+	ShipLogs.Info("=== PHASE 2: File transfers ===")
 	if err := ship.TransferRequiredFiles(ctx, serverMgr, stream, servers[0]); err != nil {
 		return fmt.Errorf("file transfer failed: %w", err)
 	}
 
 	if !dryRun {
-		infoColor.Println("\n=== PHASE 3: Container deployment ===")
+		ShipLogs.Info("=== PHASE 3: Container deployment ===")
 		if err := ship.DeployContainers(ctx, serverMgr, servers[0], stream); err != nil {
+			failfast.Failfast(err, failfast.Error, "Container deployment failed")
 			return fmt.Errorf("container deployment failed: %w", err)
 		}
 	}
 
-	infoColor.Println("\n=== PHASE 4: Post-deployment verification ===", stream)
+	ShipLogs.Info("=== PHASE 4: Post-deployment verification ===", stream)
 	if err := ship.VerifyDeployment(ctx, serverMgr, servers[0], stream); err != nil {
+		failfast.Failfast(err, failfast.Error, "Post-deployment verification failed")
 		return fmt.Errorf("post-deployment verification failed: %w", err)
 	}
 

@@ -18,25 +18,25 @@ func (sm *SecretManager) PrepareAppContext(key string) (string, error) {
 	// Generate encryption key
 
 	// Process nextdeploy.yml
-	ndConfig, err := sm.ProcessConfigFile(cwd, key)
-	if err != nil {
-		return "", fmt.Errorf("config processing failed: %w", err)
-	}
+	// ndConfig, err := sm.ProcessConfigFile(cwd, key)
+	// if err != nil {
+	// 	return "", fmt.Errorf("config processing failed: %w", err)
+	//}
 
 	// Process environment files
-	envFiles, err := sm.processEnvFiles(cwd, key, ndConfig)
-	if err != nil {
-		return "", fmt.Errorf("env file processing failed: %w", err)
-	}
+	// envFiles, err := sm.processEnvFiles(cwd, key, ndConfig)
+	// if err != nil {
+	// 	return "", fmt.Errorf("env file processing failed: %w", err)
+	// }
 
-	// Prepare cleanup defer function
-	var filesToCleanup []string
-	for _, envFile := range envFiles {
-		filesToCleanup = append(filesToCleanup, envFile.DecryptedPath)
-	}
-	filesToCleanup = append(filesToCleanup, ndConfig.DecryptedPath)
-	defer sm.cleanupDecryptedFiles(filesToCleanup)
-
-	SLogs.Info("Application context prepared successfully")
+	// // Prepare cleanup defer function
+	// var filesToCleanup []string
+	// for _, envFile := range envFiles {
+	// 	filesToCleanup = append(filesToCleanup, envFile.DecryptedPath)
+	// }
+	// filesToCleanup = append(filesToCleanup, ndConfig.DecryptedPath)
+	// defer sm.cleanupDecryptedFiles(filesToCleanup)
+	//
+	// SLogs.Info("Application context prepared successfully")
 	return cwd, nil
 }

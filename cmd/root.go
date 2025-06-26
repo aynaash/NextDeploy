@@ -1,6 +1,5 @@
 /*
 NextDeploy - A clean and powerful CLI for Next.js deployments
-Copyright © 2025 Yussuf
 */
 package cmd
 
@@ -59,7 +58,7 @@ Run '%s' to see available commands.
 			fmt.Println(bold("Quick Start:"))
 			fmt.Printf("  %s - Initialize a new project\n", cyan("nextdeploy init"))
 			fmt.Printf("  %s - Build the image for the app\n", cyan("nextdeploy build"))
-			fmt.Printf("  %s - Deploy your app on the vps\n\n", cyan("nextdeploy deploy"))
+			fmt.Printf("  %s - Deploy your app on the vps\n\n", cyan("nextdeploy ship"))
 
 			fmt.Printf("%s %s\n\n",
 				yellow("Docs →"), cyan("https://nextdeploy.one/docs"),

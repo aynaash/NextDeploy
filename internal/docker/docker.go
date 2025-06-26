@@ -363,6 +363,8 @@ func (dm *DockerManager) PushImage(ctx context.Context, imageName string) error 
 		return fmt.Errorf("docker check failed: %w", err)
 	}
 
+	//FIX: TODO add logic for pushing image to ecr
+
 	dlog.Info("Pushing Docker image: %s", imageName)
 	cmd := exec.CommandContext(ctx, "docker", "push", imageName)
 	cmd.Stdout = os.Stdout
