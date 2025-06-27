@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"nextdeploy/internal/config"
+	"nextdeploy/internal/failfast"
 	"nextdeploy/internal/logger"
 	"os"
 	"path/filepath"
@@ -60,10 +61,7 @@ func New(opts ...ServerOption) (*ServerStruct, error) {
 func WithConfig() ServerOption {
 	return func(s *ServerStruct) error {
 		cfg, err := config.Load()
-		serverlogger.Debug("Loading configuration from %v", cfg)
-		if err != nil {
-			return fmt.Errorf("failed to load configuration: %w", err)
-		}
+		failfast.Failfast(err, failfast.Error, "Erro loading config")
 		s.config = cfg
 		serverlogger.Info("Configuration loaded successfully")
 		return nil
@@ -74,7 +72,7 @@ func WithConfig() ServerOption {
 func WithSSH() ServerOption {
 	return func(s *ServerStruct) error {
 		if s.config == nil || len(s.config.Servers) == 0 {
-			return fmt.Errorf("The server configuration is not loaded or no servers configured")
+			return fmt.Errorf("the server configuration is not loaded or no servers configured")
 		}
 
 		s.mu.Lock()
@@ -107,6 +105,7 @@ func WithSSH() ServerOption {
 		}
 
 		if len(errs) > 0 {
+			serverlogger.Debug("errs look like this %s:", errs)
 			return fmt.Errorf("failed to connect to some servers: %v", errs)
 		}
 		return nil
@@ -188,44 +187,37 @@ func getAuthMethods(cfg config.ServerConfig) ([]ssh.AuthMethod, error) {
 		return nil, fmt.Errorf("no SSH key path provided for server %s", cfg.Name)
 	}
 
-	expandedPath := os.ExpandEnv(cfg.KeyPath)
-	if expandedPath == "" {
-		return nil, fmt.Errorf("Invalid key path:%v", cfg.KeyPath)
+	// Handle path expansion
+	expandedPath := cfg.KeyPath
+	if strings.HasPrefix(expandedPath, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get user home directory: %w", err)
+		}
+		expandedPath = filepath.Join(home, expandedPath[1:])
+	}
+	expandedPath = os.ExpandEnv(expandedPath)
+
+	serverlogger.Debug("Key path resolution: %s -> %s", cfg.KeyPath, expandedPath)
+
+	key, err := os.ReadFile(expandedPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read SSH key file %s (resolved to %s): %w",
+			cfg.KeyPath, expandedPath, err)
 	}
 
-	if cfg.KeyPath != "" {
-		if strings.HasSuffix(expandedPath, "~") {
-			home, err := os.UserHomeDir()
-			serverlogger.Debug("Home directory: %s", home)
-			serverlogger.Debug("Key path resolution: %s -> %s",
-				cfg.KeyPath,
-				os.ExpandEnv(cfg.KeyPath))
+	signer, err := ssh.ParsePrivateKey(key)
+	if err != nil {
+		if _, ok := err.(*ssh.PassphraseMissingError); ok && cfg.KeyPassphrase != "" {
+			signer, err = ssh.ParsePrivateKeyWithPassphrase(key, []byte(cfg.KeyPassphrase))
 			if err != nil {
-				return nil, fmt.Errorf("failed to get user home directory: %w", err)
+				return nil, fmt.Errorf("failed to parse SSH private key with passphrase: %w", err)
 			}
-			expandedPath = filepath.Join(home, expandedPath[2:])
-
-			serverlogger.Debug("Expanded SSH key path: %s", expandedPath)
+		} else {
+			return nil, fmt.Errorf("failed to parse SSH private key: %w", err)
 		}
-
-		key, err := os.ReadFile(expandedPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read SSH key file %s: %w", cfg.KeyPath, err)
-		}
-
-		signer, err := ssh.ParsePrivateKey(key)
-		if err != nil {
-			if _, ok := err.(*ssh.PassphraseMissingError); ok && cfg.KeyPassphrase != "" {
-				signer, err = ssh.ParsePrivateKeyWithPassphrase(key, []byte(cfg.KeyPassphrase))
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse SSH private key with passphrase: %w", err)
-				}
-			} else {
-				return nil, fmt.Errorf("failed to parse SSH private key: %w", err)
-			}
-		}
-		authMethods = append(authMethods, ssh.PublicKeys(signer))
 	}
+	authMethods = append(authMethods, ssh.PublicKeys(signer))
 
 	if cfg.Password != "" {
 		authMethods = append(authMethods, ssh.Password(cfg.Password))
@@ -237,7 +229,6 @@ func getAuthMethods(cfg config.ServerConfig) ([]ssh.AuthMethod, error) {
 
 	return authMethods, nil
 }
-
 func getHostKeyCallback() (ssh.HostKeyCallback, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

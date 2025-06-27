@@ -39,9 +39,6 @@ This command will:
 }
 
 func init() {
-	prepareCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show verbose output")
-	prepareCmd.Flags().DurationVar(&timeout, "timeout", 15*time.Minute, "Timeout for the preparation process")
-	prepareCmd.Flags().BoolVar(&streamMode, "stream", true, "Stream command output in real-time")
 	rootCmd.AddCommand(prepareCmd)
 }
 
@@ -70,28 +67,20 @@ func runPrepare(cmd *cobra.Command, args []string) {
 		server.WithConfig(),
 		server.WithSSH(),
 	)
-	if err != nil {
-		PrepLogs.Error("Failed to initialize server manager: %v", err)
-		os.Exit(1)
-	}
+	failfast.Failfast(err, failfast.Error, "Error setting up server")
+
 	defer func() {
-		if err := serverMgr.CloseSSHConnections(); err != nil {
-			PrepLogs.Error("Error closing connections: %v", err)
-		}
+		err := serverMgr.CloseSSHConnections()
+		failfast.Failfast(err, failfast.Error, "Error closing SSH connections")
+
 	}()
 
 	// Determine target server
 	serverName, err := selectTargetServer(ctx, serverMgr)
-	if err != nil {
-		PrepLogs.Error("Failed to select target server: %v", err)
-		os.Exit(1)
-	}
-
+	failfast.Failfast(err, failfast.Error, "Failed to select target server")
 	// Run preparation
-	if err := executePreparation(ctx, serverMgr, serverName, stream); err != nil {
-		PrepLogs.Error("Preparation failed: %v", err)
-		os.Exit(1)
-	}
+	err = executePreparation(ctx, serverMgr, serverName, stream)
+	failfast.Failfast(err, failfast.Error, "Preparation failed")
 
 	PrepLogs.Success("✅ Server %s prepared successfully!", serverName)
 }
@@ -117,20 +106,14 @@ func executePreparation(ctx context.Context, serverMgr *server.ServerStruct, ser
 	PrepLogs.Info("Starting preparation of server %s", serverName)
 
 	// Phase 1: Pre-check
-	if err := verifyServerPrerequisites(ctx, serverMgr, serverName, stream); err != nil {
-		return fmt.Errorf("pre-check failed: %w", err)
-	}
-
+	err := verifyServerPrerequisites(ctx, serverMgr, serverName, stream)
+	failfast.Failfast(err, failfast.Error, "Server prerequisites verification failed")
 	// Phase 2: Installation
-	if err := installRequiredPackages(ctx, serverMgr, serverName, stream); err != nil {
-		return fmt.Errorf("installation failed: %w", err)
-	}
-
+	err = installRequiredPackages(ctx, serverMgr, serverName, stream)
+	failfast.Failfast(err, failfast.Error, "Package installation failed")
 	// Phase 3: Verification
-	if err := verifyInstallation(ctx, serverMgr, serverName, stream); err != nil {
-		return fmt.Errorf("verification failed: %w", err)
-	}
-
+	err = verifyInstallation(ctx, serverMgr, serverName, stream)
+	failfast.Failfast(err, failfast.Error, "Installation verification failed")
 	return nil
 }
 
@@ -211,6 +194,8 @@ func installWithApt(ctx context.Context, serverMgr *server.ServerStruct, serverN
 	} else {
 		logToStream(stream, "✓ Docker already installed", color.FgGreen)
 	}
+	//TODO: 	//sudo apt update
+	// sudo apt install amazon-ecr-credential-helper
 
 	// Caddy installation check
 	if !isInstalled(ctx, serverMgr, serverName, "caddy", stream) {
@@ -223,9 +208,8 @@ func installWithApt(ctx context.Context, serverMgr *server.ServerStruct, serverN
 			"sudo systemctl enable caddy",
 			"sudo systemctl start caddy",
 		}
-		if err := executeCommands(ctx, serverMgr, serverName, caddyCmds, stream); err != nil {
-			return fmt.Errorf("caddy installation failed: %w", err)
-		}
+		err := executeCommands(ctx, serverMgr, serverName, caddyCmds, stream)
+		failfast.Failfast(err, failfast.Error, "Caddy installation failed")
 	} else {
 		logToStream(stream, "✓ Caddy already installed", color.FgGreen)
 	}
@@ -336,9 +320,7 @@ func executeCommands(ctx context.Context, serverMgr *server.ServerStruct, server
 			}
 
 			_, err := serverMgr.ExecuteCommand(ctx, serverName, cmd, stream)
-			if err != nil {
-				return fmt.Errorf("command failed: %q: %w", cmd, err)
-			}
+			failfast.Failfast(err, failfast.Error, fmt.Sprintf("Command failed: %s", cmd))
 		}
 	}
 	return nil
@@ -358,10 +340,8 @@ func CreateAppDirectory(ctx context.Context, serverMgr *server.ServerStruct, ser
 		appDir,
 	)
 
-	if _, err := serverMgr.ExecuteCommand(ctx, serverName, createCmd, os.Stdout); err != nil {
-		return fmt.Errorf("failed to create app directory: %w", err)
-	}
-
+	_, err := serverMgr.ExecuteCommand(ctx, serverName, createCmd, os.Stdout)
+	failfast.Failfast(err, failfast.Error, fmt.Sprintf("Failed to create application directory: %s", appDir))
 	// Verify directory was created
 	verifyCmd := fmt.Sprintf("test -d %s && echo 'exists' || echo 'missing'", appDir)
 	output, err := serverMgr.ExecuteCommand(ctx, serverName, verifyCmd, nil)

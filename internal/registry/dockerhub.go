@@ -2,7 +2,6 @@ package registry
 
 import (
 	"bufio"
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -10,7 +9,6 @@ import (
 	"io"
 	"net/url"
 	"nextdeploy/internal/config"
-	"nextdeploy/internal/docker"
 	"nextdeploy/internal/git"
 	"nextdeploy/internal/logger"
 	"os/exec"
@@ -238,13 +236,6 @@ func (rv *RegistryValidator) tagImage(source, target string) error {
 
 func (rv *RegistryValidator) pushImage(image string) error {
 	rlogger.Info("Pushing image %s", image)
-	// push here
-	dm := docker.NewDockerManager(true, nil)
-	context := context.Background()
-	err := dm.PushImage(context, image)
-	if err != nil {
-		return fmt.Errorf("docker push failed: %w", err)
-	}
 
 	// cmd := exec.Command("docker", "push", image)
 	// stdout, _ := cmd.StdoutPipe()
@@ -323,4 +314,5 @@ func normalizeRegistry(registry string) string {
 
 func stripTag(image string) string {
 	return strings.Split(image, ":")[0]
+
 }

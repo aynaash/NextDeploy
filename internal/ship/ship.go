@@ -2,12 +2,13 @@ package ship
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"nextdeploy/internal/config"
+	"nextdeploy/internal/failfast"
 	"nextdeploy/internal/git"
 	"nextdeploy/internal/logger"
+	"nextdeploy/internal/registry"
 	"nextdeploy/internal/server"
 	"os"
 	"path/filepath"
@@ -244,6 +245,17 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 		ShipLogs.Debug("  Using image: %s\n", image)
 	}
 	ShipLogs.Debug("Image without tag is:%s", image)
+	if cfg.Docker.Registry == "ecr" {
+		ecrContext := registry.ECRContext{
+			ECRRepoName: cfg.Docker.Image,
+			ECRRegion:   cfg.Docker.RegistryRegion,
+		}
+		token, err := registry.PrepareECRPullContext(deployCtx, ecrContext)
+		failfast.Failfast(err, failfast.Error, "Failed to prepare ECR pull context")
+		//  login docker on server
+		_, err = serverMgr.ExecuteCommand(deployCtx, serverName, fmt.Sprintf("echo %s | docker login --username AWS --password-stdin %s", token, ecrContext.ECRURL()), stream)
+		failfast.Failfast(err, failfast.Error, "Failed to login to ECR")
+	}
 
 	ShipLogs.Debug("Full image name: %s", image)
 	pullCommand := fmt.Sprintf("docker pull %s", image)
@@ -294,11 +306,11 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 	}
 
 	//==============Phase 6: Update caddy via api ==============
-	if err := UpdateCaddyConfig(ctx, serverMgr, serverName, newContainerName, newContainerPort, stream); err != nil {
-		stopCommand := fmt.Sprintf("docker stop %s && docker rm %s", newContainerName, newContainerName)
-		serverMgr.ExecuteCommand(deployCtx, serverName, stopCommand, stream)
-		return fmt.Errorf("failed to update Caddy configuration: %w", err)
-	}
+	// if err := UpdateCaddyConfig(ctx, serverMgr, serverName, newContainerName, newContainerPort, stream); err != nil {
+	// 	stopCommand := fmt.Sprintf("docker stop %s && docker rm %s", newContainerName, newContainerName)
+	// 	serverMgr.ExecuteCommand(deployCtx, serverName, stopCommand, stream)
+	// 	return fmt.Errorf("failed to update Caddy configuration: %w", err)
+	// }
 
 	// ===========Phase 7: clean up old containers ==============
 	if currentColor != "" {
@@ -317,6 +329,8 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 	} else {
 		successColor.Println("✓ Caddy service reloaded successfully")
 	}
+	//TODO:--- add way to count successfully deployments by send new deployments to api endpoint
+	//TODO: --- Add feedback collection to api endpoint: or ui from terminal
 
 	successColor.Printf("✓ Containers running:\n%s\n", output)
 	return nil
@@ -344,197 +358,6 @@ func VerifyContainerHealth(serverMgr *server.ServerStruct, serverName, port stri
 }
 
 // Improved updateCaddyConfig with better error handling
-//
-//	func UpdateCaddyConfig(ctx context.Context, serverMgr *server.ServerStruct, serverName, domain, port string, stream io.Writer) error {
-//		const maxRetries = 3
-//		const retryDelay = 500 * time.Millisecond
-//
-//		ShipLogs.Info("Starting Caddy config update",
-//			"domain", domain,
-//			"port", port,
-//			"server", serverName)
-//
-//		// 1. Verify Caddy is running
-//		ShipLogs.Debug("Checking Caddy availability")
-//		if _, err := serverMgr.ExecuteCommand(ctx, serverName, "caddy -v", stream); err != nil {
-//			ShipLogs.Error("Caddy not available", "error", err)
-//			return fmt.Errorf("caddy container not found: %w", err)
-//		}
-//
-//		// 2. Get current config to modify
-//		getConfigCmd := `curl -sS "http://localhost:2019/config/apps/http/servers/srv0"`
-//		ShipLogs.Debug("Fetching current Caddy config")
-//		currentConfig, err := serverMgr.ExecuteCommand(ctx, serverName, getConfigCmd, stream)
-//		if err != nil {
-//			ShipLogs.Error("Failed to get current config", "error", err)
-//			return fmt.Errorf("failed to get current config: %w", err)
-//		}
-//
-//		// 3. Parse and modify config
-//		var config struct {
-//			Routes []map[string]interface{} `json:"routes"`
-//		}
-//		if err := json.Unmarshal([]byte(currentConfig), &config); err != nil {
-//			ShipLogs.Error("Failed to parse config", "error", err)
-//			return fmt.Errorf("failed to parse config: %w", err)
-//		}
-//
-//		// Remove existing route if it exists
-//		ShipLogs.Debug("Removing existing route if present")
-//		filteredRoutes := make([]map[string]interface{}, 0)
-//		for _, route := range config.Routes {
-//			if route["match"] != nil {
-//				if matches, ok := route["match"].([]interface{}); ok {
-//					for _, match := range matches {
-//						if hostMatch, ok := match.(map[string]interface{}); ok {
-//							if hosts, ok := hostMatch["host"].([]interface{}); ok {
-//								for _, h := range hosts {
-//									if h == domain {
-//										continue // Skip this route
-//									}
-//								}
-//							}
-//						}
-//					}
-//				}
-//			}
-//			filteredRoutes = append(filteredRoutes, route)
-//		}
-//
-//		// Add new route
-//		newRoute := map[string]interface{}{
-//			"match": []map[string]interface{}{
-//				{
-//					"host": []string{domain},
-//				},
-//			},
-//			"handle": []map[string]interface{}{
-//				{
-//					"handler": "reverse_proxy",
-//					"upstreams": []map[string]interface{}{
-//						{
-//							"dial": fmt.Sprintf("localhost:%s", port),
-//						},
-//					},
-//				},
-//			},
-//		}
-//		config.Routes = append(filteredRoutes, newRoute)
-//
-//		updatedConfig, err := json.Marshal(config)
-//		if err != nil {
-//			ShipLogs.Error("Failed to marshal updated config", "error", err)
-//			return fmt.Errorf("failed to marshal config: %w", err)
-//		}
-//
-//		// 4. Apply updated config
-//		updateCmd := fmt.Sprintf(
-//			`curl -sS -X POST "http://localhost:2019/load" \
-//	        -H "Content-Type: application/json" \
-//	        -d '%s'`,
-//			strings.ReplaceAll(string(updatedConfig), "'", "'\\''"))
-//
-//		ShipLogs.Debug("Applying updated config", "config", string(updatedConfig))
-//		if _, err := serverMgr.ExecuteCommand(ctx, serverName, updateCmd, stream); err != nil {
-//			ShipLogs.Error("Failed to update config", "error", err)
-//			return fmt.Errorf("failed to update config: %w", err)
-//		}
-//
-//		// 5. Verify update
-//		verifyCmd := `curl -sS "http://localhost:2019/config/apps/http/servers/srv0"`
-//		for i := 0; i < maxRetries; i++ {
-//			ShipLogs.Debug("Verifying config update", "attempt", i+1)
-//			verifyOutput, err := serverMgr.ExecuteCommand(ctx, serverName, verifyCmd, stream)
-//			if err == nil && strings.Contains(verifyOutput, domain) {
-//				ShipLogs.Info("Caddy config updated successfully")
-//				return nil
-//			}
-//			time.Sleep(retryDelay)
-//		}
-//
-//		ShipLogs.Error("Failed to verify config update")
-//		return fmt.Errorf("failed to verify config update after %d attempts", maxRetries)
-//	}
-func UpdateCaddyConfig(ctx context.Context, serverMgr *server.ServerStruct, serverName, domain, port string, stream io.Writer) error {
-	const maxRetries = 3
-	const retryDelay = 500 * time.Millisecond
-
-	ShipLogs.Info("Starting Caddy config update (simulated)",
-		"domain", domain,
-		"port", port,
-		"server", serverName)
-
-	// 1. Simulate Caddy availability check
-	ShipLogs.Debug("Simulating Caddy availability check")
-	if _, err := simulateCommand("caddy -v"); err != nil {
-		ShipLogs.Error("Caddy not available (simulated)", "error", err)
-		return fmt.Errorf("caddy container not found (simulated): %w", err)
-	}
-
-	// 2. Simulate getting current config
-	ShipLogs.Debug("Simulating fetching current Caddy config")
-	currentConfig := simulateCurrentConfig()
-
-	// 3. Parse and modify config (simulated)
-	var config struct {
-		Routes []map[string]interface{} `json:"routes"`
-	}
-	if err := json.Unmarshal([]byte(currentConfig), &config); err != nil {
-		ShipLogs.Error("Failed to parse config (simulated)", "error", err)
-		return fmt.Errorf("failed to parse config (simulated): %w", err)
-	}
-
-	// Simulate removing existing route
-	ShipLogs.Debug("Simulating removing existing route if present")
-	filteredRoutes := simulateRouteRemoval(config.Routes, domain)
-
-	// Simulate adding new route
-	newRoute := map[string]interface{}{
-		"match": []map[string]interface{}{
-			{
-				"host": []string{domain},
-			},
-		},
-		"handle": []map[string]interface{}{
-			{
-				"handler": "reverse_proxy",
-				"upstreams": []map[string]interface{}{
-					{
-						"dial": fmt.Sprintf("localhost:%s", port),
-					},
-				},
-			},
-		},
-	}
-	config.Routes = append(filteredRoutes, newRoute)
-
-	updatedConfig, err := json.Marshal(config)
-	if err != nil {
-		ShipLogs.Error("Failed to marshal updated config (simulated)", "error", err)
-		return fmt.Errorf("failed to marshal config (simulated): %w", err)
-	}
-
-	// 4. Simulate applying updated config
-	ShipLogs.Debug("Simulating applying updated config", "config", string(updatedConfig))
-	if err := simulateConfigUpdate(string(updatedConfig)); err != nil {
-		ShipLogs.Error("Failed to update config (simulated)", "error", err)
-		return fmt.Errorf("failed to update config (simulated): %w", err)
-	}
-
-	// 5. Simulate verification
-	for i := 0; i < maxRetries; i++ {
-		ShipLogs.Debug("Simulating config update verification", "attempt", i+1)
-		if simulateVerifyConfig(domain) {
-			ShipLogs.Info("Caddy config updated successfully (simulated)")
-			return nil
-		}
-		time.Sleep(retryDelay)
-	}
-
-	ShipLogs.Error("Failed to verify config update (simulated)")
-	return fmt.Errorf("failed to verify config update after %d attempts (simulated)", maxRetries)
-}
-
 // Helper simulation functions
 func simulateCommand(cmd string) (string, error) {
 	// Simulate successful command execution

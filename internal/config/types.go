@@ -69,20 +69,21 @@ type Repository struct {
 
 // DockerConfig contains containerization settings
 type DockerConfig struct {
-	Image        string      `yaml:"image"`
-	Registry     string      `yaml:"registry,omitempty"`
-	Build        DockerBuild `yaml:"build"`
-	Push         bool        `yaml:"push"`
-	Username     string      `yaml:"username,omitempty"`
-	Password     string      `yaml:"password,omitempty"`
-	AlwaysPull   bool        `yaml:"alwaysPull,omitempty"`
-	Strategy     string      `yaml:"strategy,omitempty"`
-	AutoPush     bool        `yaml:"autoPush,omitempty"`
-	BuildArgs    []string    `yaml:"buildArgs,omitempty"`
-	Platform     string      `yaml:"platform,omitempty"`
-	NoCache      bool        `yaml:"noCache,omitempty"`
-	BuildContext string      `yaml:"buildContext,omitempty"`
-	Target       string      `yaml:"target,omitempty"`
+	Image          string      `yaml:"image"`
+	Registry       string      `yaml:"registry,omitempty"`
+	RegistryRegion string      `yaml:"registryregion,omitempty"`
+	Build          DockerBuild `yaml:"build"`
+	Push           bool        `yaml:"push"`
+	Username       string      `yaml:"username,omitempty"`
+	Password       string      `yaml:"password,omitempty"`
+	AlwaysPull     bool        `yaml:"alwaysPull,omitempty"`
+	Strategy       string      `yaml:"strategy,omitempty"`
+	AutoPush       bool        `yaml:"autoPush,omitempty"`
+	BuildArgs      []string    `yaml:"buildArgs,omitempty"`
+	Platform       string      `yaml:"platform,omitempty"`
+	NoCache        bool        `yaml:"noCache,omitempty"`
+	BuildContext   string      `yaml:"buildContext,omitempty"`
+	Target         string      `yaml:"target,omitempty"`
 }
 
 // DockerBuild contains Docker build parameters
