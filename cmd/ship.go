@@ -14,15 +14,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	bluePort  = "3001" // Blue container port
-	greenPort = "3002" // Green container port
-)
-
 var (
 	ShipLogs = logger.PackageLogger("ship::", "🚢::")
 	// Command flags
 	dryRun bool
+	fresh  bool // fresh flag for caddy setup
 )
 
 var shipCmd = &cobra.Command{
@@ -38,6 +34,8 @@ var shipCmd = &cobra.Command{
 }
 
 func init() {
+	// add fresh boolean flag for dry run
+	shipCmd.Flags().BoolVarP(&dryRun, "fresh ", "f", false, "Perform caddy setup")
 	rootCmd.AddCommand(shipCmd)
 }
 
@@ -56,10 +54,6 @@ func Ship(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}()
 	ShipLogs.Debug("Starting deployment process...")
-
-	if dryRun {
-		ShipLogs.Warn("🚧 DRY RUN MODE: No changes will be made 🚧\n")
-	}
 
 	serverMgr, err := server.New(
 		server.WithConfig(),
@@ -107,10 +101,16 @@ func runDeployment(ctx context.Context, serverMgr *server.ServerStruct, servers 
 		}
 	}
 
-	ShipLogs.Info("=== PHASE 4: Post-deployment verification ===", stream)
+	ShipLogs.Info("=== PHASE 4: Post-deployment verification ===")
 	if err := ship.VerifyDeployment(ctx, serverMgr, servers[0], stream); err != nil {
 		failfast.Failfast(err, failfast.Error, "Post-deployment verification failed")
 		return fmt.Errorf("post-deployment verification failed: %w", err)
+	}
+
+	ShipLogs.Info(" ==== PHASE 4: Setting up caddy ====")
+	if err := ship.SetupCaddy(ctx, serverMgr, servers[0], fresh, stream); err != nil {
+		failfast.Failfast(err, failfast.Error, "Caddy setup failed")
+		return fmt.Errorf("caddy setup failed: %w", err)
 	}
 
 	return nil

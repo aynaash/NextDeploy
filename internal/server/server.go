@@ -244,6 +244,12 @@ func getHostKeyCallback() (ssh.HostKeyCallback, error) {
 	return hostKeyCallback, nil
 }
 
+func (s *ServerStruct) BasicCaddySetup(ctx context.Context, serverName string, stream io.Writer) error {
+
+	return nil
+
+}
+
 // ExecuteCommand runs a command on the specified server with context support
 // ExecuteCommand runs a command on the specified server with context support and streaming
 func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command string, stream io.Writer) (string, error) {

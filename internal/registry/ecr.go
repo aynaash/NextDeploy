@@ -56,7 +56,7 @@ func PrepareECRPushContext(ctx context.Context, ecr ECRContext) error {
 func PrepareECRPullContext(ctx context.Context, ecr ECRContext) (token string, error error) {
 	ECRLogger.Info("Preparing ECR pull context")
 	// Get login password from aws CLI
-	loginCommand := exec.CommandContext(ctx, "aws", "ecr", "get-login-password", "--region", ecr.ECRRepoName)
+	loginCommand := exec.CommandContext(ctx, "aws", "ecr", "get-login-password", "--region", ecr.ECRRegion)
 	var stdout, stderr bytes.Buffer
 	loginCommand.Stdout = &stdout
 	loginCommand.Stderr = &stderr
@@ -64,13 +64,5 @@ func PrepareECRPullContext(ctx context.Context, ecr ECRContext) (token string, e
 	failfast.Failfast(err, failfast.Error, "Failed to get ECR login password: %s")
 	password := stdout.String()
 	// pip token to docker login
-	dockerLoginCommand := exec.CommandContext(ctx, "docker", "login", "--username", "AWS", "--password-stdin", ecr.ECRURL())
-	dockerLoginCommand.Stdin = bytes.NewBufferString(password)
-	err = dockerLoginCommand.Run()
-	failfast.Failfast(err, failfast.Error, "Failed to login to ECR")
-
-	ECRLogger.Info("Successfully logged in to ECR repository %s", ecr.ECRRepoName)
-	ECRLogger.Success("ECR pull context prepared successfully")
-
 	return password, nil
 }

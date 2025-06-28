@@ -29,7 +29,7 @@ var (
 var prepareCmd = &cobra.Command{
 	Use:   "prepare",
 	Short: "Prepare target server with required tools",
-	Long: `Installs Docker, Caddy, Go and other required tools on the target server.
+	Long: `Installs Docker, Caddy and other required tools on the target server.
 This command will:
 1. Verify server connectivity
 2. Install required packages
@@ -39,11 +39,15 @@ This command will:
 }
 
 func init() {
+	// Add flags for the prepare command
 	rootCmd.AddCommand(prepareCmd)
 }
 
 func runPrepare(cmd *cobra.Command, args []string) {
 	// Create context with timeout
+	if timeout == 0 {
+		timeout = 3 * time.Minute // Default timeout
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -72,7 +76,6 @@ func runPrepare(cmd *cobra.Command, args []string) {
 	defer func() {
 		err := serverMgr.CloseSSHConnections()
 		failfast.Failfast(err, failfast.Error, "Error closing SSH connections")
-
 	}()
 
 	// Determine target server
@@ -108,12 +111,17 @@ func executePreparation(ctx context.Context, serverMgr *server.ServerStruct, ser
 	// Phase 1: Pre-check
 	err := verifyServerPrerequisites(ctx, serverMgr, serverName, stream)
 	failfast.Failfast(err, failfast.Error, "Server prerequisites verification failed")
+	// setup password less sudo
+	failfast.Failfast(err, failfast.Error, "Failed to set up passwordless sudo")
 	// Phase 2: Installation
 	err = installRequiredPackages(ctx, serverMgr, serverName, stream)
 	failfast.Failfast(err, failfast.Error, "Package installation failed")
 	// Phase 3: Verification
 	err = verifyInstallation(ctx, serverMgr, serverName, stream)
 	failfast.Failfast(err, failfast.Error, "Installation verification failed")
+
+	// Phase 4: Setup caddy
+
 	return nil
 }
 
@@ -123,23 +131,36 @@ func verifyServerPrerequisites(ctx context.Context, serverMgr *server.ServerStru
 	checks := []struct {
 		command string
 		message string
+		timeout time.Duration // Individual timeout for each check
 	}{
-		{"uname -a", "Checking system information..."},
-		{"df -h", "Checking disk space..."},
-		{"free -m", "Checking memory..."},
+		{"uname -a", "Checking system information...", 5 * time.Second},
+		{"df -h", "Checking disk space...", 10 * time.Second},
+		{"free -m", "Checking memory...", 5 * time.Second},
 	}
 
 	for _, check := range checks {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			PrepLogs.Error("Prerequisite checks cancelled: %v", ctx.Err())
+			return fmt.Errorf("prerequisite checks cancelled: %w", ctx.Err())
 		default:
 			if stream != nil {
 				PrepLogs.Debug("Running prerequisite check: %s", check.command)
 			}
 
-			output, err := serverMgr.ExecuteCommand(ctx, serverName, check.command, stream)
-			failfast.Failfast(err, failfast.Error, fmt.Sprintf("Failed to run prerequisite check: %s", check.command))
+			// Create a sub-context with individual timeout
+			checkCtx, cancel := context.WithTimeout(ctx, check.timeout)
+			defer cancel()
+
+			output, err := serverMgr.ExecuteCommand(checkCtx, serverName, check.command, stream)
+			if err != nil {
+				fmt.Sprintf("Prerequisite check failed",
+					"command", check.command,
+					"error", err,
+					"timeout", check.timeout)
+				return fmt.Errorf("failed prerequisite check %q: %w", check.command, err)
+			}
+			verbose = true
 
 			if verbose {
 				PrepLogs.Debug("Check %q output:\n%s", check.command, output)
@@ -194,8 +215,6 @@ func installWithApt(ctx context.Context, serverMgr *server.ServerStruct, serverN
 	} else {
 		logToStream(stream, "✓ Docker already installed", color.FgGreen)
 	}
-	//TODO: 	//sudo apt update
-	// sudo apt install amazon-ecr-credential-helper
 
 	// Caddy installation check
 	if !isInstalled(ctx, serverMgr, serverName, "caddy", stream) {
@@ -214,44 +233,7 @@ func installWithApt(ctx context.Context, serverMgr *server.ServerStruct, serverN
 		logToStream(stream, "✓ Caddy already installed", color.FgGreen)
 	}
 
-	// Go installation check
-	if !isInstalled(ctx, serverMgr, serverName, "/usr/local/go/bin/go", stream) {
-		goCmds := []string{
-			"export GOLANG_VERSION=1.21.0",
-			"export ARCH=amd64",
-			"curl -OL https://golang.org/dl/go${GOLANG_VERSION}.linux-${ARCH}.tar.gz",
-			"sudo rm -rf /usr/local/go",
-			"sudo tar -C /usr/local -xzf go${GOLANG_VERSION}.linux-${ARCH}.tar.gz",
-			// Add to both profile files
-			`echo 'export PATH=$PATH:/usr/local/go/bin' | sudo tee -a /etc/profile.d/go.sh >/dev/null`,
-			`echo 'export PATH=$PATH:/usr/local/go/bin' >> $HOME/.bashrc`,
-			// Set permissions
-			"sudo chmod 644 /etc/profile.d/go.sh",
-			// Cleanup
-			"rm go${GOLANG_VERSION}.linux-${ARCH}.tar.gz",
-			// Verify installation using full path
-			"/usr/local/go/bin/go version"}
-		if err := executeCommands(ctx, serverMgr, serverName, goCmds, stream); err != nil {
-			return fmt.Errorf("go installation failed: %w", err)
-		}
-	} else {
-		logToStream(stream, "✓ Go already installed", color.FgGreen)
-		error := ensureGoPath(ctx, serverMgr, serverName, stream)
-		if error != nil {
-			PrepLogs.Warn("Failed to ensure Go PATH: %v", error)
-		}
-	}
-
 	return nil
-}
-func ensureGoPath(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
-	cmds := []string{
-		// Check if PATH is already configured
-		`grep -q '/usr/local/go/bin' /etc/profile.d/go.sh || echo 'export PATH=$PATH:/usr/local/go/bin' | sudo tee -a /etc/profile.d/go.sh >/dev/null`,
-		`grep -q '/usr/local/go/bin' $HOME/.bashrc || echo 'export PATH=$PATH:/usr/local/go/bin' >> $HOME/.bashrc`,
-		"sudo chmod 644 /etc/profile.d/go.sh",
-	}
-	return executeCommands(ctx, serverMgr, serverName, cmds, stream)
 }
 
 // Helper functions
@@ -298,12 +280,6 @@ func installWithYum(ctx context.Context, serverMgr *server.ServerStruct, serverN
 		`sudo yum install -y yum-plugin-copr &&
 		 sudo yum copr enable -y @caddy/caddy &&
 		 sudo yum install -y caddy`,
-		`curl -OL https://golang.org/dl/go1.21.0.linux-amd64.tar.gz &&
-		 sudo rm -rf /usr/local/go &&
-		 sudo tar -C /usr/local -xzf go1.21.0.linux-amd64.tar.gz &&
-		 echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc &&
-		 source ~/.bashrc &&
-		 rm go1.21.0.linux-amd64.tar.gz`,
 	}
 
 	return executeCommands(ctx, serverMgr, serverName, commands, stream)
@@ -352,6 +328,7 @@ func CreateAppDirectory(ctx context.Context, serverMgr *server.ServerStruct, ser
 	PrepLogs.Success("✅ Application directory ready at %s", appDir)
 	return nil
 }
+
 func verifyInstallation(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
 	PrepLogs.Info("Verifying installations...")
 
@@ -359,10 +336,9 @@ func verifyInstallation(ctx context.Context, serverMgr *server.ServerStruct, ser
 		command string
 		tool    string
 	}{
-		// Source profile before checking go to ensure PATH is set
-		{`source /etc/profile.d/go.sh >/dev/null 2>&1 || true; go version`, "Go"},
 		{"docker --version", "Docker"},
-		{"caddy version", "Caddy"}}
+		{"caddy version", "Caddy"},
+	}
 
 	for _, check := range checks {
 		select {

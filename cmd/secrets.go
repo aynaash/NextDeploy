@@ -43,7 +43,7 @@ func encryptFiles() {
 
 	// Check if Doppler is enabled
 	if sm.IsDopplerEnabled() {
-		Elogs.Info("Doppler is enabled, proceeding with file encryption...")
+		Elogs.Info("Doppler is enabled, no need for this whole process...")
 	}
 	// first check if the key exist
 	if sm.IsKeyExist() {

@@ -96,7 +96,8 @@ func TransferRequiredFiles(ctx context.Context, serverMgr *server.ServerStruct, 
 	ShipLogs.Info("Transferring required files to %s...", serverName)
 
 	files := map[string]string{
-		"nextdeploy.yml": "nextdeploy.yml",
+		"nextdeploy.yml.enc": "nextdeploy.yml.enc",
+		".env.enc":           ".env.enc",
 	}
 
 	// Use a directory in the user's home folder instead of /app
@@ -193,13 +194,15 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 	if err != nil {
 		return fmt.Errorf("failed to load configuration to get password and user for logins : %w", err)
 	}
-	if cfg.Docker.Username == "" || cfg.Docker.Password == "" {
-		return fmt.Errorf("Docker configuration is missing username or password")
-	}
-	loginCommand := fmt.Sprintf("docker login --username %s --password %s", cfg.Docker.Username, cfg.Docker.Password)
-	if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, loginCommand, stream); err != nil {
-		warnColor.Printf("  Warning: Failed to login to Docker registry: %v\n", err)
+	if cfg.Docker.Registry == "dockerhub" {
+		if cfg.Docker.Username == "" || cfg.Docker.Password == "" {
+			return fmt.Errorf("Docker configuration is missing username or password")
+		}
+		loginCommand := fmt.Sprintf("docker login --username %s --password %s", cfg.Docker.Username, cfg.Docker.Password)
+		if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, loginCommand, stream); err != nil {
+			warnColor.Printf("  Warning: Failed to login to Docker registry: %v\n", err)
 
+		}
 	}
 	//===== Determin curre deployment green =========
 	currentColor := ""
@@ -246,6 +249,7 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 	}
 	ShipLogs.Debug("Image without tag is:%s", image)
 	if cfg.Docker.Registry == "ecr" {
+
 		ecrContext := registry.ECRContext{
 			ECRRepoName: cfg.Docker.Image,
 			ECRRegion:   cfg.Docker.RegistryRegion,
@@ -253,7 +257,8 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 		token, err := registry.PrepareECRPullContext(deployCtx, ecrContext)
 		failfast.Failfast(err, failfast.Error, "Failed to prepare ECR pull context")
 		//  login docker on server
-		_, err = serverMgr.ExecuteCommand(deployCtx, serverName, fmt.Sprintf("echo %s | docker login --username AWS --password-stdin %s", token, ecrContext.ECRURL()), stream)
+		ShipLogs.Debug("Logging in to ECR with token: %s", token)
+		_, err = serverMgr.ExecuteCommand(deployCtx, serverName, fmt.Sprintf("docker login --username AWS --password-stdin %s", token, ecrContext.ECRURL()), stream)
 		failfast.Failfast(err, failfast.Error, "Failed to login to ECR")
 	}
 
@@ -304,14 +309,6 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 	if err != nil {
 		return fmt.Errorf("failed to check running containers: %w", err)
 	}
-
-	//==============Phase 6: Update caddy via api ==============
-	// if err := UpdateCaddyConfig(ctx, serverMgr, serverName, newContainerName, newContainerPort, stream); err != nil {
-	// 	stopCommand := fmt.Sprintf("docker stop %s && docker rm %s", newContainerName, newContainerName)
-	// 	serverMgr.ExecuteCommand(deployCtx, serverName, stopCommand, stream)
-	// 	return fmt.Errorf("failed to update Caddy configuration: %w", err)
-	// }
-
 	// ===========Phase 7: clean up old containers ==============
 	if currentColor != "" {
 		oldContainerName := fmt.Sprintf("%s-%s", serverName, currentColor)
@@ -439,6 +436,117 @@ func RollbackDeployment(serverMgr *server.ServerStruct, serverName, domain, prev
 
 	_, err := serverMgr.ExecuteCommand(context.Background(), serverName, updateCommand, stream)
 	return err
+}
+
+func SetupCaddy(ctx context.Context, serverMgr *server.ServerStruct, serverName string, fresh bool, stream io.Writer) error {
+	infoColor.Printf("Setting up Caddy on %s...\n", serverName)
+
+	// Check if Caddy is installed
+	if _, err := serverMgr.ExecuteCommand(ctx, serverName, "caddy version", stream); err != nil {
+		return fmt.Errorf("Caddy is not installed on %s: %w", serverName, err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+	domain := cfg.App.Domain
+	email := cfg.SSL.Email
+	if domain == "" {
+		return fmt.Errorf("Caddy domain is not specified in configuration")
+	}
+
+	configContent := fmt.Sprintf(`
+{
+    # Global settings
+    email %s # For Let's Encryp
+    acme_ca https://acme-v02.api.letsencrypt.org/directory
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 100mb
+            roll_keep 5
+        }
+    }
+}
+
+# Primary domain
+%s {
+    # Handle HTTP->HTTPS and www->non-www redirects
+    redir https://%s{uri} permanent
+
+    # WebSocket route matcher
+    @ws {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+
+    # Reverse proxy configuration
+    reverse_proxy @ws localhost:3001  # WebSocket traffic
+    reverse_proxy localhost:3001 localhost:3002 {  # Normal traffic
+        # Next.js optimizations
+        transport http {
+            keepalive 30s
+            tls_insecure_skip_verify  # For local Docker networks
+        }
+
+        # Load balancing
+        lb_policy first
+        lb_try_duration 5s
+        health_uri /health
+        health_interval 10s
+    }
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        -Server  # Remove server header
+    }
+
+    # Cache control (customize per route)
+    @static {
+        path *.css *.js *.jpg *.png *.svg *.ico *.woff2
+    }
+    header @static Cache-Control "public, max-age=31536000, immutable"
+		{
+    admin :2019
+}
+}`, email, domain, domain)
+
+	// Create Caddyfile directory if it doesn't exist
+	if fresh {
+		caddyDir := "/etc/caddy"
+		if _, err := serverMgr.ExecuteCommand(ctx, serverName, fmt.Sprintf("mkdir -p %s && chmod 755 %s", caddyDir, caddyDir), stream); err != nil {
+			return fmt.Errorf("failed to create Caddy directory %s: %w", caddyDir, err)
+		}
+
+		// Write the dynamic Caddyfile
+		caddyFilePath := filepath.Join(caddyDir, "Caddyfile")
+		localfile, err := os.CreateTemp("", "Caddyfile")
+		if err != nil {
+			return fmt.Errorf("failed to create temporary Caddyfile: %w", err)
+		}
+		defer os.Remove(localfile.Name()) // Clean up temp file
+		if _, err := localfile.WriteString(configContent); err != nil {
+			return fmt.Errorf("failed to write Caddyfile content: %w", err)
+		}
+		if err := localfile.Close(); err != nil {
+			return fmt.Errorf("failed to close temporary Caddyfile: %w", err)
+		}
+		// Upload the Caddyfile to the server
+		if err := serverMgr.UploadFile(ctx, serverName, localfile.Name(), caddyFilePath); err != nil {
+			return fmt.Errorf("failed to upload Caddyfile to %s: %w", serverName, err)
+		}
+	}
+
+	// Reload Caddy service
+	if _, err := serverMgr.ExecuteCommand(ctx, serverName, "sudo systemctl reload caddy", stream); err != nil {
+		return fmt.Errorf("failed to reload Caddy service: %w", err)
+	}
+
+	ShipLogs.Success("✓ Caddy setup completed successfully")
+	return nil
 }
 
 func VerifyDeployment(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
