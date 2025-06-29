@@ -320,7 +320,6 @@ func (dm *DockerManager) BuildImage(ctx context.Context, dir string, opts BuildO
 
 // PushImage pushes a Docker image to registry
 func (dm *DockerManager) PushImage(ctx context.Context, imageName string, ProvisionECRUser bool, Fresh bool) error {
-	//TODO: add logic for image push to variaty of registries
 	err := dm.ValidateImageName(imageName)
 	if err != nil {
 		failfast.Failfast(err, failfast.Error, "Invalid Docker image name")
@@ -334,7 +333,6 @@ func (dm *DockerManager) PushImage(ctx context.Context, imageName string, Provis
 		failfast.Failfast(err, failfast.Error, "Failed to load configuration")
 	}
 	if cfg.Docker.Registry == "ecr" {
-		//TODO: add ecr operations context logic
 		dlog.Info("Preparing ECR context for image push")
 		ecrContext := registry.ECRContext{
 			ECRRepoName: cfg.Docker.Image,
