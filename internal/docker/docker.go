@@ -1,3 +1,4 @@
+// NOTE: cross compilation safe
 package docker
 
 import (
@@ -29,8 +30,9 @@ var (
 )
 
 var (
-	forceOverwrite bool
-	skipPrompts    bool
+	forceOverwrite   bool
+	skipPrompts      bool
+	ProvisionEcrUser bool
 )
 
 var (
@@ -54,12 +56,14 @@ type Logger interface {
 }
 
 type BuildOptions struct {
-	ImageName string
-	NoCache   bool
-	Pull      bool
-	Target    string
-	BuildArgs []string
-	Platform  string // Added platform support
+	ImageName        string
+	NoCache          bool
+	Pull             bool
+	Target           string
+	BuildArgs        []string
+	Platform         string // Added platform support
+	ProvisionEcrUser bool   // Flag to provision ECR user
+	Fresh            bool   // Flag to indicate fresh build
 }
 
 // NewDockerManager creates a new DockerManager instance
@@ -315,14 +319,20 @@ func (dm *DockerManager) BuildImage(ctx context.Context, dir string, opts BuildO
 }
 
 // PushImage pushes a Docker image to registry
-func (dm *DockerManager) PushImage(ctx context.Context, imageName string) error {
+func (dm *DockerManager) PushImage(ctx context.Context, imageName string, ProvisionECRUser bool, Fresh bool) error {
 	//TODO: add logic for image push to variaty of registries
 	err := dm.ValidateImageName(imageName)
-	failfast.Failfast(err, failfast.Error, "Invalid Docker image name")
+	if err != nil {
+		failfast.Failfast(err, failfast.Error, "Invalid Docker image name")
+	}
 	err = dm.CheckDockerInstalled()
-	failfast.Failfast(err, failfast.Error, "Docker is not installed or not functioning")
+	if err != nil {
+		failfast.Failfast(err, failfast.Error, "Docker is not installed or not functioning")
+	}
 	cfg, err := config.Load()
-	failfast.Failfast(err, failfast.Error, "Failed to load configuration")
+	if err != nil {
+		failfast.Failfast(err, failfast.Error, "Failed to load configuration")
+	}
 	if cfg.Docker.Registry == "ecr" {
 		//TODO: add ecr operations context logic
 		dlog.Info("Preparing ECR context for image push")
@@ -330,9 +340,22 @@ func (dm *DockerManager) PushImage(ctx context.Context, imageName string) error 
 			ECRRepoName: cfg.Docker.Image,
 			ECRRegion:   cfg.Docker.RegistryRegion,
 		}
+		if ProvisionECRUser {
+			if Fresh {
+				dlog.Info("Provisioning new ECR user and policy and new old ones for name conflict")
+				err = registry.DeleteECRUserAndPolicy()
+			}
+			user, err := registry.CreateECRUserAndPolicy()
+			if err != nil {
+				failfast.Failfast(err, failfast.Error, "Failed to create ECR user and policy")
+			}
+			dlog.Info("ECR user created: %s", user)
+		}
 		dlog.Debug("ECR context: %+v", ecrContext)
-		err := registry.PrepareECRPushContext(ctx, ecrContext)
 		failfast.Failfast(err, failfast.Error, "Failed to prepare ECR context")
+		// prepare ecr push context
+		err = registry.PrepareECRPushContext(ctx, ecrContext)
+		failfast.Failfast(err, failfast.Error, "Failed to prepare ECR push context")
 	}
 
 	dlog.Info("Pushing Docker image: %s", imageName)

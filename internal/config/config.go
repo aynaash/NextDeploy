@@ -1,3 +1,4 @@
+// NOTE: cross compile safe
 package config
 
 import (

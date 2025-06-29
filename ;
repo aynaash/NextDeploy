@@ -1,15 +1,13 @@
-// NOTE: CROSS COMPILE SAFE
 package detect
 
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/spf13/cobra"
 	"nextdeploy/internal/failfast"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/spf13/cobra"
 )
 
 // PackageJSON represents the structure of package.json we care about
@@ -30,14 +28,22 @@ func ValidateNextJSProject(cmd *cobra.Command, args []string) error {
 	}
 
 	absPath, err := filepath.Abs(targetDir)
-	failfast.Failfast(err, failfast.Error, "failed to get absolute path for directory")
-	err = validateDirectory(absPath)
-	failfast.Failfast(err, failfast.Error, "failed to validate directory")
+	if err != nil {
+		return fmt.Errorf("failed to resolve path '%s': %w", targetDir, err)
+	}
+
+	if err := validateDirectory(absPath); err != nil {
+		return err
+	}
+
 	isNextJS, reason, err := IsNextJSProject(absPath)
-	failfast.Failfast(err, failfast.Error, "failed to determine if directory is a Next.js project")
+	if err != nil {
+		return fmt.Errorf("project validation failed: %w", err)
+	}
+
 	if !isNextJS {
 		if reason != "" {
-			failfast.Failfast(fmt.Errorf("directory '%s' is not a Next.js project: %s", absPath, reason), failfast.Error, "directory validation failed")
+			return fmt.Errorf("not a Next.js project: %s", reason)
 		}
 		return fmt.Errorf("directory doesn't appear to be a Next.js project")
 	}
@@ -154,15 +160,11 @@ func hasNextJSStructure(dir string) bool {
 		"public",
 	}
 
-	// More robust directory checking that handles case differences
 	for _, dirPath := range nextjsDirs {
-		if entries, err := os.ReadDir(dir); err == nil {
-			for _, entry := range entries {
-				if strings.EqualFold(entry.Name(), dirPath) && entry.IsDir() {
-					return true
-				}
-			}
+		if info, err := os.Stat(filepath.Join(dir, dirPath)); err == nil && info.IsDir() {
+			return true
 		}
 	}
+
 	return false
 }

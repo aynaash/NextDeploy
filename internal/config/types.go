@@ -8,21 +8,22 @@ import (
 
 // NextDeployConfig represents the complete deployment configuration
 type NextDeployConfig struct {
-	Version     string         `yaml:"version"`
-	App         AppConfig      `yaml:"app"`
-	Repository  Repository     `yaml:"repository"`
-	Docker      DockerConfig   `yaml:"docker"`
-	Deployment  Deployment     `yaml:"deployment"`
-	Database    *Database      `yaml:"database,omitempty"`
-	Monitoring  *Monitoring    `yaml:"monitoring,omitempty"`
-	Secrets     SecretsConfig  `yaml:"secrets"`
-	Logging     Logging        `yaml:"logging,omitempty"`
-	Backup      *Backup        `yaml:"backup,omitempty"`
-	SSL         *SSL           `yaml:"ssl,omitempty"`
-	Webhooks    []Webhook      `yaml:"webhooks,omitempty"`
-	Environment []EnvVariable  `yaml:"environment,omitempty"`
-	Servers     []ServerConfig `yaml:"servers"`
-	SSLConfig   *SSLConfig     `yaml:"ssl_config,omitempty"`
+	Version       string               `yaml:"version"`
+	App           AppConfig            `yaml:"app"`
+	Repository    Repository           `yaml:"repository"`
+	Docker        DockerConfig         `yaml:"docker"`
+	Deployment    Deployment           `yaml:"deployment"`
+	Database      *Database            `yaml:"database,omitempty"`
+	Monitoring    *Monitoring          `yaml:"monitoring,omitempty"`
+	Secrets       SecretsConfig        `yaml:"secrets"`
+	Logging       Logging              `yaml:"logging,omitempty"`
+	Backup        *Backup              `yaml:"backup,omitempty"`
+	SSL           *SSL                 `yaml:"ssl,omitempty"`
+	Webhooks      []Webhook            `yaml:"webhooks,omitempty"`
+	Environment   []EnvVariable        `yaml:"environment,omitempty"`
+	Servers       []ServerConfig       `yaml:"servers"`
+	SSLConfig     *SSLConfig           `yaml:"ssl_config,omitempty"`
+	CloudProvider *CloudProviderStruct `yaml:"cloud_provider,omitempty"`
 }
 type SSLConfig struct {
 	Domain      string `yaml:"domain"`
@@ -39,6 +40,12 @@ type SSLConfig struct {
 	} `yaml:"ssl"`
 }
 
+type CloudProviderStruct struct {
+	Name      string `yaml:"name"`
+	Region    string `yaml:"region"`
+	AccessKey string `yaml:"access_key,omitempty"`
+	SecretKey string `yaml:"secret_key,omitempty"`
+}
 type ServerConfig struct {
 	Name          string `yaml:"name"`
 	Host          string `yaml:"host"`

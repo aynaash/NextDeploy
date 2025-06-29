@@ -15,7 +15,9 @@ import (
 )
 
 var (
-	buildlogger = logger.PackageLogger("BUILD", "🧱 BUILD")
+	buildlogger      = logger.PackageLogger("BUILD", "🧱 BUILD")
+	ProvisionEcrUser bool
+	fresh            = false // delete current exisiting user start a fresh
 )
 
 var buildCmd = &cobra.Command{
@@ -99,6 +101,9 @@ func GenerateImageName(config DockerConfig, gitInfo *git.RepositoryInfo, env str
 func init() {
 	// No flags needed - everything comes from config or auto-detection
 	rootCmd.AddCommand(buildCmd)
+	// provision-ecr-user --fresh
+	buildCmd.Flags().BoolVarP(&fresh, "fresh", "f", false, "Delete current existing user and start fresh")
+	buildCmd.Flags().BoolVar(&ProvisionEcrUser, "provision-ecr-user", false, "Provision ECR user for pushing images")
 }
 
 func buildCmdFunction(cmd *cobra.Command, args []string) error {
@@ -136,16 +141,18 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 	imagename := cfg.Docker.Image + ":" + tag
 	// Auto-configure build options based on environment
 	opts := docker.BuildOptions{
-		ImageName: imagename,
-		NoCache:   env == "production", // No cache in production
-		Pull:      cfg.Docker.AlwaysPull || env == "production",
-		Target:    cfg.Docker.Target,
-		Platform:  cfg.Docker.Platform,
-		BuildArgs: cfg.Docker.BuildArgs,
+		ImageName:        imagename,
+		NoCache:          env == "production", // No cache in production
+		Pull:             cfg.Docker.AlwaysPull || env == "production",
+		Target:           cfg.Docker.Target,
+		Platform:         cfg.Docker.Platform,
+		BuildArgs:        cfg.Docker.BuildArgs,
+		ProvisionEcrUser: ProvisionEcrUser,
+		Fresh:            fresh,
 	}
 
 	// Build options for image are
-	buildlogger.Debug("Build Options: %v", opts)
+	buildlogger.Info("Build Options: %v", opts)
 	// Log what we're doing
 	cmd.Printf("Building %s image for %s environment\n", opts.ImageName, env)
 	if opts.NoCache {
@@ -164,7 +171,7 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 	// Handle push if configured
 	if cfg.Docker.Push {
 		cmd.Println("Pushing image to registry...")
-		if err := dm.PushImage(ctx, opts.ImageName); err != nil {
+		if err := dm.PushImage(ctx, opts.ImageName, opts.ProvisionEcrUser, opts.Fresh); err != nil {
 			return fmt.Errorf("push failed: %w", err)
 		}
 		cmd.Println("Image pushed successfully")

@@ -161,3 +161,15 @@ webhook:
 # Example:
 #   - You can hook this into Notion, Linear, Jira, Slack, or even a custom dashboard.
 #   - Also useful for CI/CD chaining (e.g., notify QA team that staging is ready).
+
+
+
+## CLOUD PROVIDER instructions
+
+CloudProvider:
+  name: aws  # Supported: aws | gcp | azure | digitalocean
+  region: us-north-1 # AWS region (e.g., us-east-1, eu-west-1)
+  access_key: YOUR_AWS_ACCESS_KEY  # IAM user access key
+  secret_key: YOUR_AWS_SECRET_KEY  # IAM user secret key
+  vpc_id: vpc-12345678  # VPC ID for networking (if applicable)
+  subnet_id: subnet-12345678  # Subnet ID for deploying resources

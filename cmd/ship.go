@@ -18,7 +18,7 @@ var (
 	ShipLogs = logger.PackageLogger("ship::", "🚢::")
 	// Command flags
 	dryRun bool
-	fresh  bool // fresh flag for caddy setup
+	new    bool // fresh boolean flag for caddy setup
 )
 
 var shipCmd = &cobra.Command{
@@ -35,7 +35,7 @@ var shipCmd = &cobra.Command{
 
 func init() {
 	// add fresh boolean flag for dry run
-	shipCmd.Flags().BoolVarP(&dryRun, "fresh ", "f", false, "Perform caddy setup")
+	shipCmd.Flags().BoolVarP(&dryRun, "new ", "n", false, "Perform caddy setup")
 	rootCmd.AddCommand(shipCmd)
 }
 

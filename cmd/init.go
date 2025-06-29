@@ -1,3 +1,4 @@
+// NOTE: cross compile safe
 package cmd
 
 // FEATURE: GIVE USER  ABILITY TO START FROM ZERO USING OUR OWN NEXTJS TEMPLATES
