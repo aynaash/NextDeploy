@@ -116,14 +116,6 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 
 	// Initialize components
 	dm := docker.NewDockerManager(true, nil)
-	gitInfo, err := git.GetRepositoryInfo()
-	// Log out the repository info
-	//TODO: Add small logic for printing out information in a nice formatedd way
-	buildlogger.Info("Repository Info: %v", gitInfo)
-	if err != nil {
-		return fmt.Errorf("failed to get git info: %w", err)
-	}
-
 	// Determine environment (dev/prod)
 	env := os.Getenv("NODE_ENV")
 	if env == "" {
@@ -131,13 +123,9 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 	}
 	var builArgs []string
 	for k, v := range cfg.Docker.BuildArgs {
-		builArgs = append(builArgs, fmt.Sprintln("--build-arg=%s=%s", k, v))
+		builArgs = append(builArgs, fmt.Sprintf("--build-arg=%v=%s", k, v))
+		buildlogger.Debug("Build args look like this %v", builArgs)
 	}
-
-	// Logout the git info and env
-	buildlogger.Info("Git Info: %s, Branch: %s, Dirty: %t", gitInfo.CommitHash, gitInfo.BranchName, gitInfo.IsDirty)
-
-	//imagename := GenerateImageName(cfg.Docker, gitInfo, env)
 	tag, _ := git.GetCommitHash()
 	imagename := cfg.Docker.Image + ":" + tag
 	// Auto-configure build options based on environment

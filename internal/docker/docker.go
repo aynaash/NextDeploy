@@ -373,12 +373,20 @@ func (dm *DockerManager) PushImage(ctx context.Context, imageName string, Provis
 		if ProvisionECRUser {
 			if Fresh {
 				dlog.Info("Provisioning new ECR user and policy and new old ones for name conflict")
-				err = registry.DeleteECRUserAndPolicy()
+				// before deleting we we need to confirm user to deleted exists in order to avoid try to non-existing user deletion
+				exists, err := registry.CheckUserExists()
 				if err != nil {
-					dlog.Error("Failed to delete old ECR user and policy: %v", err)
-					return fmt.Errorf("failed to delete old ECR user and policy: %w", err)
-				} else {
-					dlog.Info("Old ECR user and policy deleted successfully")
+					dlog.Error("Failed to check if ECR user exists: %v", err)
+					return fmt.Errorf("failed to check if ECR user exists: %w", err)
+				}
+				if exists {
+					err = registry.DeleteECRUserAndPolicy()
+					if err != nil {
+						dlog.Error("Failed to delete old ECR user and policy: %v", err)
+						return fmt.Errorf("failed to delete old ECR user and policy: %w", err)
+					} else {
+						dlog.Info("Old ECR user and policy deleted successfully")
+					}
 				}
 			}
 			user, err := registry.CreateECRUserAndPolicy()

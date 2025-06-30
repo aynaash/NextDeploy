@@ -234,6 +234,7 @@ func PrepareECRPushContext(ctx context.Context) error {
 	if err != nil {
 		if err != nil && strings.Contains(err.Error(), "RepositoryNotFoundException") {
 			ECRLogger.Info("Repository does not exist, please use provision flag -p to create it")
+			// FIX: err in logic
 			var provisionEcrRepo bool = false
 			if provisionEcrRepo {
 				ECRLogger.Info("Creating ECR repository %s in region %s", ecrCtx.ECRRepoName, ecrCtx.ECRRegion)
@@ -303,6 +304,35 @@ const (
 	}`
 )
 
+func CheckUserExists() (bool, error) {
+	ECRLogger.Info("Checking if ECR user exists")
+	cfg, err := config.Load()
+	if err != nil {
+		return false, err
+	}
+
+	awsCfg, err := awsConfig.LoadDefaultConfig(context.TODO(),
+		awsConfig.WithRegion(cfg.Docker.RegistryRegion),
+	)
+	if err != nil {
+		return false, err
+	}
+
+	iamClient := iam.NewFromConfig(awsCfg)
+	userName := cfg.App.Domain
+
+	_, err = iamClient.GetUser(context.TODO(), &iam.GetUserInput{
+		UserName: aws.String(userName),
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "NoSuchEntity") {
+			return false, nil // User does not exist
+		}
+		return false, fmt.Errorf("failed to check if user exists: %w", err)
+	}
+
+	return true, nil // User exists
+}
 func DeleteECRUserAndPolicy() error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -351,7 +381,6 @@ func cleanupUser(iamClient *iam.Client, userName string) error {
 	})
 	if err != nil {
 		ECRLogger.Warn("User %s does not exist, skipping deletion", userName)
-		return nil
 	}
 
 	return nil
