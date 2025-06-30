@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"nextdeploy/internal/failfast"
 	"nextdeploy/internal/logger"
 	"nextdeploy/internal/server"
 	"nextdeploy/internal/ship"
@@ -59,7 +58,9 @@ func Ship(cmd *cobra.Command, args []string) {
 		server.WithConfig(),
 		server.WithSSH(),
 	)
-	failfast.Failfast(err, failfast.Error, "Failed to initialize server manager")
+	if err != nil {
+		return
+	}
 	defer func() {
 		if err := serverMgr.CloseSSHConnections(); err != nil {
 			ShipLogs.Error("Error closing connections: %v\n", err)
@@ -74,8 +75,8 @@ func Ship(cmd *cobra.Command, args []string) {
 	var stream = io.Discard
 
 	if err := runDeployment(ctx, serverMgr, servers, stream); err != nil {
-		failfast.Failfast(err, failfast.Error, "Deployment failed")
-		os.Exit(1)
+		ShipLogs.Error("Deployment failed: %v", err)
+		return
 	}
 
 	ShipLogs.Success("\n🎉 Deployment completed successfully! 🎉")
@@ -84,7 +85,6 @@ func Ship(cmd *cobra.Command, args []string) {
 func runDeployment(ctx context.Context, serverMgr *server.ServerStruct, servers []string, stream io.Writer) error {
 	ShipLogs.Info("=== PHASE 1: Pre-deployment checks ===")
 	if err := ship.VerifyServers(ctx, serverMgr, servers, stream); err != nil {
-		failfast.Failfast(err, failfast.Error, "Pre-deployment checks failed")
 		return fmt.Errorf("pre-deployment checks failed: %w", err)
 	}
 
@@ -96,20 +96,17 @@ func runDeployment(ctx context.Context, serverMgr *server.ServerStruct, servers 
 	if !dryRun {
 		ShipLogs.Info("=== PHASE 3: Container deployment ===")
 		if err := ship.DeployContainers(ctx, serverMgr, servers[0], stream); err != nil {
-			failfast.Failfast(err, failfast.Error, "Container deployment failed")
 			return fmt.Errorf("container deployment failed: %w", err)
 		}
 	}
 
 	ShipLogs.Info("=== PHASE 4: Post-deployment verification ===")
 	if err := ship.VerifyDeployment(ctx, serverMgr, servers[0], stream); err != nil {
-		failfast.Failfast(err, failfast.Error, "Post-deployment verification failed")
 		return fmt.Errorf("post-deployment verification failed: %w", err)
 	}
 
-	ShipLogs.Info(" ==== PHASE 4: Setting up caddy ====")
+	ShipLogs.Info(" ==== PHASE 4: Refresh caddy  ====")
 	if err := ship.SetupCaddy(ctx, serverMgr, servers[0], fresh, stream); err != nil {
-		failfast.Failfast(err, failfast.Error, "Caddy setup failed")
 		return fmt.Errorf("caddy setup failed: %w", err)
 	}
 

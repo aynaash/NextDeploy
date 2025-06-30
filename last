@@ -1,2 +1,6 @@
-/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/internal/secrets/SecretManager.go
 /home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/cmd/run.go
+/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/internal/secrets/secretmanager.go
+/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/internal/registry/ecr.go
+/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/go.mod
+/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/cmd/build.go
+/home/elitebook/Music/my-saas/twoyears/NextDeploy/NextOperations/internal/docker/docker.go

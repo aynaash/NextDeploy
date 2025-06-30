@@ -1,5 +1,6 @@
 package cmd
 
+// This command should validate all best practices and configurations are correct
 import (
 	"fmt"
 )

@@ -3,7 +3,6 @@ package config
 
 import (
 	"bufio"
-	"nextdeploy/internal/failfast"
 	"nextdeploy/internal/logger"
 	"strconv"
 
@@ -29,7 +28,10 @@ func HandleConfigSetup(cmd *cobra.Command, reader *bufio.Reader) error {
 
 	if defaultConfig {
 		err := GenerateSampleConfig()
-		failfast.Failfast(err, failfast.Error, "Failed to generate sample configuration file")
+		if err != nil {
+			plog.Error("failed to generate sample config: %v", err)
+			return nil
+		}
 		plog.Success("✅ nextdeploy.yml created")
 		return nil
 	}

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"nextdeploy/internal/config"
-	"nextdeploy/internal/failfast"
 	"nextdeploy/internal/git"
 	"nextdeploy/internal/logger"
 	"nextdeploy/internal/registry"
@@ -255,11 +254,15 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 			ECRRegion:   cfg.Docker.RegistryRegion,
 		}
 		token, err := registry.PrepareECRPullContext(deployCtx, ecrContext)
-		failfast.Failfast(err, failfast.Error, "Failed to prepare ECR pull context")
+		if err != nil {
+			return err
+		}
 		//  login docker on server
 		ShipLogs.Debug("Logging in to ECR with token: %s", token)
 		_, err = serverMgr.ExecuteCommand(deployCtx, serverName, fmt.Sprintf("docker login --username AWS --password-stdin %s", token, ecrContext.ECRURL()), stream)
-		failfast.Failfast(err, failfast.Error, "Failed to login to ECR")
+		if err != nil {
+			return err
+		}
 	}
 
 	ShipLogs.Debug("Full image name: %s", image)

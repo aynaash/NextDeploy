@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"nextdeploy/internal/config"
 	"nextdeploy/internal/detect"
-	"nextdeploy/internal/failfast"
 	"nextdeploy/internal/logger"
 	"nextdeploy/internal/registry"
 	"os"
@@ -81,7 +80,14 @@ func (dm *DockerManager) DockerfileExists(dir string) (bool, error) {
 	dlog.Debug("Checking for Dockerfile at: %s", path)
 
 	stat, err := os.Stat(path)
-	failfast.Failfast(err, failfast.Error, "Failed to check Dockerfile existence")
+	if err != nil {
+		if os.IsNotExist(err) {
+			dlog.Debug("Dockerfile does not exist at: %s", path)
+			return false, nil
+		}
+		dlog.Error("Error checking Dockerfile: %v", err)
+		return false, fmt.Errorf("error checking Dockerfile: %w", err)
+	}
 	if stat.IsDir() {
 		dlog.Error("Dockerfile path is a directory, expected a file")
 		return false, fmt.Errorf("dockerfile path is a directory")
@@ -93,12 +99,17 @@ func (dm *DockerManager) DockerfileExists(dir string) (bool, error) {
 // GenerateDockerfile creates a new Dockerfile with content tailored to the package manager
 func (dm *DockerManager) GenerateDockerfile(dir, pkgManager string, overwrite bool) error {
 	exists, err := dm.DockerfileExists(dir)
-	failfast.Failfast(err, failfast.Error, "Failed to check Dockerfile existence")
+	if err != nil {
+		return fmt.Errorf("failed to check Dockerfile existence: %w", err)
+	}
 	if exists && !overwrite {
 		return ErrDockerfileExists
 	}
 	content, err := dm.generateDockerfileContent(pkgManager)
-	failfast.Failfast(err, failfast.Error, "Failed to generate Dockerfile content")
+	if err != nil {
+		return fmt.Errorf("failed to generate Dockerfile content: %w", err)
+	}
+
 	return dm.WriteDockerfile(dir, content)
 }
 
@@ -109,7 +120,10 @@ func (dm *DockerManager) WriteDockerfile(dir, content string) error {
 
 	path := filepath.Join(dir, DockerfileName)
 	err := os.WriteFile(path, []byte(content), 0644)
-	failfast.Failfast(err, failfast.Error, "Failed to write Dockerfile")
+	if err != nil {
+		dlog.Error("Failed to write Dockerfile: %v", err)
+		return fmt.Errorf("failed to write Dockerfile: %w", err)
+	}
 
 	dlog.Success("Dockerfile created successfully at %s", path)
 	return nil
@@ -262,14 +276,20 @@ func (dm *DockerManager) CheckDockerInstalled() error {
 	dlog.Info("Checking if Docker is installed...")
 
 	path, err := exec.LookPath("docker")
-	failfast.Failfast(err, failfast.Error, "Failed to find Docker executable")
+	if err != nil {
+		dlog.Error("Docker not found in PATH: %v", err)
+		return fmt.Errorf("%w: %s", ErrDockerNotInstalled, err)
+	}
 
 	dlog.Success("Docker found at: %s", path)
 
 	// Verify docker is actually working
 	cmd := exec.Command("docker", "version")
 	err = cmd.Run()
-	failfast.Failfast(err, failfast.Error, "Docker is not functioning properly")
+	if err != nil {
+		dlog.Error("Docker command failed: %v", err)
+		return fmt.Errorf("%w: %s", ErrDockerNotInstalled, err)
+	}
 	return nil
 }
 
@@ -278,9 +298,15 @@ func (dm *DockerManager) BuildImage(ctx context.Context, dir string, opts BuildO
 	// print out the options for debugging
 	dlog.Debug("Build options: %+v", opts)
 	err := dm.ValidateImageName(opts.ImageName)
-	failfast.Failfast(err, failfast.Error, "Invalid Docker image name")
+	if err != nil {
+		dlog.Error("Invalid Docker image name: %s", opts.ImageName)
+		return fmt.Errorf("%w: %s", ErrInvalidImageName, err)
+	}
 	exists, err := dm.DockerfileExists(dir)
-	failfast.Failfast(err, failfast.Error, "Failed to check Dockerfile existence")
+	if err != nil {
+		dlog.Error("Failed to check Dockerfile existence: %v", err)
+		return fmt.Errorf("failed to check Dockerfile existence: %w", err)
+	}
 	if !exists {
 		dlog.Error("Dockerfile not found in directory: %s", dir)
 		return ErrDockerfileNotFound
@@ -312,7 +338,10 @@ func (dm *DockerManager) BuildImage(ctx context.Context, dir string, opts BuildO
 	cmd.Stderr = os.Stderr
 
 	err = cmd.Run()
-	failfast.Failfast(err, failfast.Error, "Failed to build Docker image")
+	if err != nil {
+		dlog.Error("Failed to build Docker image: %v", err)
+		return fmt.Errorf("%w: %s", ErrBuildFailed, err)
+	}
 	dlog.Success("Image built successfully: %s", opts.ImageName)
 	// push image
 	return nil
@@ -322,15 +351,18 @@ func (dm *DockerManager) BuildImage(ctx context.Context, dir string, opts BuildO
 func (dm *DockerManager) PushImage(ctx context.Context, imageName string, ProvisionECRUser bool, Fresh bool) error {
 	err := dm.ValidateImageName(imageName)
 	if err != nil {
-		failfast.Failfast(err, failfast.Error, "Invalid Docker image name")
+		dlog.Error("Invalid Docker image name: %s", imageName)
+		return fmt.Errorf("%w: %s", ErrInvalidImageName, err)
 	}
 	err = dm.CheckDockerInstalled()
 	if err != nil {
-		failfast.Failfast(err, failfast.Error, "Docker is not installed or not functioning")
+		dlog.Error("Docker is not installed or not functioning: %v", err)
+		return fmt.Errorf("%w: %s", ErrDockerNotInstalled, err)
 	}
 	cfg, err := config.Load()
 	if err != nil {
-		failfast.Failfast(err, failfast.Error, "Failed to load configuration")
+		dlog.Error("Failed to load configuration: %v", err)
+		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 	if cfg.Docker.Registry == "ecr" {
 		dlog.Info("Preparing ECR context for image push")
@@ -342,18 +374,27 @@ func (dm *DockerManager) PushImage(ctx context.Context, imageName string, Provis
 			if Fresh {
 				dlog.Info("Provisioning new ECR user and policy and new old ones for name conflict")
 				err = registry.DeleteECRUserAndPolicy()
+				if err != nil {
+					dlog.Error("Failed to delete old ECR user and policy: %v", err)
+					return fmt.Errorf("failed to delete old ECR user and policy: %w", err)
+				} else {
+					dlog.Info("Old ECR user and policy deleted successfully")
+				}
 			}
 			user, err := registry.CreateECRUserAndPolicy()
 			if err != nil {
-				failfast.Failfast(err, failfast.Error, "Failed to create ECR user and policy")
+				dlog.Error("Failed to create ECR user and policy: %v", err)
+				return fmt.Errorf("failed to create ECR user and policy: %w", err)
 			}
-			dlog.Info("ECR user created: %s", user)
+			dlog.Info("ECR user created: %v", user)
 		}
 		dlog.Debug("ECR context: %+v", ecrContext)
-		failfast.Failfast(err, failfast.Error, "Failed to prepare ECR context")
 		// prepare ecr push context
-		err = registry.PrepareECRPushContext(ctx, ecrContext)
-		failfast.Failfast(err, failfast.Error, "Failed to prepare ECR push context")
+		err = registry.PrepareECRPushContext(ctx)
+		if err != nil {
+			dlog.Error("Failed to prepare ECR push context: %v", err)
+			return fmt.Errorf("failed to prepare ECR push context: %w", err)
+		}
 	}
 
 	dlog.Info("Pushing Docker image: %s", imageName)
@@ -362,7 +403,10 @@ func (dm *DockerManager) PushImage(ctx context.Context, imageName string, Provis
 	cmd.Stderr = os.Stderr
 
 	err = cmd.Run()
-	failfast.Failfast(err, failfast.Error, "Failed to push Docker image")
+	if err != nil {
+		dlog.Error("Failed to push Docker image: %v", err)
+		return fmt.Errorf("%w: %s", ErrPushFailed, err)
+	}
 	dlog.Success("Image pushed successfully: %s", imageName)
 	return nil
 }
@@ -370,7 +414,10 @@ func (dm *DockerManager) PushImage(ctx context.Context, imageName string, Provis
 func HandleDockerfileSetup(cmd *cobra.Command, dm *DockerManager, reader *bufio.Reader) error {
 	if skipPrompts || config.PromptYesNo(reader, "Set up Dockerfile for your project?") {
 		exists, err := dm.DockerfileExists(".")
-		failfast.Failfast(err, failfast.Error, "Failed to check Dockerfile existence")
+		if err != nil {
+			dlog.Error("Failed to check for Dockerfile: %v", err)
+			return fmt.Errorf("failed to check for Dockerfile: %w", err)
+		}
 
 		if exists {
 			if !forceOverwrite && !skipPrompts && !config.PromptYesNo(reader, "Dockerfile exists. Overwrite?") {
@@ -396,7 +443,10 @@ func HandleDockerfileSetup(cmd *cobra.Command, dm *DockerManager, reader *bufio.
 		}
 
 		err = dm.GenerateDockerfile(".", pkgManager, true)
-		failfast.Failfast(err, failfast.Error, "Failed to generate Dockerfile")
+		if err != nil {
+			dlog.Error("Failed to generate Dockerfile: %v", err)
+			return fmt.Errorf("failed to generate Dockerfile: %w", err)
+		}
 		dlog.Success("Dockerfile created successfully")
 		// Add .dockerignore file creation
 		if skipPrompts || config.PromptYesNo(reader, "Create .dockerignore file?") {
@@ -451,13 +501,19 @@ func updateGitignore() error {
 	}
 
 	f, err := os.OpenFile(".gitignore", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	failfast.Failfast(err, failfast.Error, "Failed to open .gitignore for appending")
+	if err != nil {
+		return fmt.Errorf("failed to open .gitignore file: %w", err)
+	}
 
 	err = f.Close()
-	failfast.Failfast(err, failfast.Error, "Failed to close .gitignore file")
+	if err != nil {
+		return fmt.Errorf("failed to close .gitignore file: %w", err)
+	}
 
 	_, err = f.WriteString(strings.Join(toAdd, "\n") + "\n")
-	failfast.Failfast(err, failfast.Warn, "Failed to write to .gitignore")
+	if err != nil {
+		return fmt.Errorf("failed to write to .gitignore file: %w", err)
+	}
 
 	return nil
 }
@@ -496,7 +552,9 @@ func createDockerignore() error {
 	if _, err := os.Stat(".dockerignore"); err == nil {
 		// Read existing content
 		existingContent, err := os.ReadFile(".dockerignore")
-		failfast.Failfast(err, failfast.Error, "Failed to read existing .dockerignore")
+		if err != nil {
+			return fmt.Errorf("failed to read existing .dockerignore: %w", err)
+		}
 
 		// Split existing content into lines
 		existingLines := strings.Split(string(existingContent), "\n")
@@ -530,13 +588,17 @@ func createDockerignore() error {
 
 		// Write the merged file
 		err = os.WriteFile(".dockerignore", []byte(content), 0644)
-		failfast.Failfast(err, failfast.Error, "Failed to write updated .dockerignore")
+		if err != nil {
+			return fmt.Errorf("failed to update .dockerignore: %w", err)
+		}
 		return nil
 	}
 
 	// Write the file if it doesn't exist
 	content := strings.Join(patterns, "\n")
 	err := os.WriteFile(".dockerignore", []byte(content), 0644)
-	failfast.Failfast(err, failfast.Error, "Failed to create .dockerignore")
+	if err != nil {
+		return fmt.Errorf("failed to create .dockerignore: %w", err)
+	}
 	return nil
 }

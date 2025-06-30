@@ -4,7 +4,6 @@ package detect
 import (
 	"encoding/json"
 	"fmt"
-	"nextdeploy/internal/failfast"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,14 +29,20 @@ func ValidateNextJSProject(cmd *cobra.Command, args []string) error {
 	}
 
 	absPath, err := filepath.Abs(targetDir)
-	failfast.Failfast(err, failfast.Error, "failed to get absolute path for directory")
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path for directory '%s': %w", targetDir, err)
+	}
 	err = validateDirectory(absPath)
-	failfast.Failfast(err, failfast.Error, "failed to validate directory")
+	if err != nil {
+		return fmt.Errorf("failed to validate directory '%s': %w", absPath, err)
+	}
 	isNextJS, reason, err := IsNextJSProject(absPath)
-	failfast.Failfast(err, failfast.Error, "failed to determine if directory is a Next.js project")
+	if err != nil {
+		return fmt.Errorf("failed to validate Next.js project: %w", err)
+	}
 	if !isNextJS {
 		if reason != "" {
-			failfast.Failfast(fmt.Errorf("directory '%s' is not a Next.js project: %s", absPath, reason), failfast.Error, "directory validation failed")
+			return fmt.Errorf("directory '%s' is not a Next.js project: %s", absPath, reason)
 		}
 		return fmt.Errorf("directory doesn't appear to be a Next.js project")
 	}

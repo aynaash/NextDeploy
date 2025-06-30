@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"nextdeploy/internal/config"
-	"nextdeploy/internal/failfast"
 	"nextdeploy/internal/logger"
 	"os"
 	"path/filepath"
@@ -61,7 +60,9 @@ func New(opts ...ServerOption) (*ServerStruct, error) {
 func WithConfig() ServerOption {
 	return func(s *ServerStruct) error {
 		cfg, err := config.Load()
-		failfast.Failfast(err, failfast.Error, "Erro loading config")
+		if err != nil {
+			return fmt.Errorf("failed to load configuration: %w", err)
+		}
 		s.config = cfg
 		serverlogger.Info("Configuration loaded successfully")
 		return nil

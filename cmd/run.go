@@ -1,3 +1,11 @@
+//
+//
+// HERE : In this command we have s small idea of error handling and logging where
+//       we pass go errors to a generic failfast function that handles the error
+//       I have configned it  to this command mostly because i want it reviewed and made better by other devs
+//       NOTE: Please check it out and let me know if you have any suggestions or improvements or you think it is a bad
+//             idea to use this pattern in the project or in any go project
+
 package cmd
 
 import (

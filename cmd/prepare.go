@@ -75,15 +75,25 @@ func runPrepare(cmd *cobra.Command, args []string) {
 
 	defer func() {
 		err := serverMgr.CloseSSHConnections()
-		failfast.Failfast(err, failfast.Error, "Error closing SSH connections")
+		if err != nil {
+			PrepLogs.Error("Failed to close SSH connections: %v", err)
+		} else {
+			PrepLogs.Debug("SSH connections closed successfully")
+		}
 	}()
 
 	// Determine target server
 	serverName, err := selectTargetServer(ctx, serverMgr)
-	failfast.Failfast(err, failfast.Error, "Failed to select target server")
+	if err != nil {
+		PrepLogs.Error("Failed to select target server: %v", err)
+		return
+	}
 	// Run preparation
 	err = executePreparation(ctx, serverMgr, serverName, stream)
-	failfast.Failfast(err, failfast.Error, "Preparation failed")
+	if err != nil {
+		PrepLogs.Error("Preparation failed: %v", err)
+		return
+	}
 
 	PrepLogs.Success("✅ Server %s prepared successfully!", serverName)
 }
@@ -110,18 +120,21 @@ func executePreparation(ctx context.Context, serverMgr *server.ServerStruct, ser
 
 	// Phase 1: Pre-check
 	err := verifyServerPrerequisites(ctx, serverMgr, serverName, stream)
-	failfast.Failfast(err, failfast.Error, "Server prerequisites verification failed")
-	// setup password less sudo
-	failfast.Failfast(err, failfast.Error, "Failed to set up passwordless sudo")
-	// Phase 2: Installation
+	if err != nil {
+		PrepLogs.Error("Server prerequisites verification failed: %v", err)
+		return fmt.Errorf("server prerequisites verification failed: %w", err)
+	}
 	err = installRequiredPackages(ctx, serverMgr, serverName, stream)
-	failfast.Failfast(err, failfast.Error, "Package installation failed")
+	if err != nil {
+		PrepLogs.Error("Failed to install required packages: %v", err)
+		return fmt.Errorf("failed to install required packages: %w", err)
+	}
 	// Phase 3: Verification
 	err = verifyInstallation(ctx, serverMgr, serverName, stream)
-	failfast.Failfast(err, failfast.Error, "Installation verification failed")
-
-	// Phase 4: Setup caddy
-
+	if err != nil {
+		PrepLogs.Error("Installation verification failed: %v", err)
+		return fmt.Errorf("installation verification failed: %w", err)
+	}
 	return nil
 }
 
@@ -176,7 +189,10 @@ func installRequiredPackages(ctx context.Context, serverMgr *server.ServerStruct
 
 	// First determine package manager - trim any whitespace from output
 	pkgManager, err := serverMgr.ExecuteCommand(ctx, serverName, "command -v apt-get >/dev/null && echo apt || echo yum", stream)
-	failfast.Failfast(err, failfast.Error, "Failed to determine package manager")
+	if err != nil {
+		PrepLogs.Error("Failed to determine package manager: %v", err)
+		return fmt.Errorf("failed to determine package manager: %w", err)
+	}
 
 	// Clean up the package manager string
 	pkgManager = strings.TrimSpace(pkgManager)
@@ -199,7 +215,9 @@ func installWithApt(ctx context.Context, serverMgr *server.ServerStruct, serverN
 	// Check and install base packages only if missing
 	basePkgs := []string{"curl", "git", "make", "gcc", "build-essential"}
 	err := installIfMissing(ctx, serverMgr, serverName, basePkgs, stream)
-	failfast.Failfast(err, failfast.Error, "Failed to install base packages")
+	if err != nil {
+		return fmt.Errorf("failed to install base packages: %w", err)
+	}
 
 	// Docker installation check
 	if !isInstalled(ctx, serverMgr, serverName, "docker", stream) {
@@ -228,7 +246,9 @@ func installWithApt(ctx context.Context, serverMgr *server.ServerStruct, serverN
 			"sudo systemctl start caddy",
 		}
 		err := executeCommands(ctx, serverMgr, serverName, caddyCmds, stream)
-		failfast.Failfast(err, failfast.Error, "Caddy installation failed")
+		if err != nil {
+			return fmt.Errorf("caddy installation failed: %w", err)
+		}
 	} else {
 		logToStream(stream, "✓ Caddy already installed", color.FgGreen)
 	}
@@ -347,10 +367,15 @@ func verifyInstallation(ctx context.Context, serverMgr *server.ServerStruct, ser
 		default:
 			if stream != nil {
 				color.New(color.FgBlue).Fprintf(stream, "🔍 Checking %s installation...\n", check.tool)
+				PrepLogs.Debug("Running command: %s", check.command)
+
 			}
 
 			output, err := serverMgr.ExecuteCommand(ctx, serverName, check.command, stream)
-			failfast.Failfast(err, failfast.Error, fmt.Sprintf("Failed to check %s installation", check.tool))
+			if err != nil {
+				PrepLogs.Error("Failed to verify %s installation: %v", check.tool, err)
+				return fmt.Errorf("failed to verify %s installation: %w", check.tool, err)
+			}
 
 			if verbose {
 				PrepLogs.Debug("%s version: %s", check.tool, output)
