@@ -398,7 +398,7 @@ func (dm *DockerManager) PushImage(ctx context.Context, imageName string, Provis
 		}
 		dlog.Debug("ECR context: %+v", ecrContext)
 		// prepare ecr push context
-		err = registry.PrepareECRPushContext(ctx)
+		err = registry.PrepareECRPushContext(ctx, Fresh)
 		if err != nil {
 			dlog.Error("Failed to prepare ECR push context: %v", err)
 			return fmt.Errorf("failed to prepare ECR push context: %w", err)
