@@ -1,7 +1,4 @@
-//go:build ignore
-// +build ignore
-
-package playground
+package registry
 
 import (
 	"fmt"
@@ -10,23 +7,18 @@ import (
 	"strings"
 )
 
-// AddAWSProfile adds or updates an AWS profile in ~/.aws/credentials
-func AddAWSProfile(profileName, accessKeyID, secretAccessKey string) error {
-	// Get the user's home directory
+func AddAWSProfile(profileName, accessKeyId, secretAccessKey string) error {
+	// get home dir
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
-
-	// Path to AWS credentials file
 	credPath := filepath.Join(homeDir, ".aws", "credentials")
-
 	// Create .aws directory if it doesn't exist
 	if err := os.MkdirAll(filepath.Dir(credPath), 0700); err != nil {
 		return fmt.Errorf("failed to create .aws directory: %w", err)
 	}
 
-	// Read existing content if file exists
 	var existingContent string
 	if _, err := os.Stat(credPath); err == nil {
 		content, err := os.ReadFile(credPath)
@@ -35,21 +27,18 @@ func AddAWSProfile(profileName, accessKeyID, secretAccessKey string) error {
 		}
 		existingContent = string(content)
 	}
-
-	// Parse existing profiles
+	// parse existing profiles
 	profiles := parseProfiles(existingContent)
-
-	// Add/update the profile
+	// add/update the profile
 	profiles[profileName] = profile{
-		AccessKeyID:     accessKeyID,
+		AccessKeyID:     accessKeyId,
 		SecretAccessKey: secretAccessKey,
 	}
-
-	// Write back to file
+	// write back to file
 	if err := writeProfiles(credPath, profiles); err != nil {
 		return fmt.Errorf("failed to write credentials file: %w", err)
 	}
-
+	ECRLogger.Info("Added AWS profile %s to %s", profileName, credPath)
 	return nil
 }
 
@@ -115,18 +104,4 @@ func writeProfiles(path string, profiles map[string]profile) error {
 
 	// Then rename to replace original
 	return os.Rename(tempPath, path)
-}
-
-func main() {
-	// Example usage
-	err := AddAWSProfile(
-		"my-new-profile",
-		"AKIAXXXXXXXXXXXXXXXX",
-		"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-	)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-	} else {
-		fmt.Println("Profile added successfully")
-	}
 }
