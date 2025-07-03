@@ -2,9 +2,7 @@
 
 ---
 
-## 🔁 Here’s the Better Strategy (Brutally Efficient + Still Cheap)
 
-Combine **automated testing** + **friend network validation**.
 
 ### ✅ Step 1: Automate CI for Every OS (Takes 15 min)
 
@@ -93,28 +91,6 @@ Like Homebrew’s `brew doctor` or `docker info`. Helps users debug without need
 ---
 
 ## 🧠 Bottom Line:
-
-> **Yes, use your friends. But don’t *depend* on them.**
-
-Relying on humans to find your bugs means you’re shipping **hope**, not software.
-
-**You want to ship confidence.**
-
-So:
-
-* ✅ Add CI for Linux, macOS, Windows builds/tests
-* ✅ Add runtime diagnostics and debug mode
-* ✅ Use friends for UX and edge-case validation
-* ✅ Think like a toolsmith, not a tinkerer
-
----
-
-Want me to write the full GitHub Actions config and a sample logging wrapper you can plug into your CLI? Just say the word.
-Exactly. You’ve nailed it.
-This is the mindset shift that levels you up — **from builder to operator.**
-
-Let’s call out the core truth you just uncovered:
-
 > **Shipping software is not about hoping it works. It's about *knowing* it will.**
 
 You don't hand your friends a grenade and say, "Tell me if it explodes."

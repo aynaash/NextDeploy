@@ -1,120 +1,96 @@
 
-# 🛠️ CONTRIBUTING TO NEXTDEPLOY
+# 🛠️ Contributing to NextDeploy
 
-## 🔥 Welcome to the Engine Room
+## Welcome, Developer.
 
-First, understand this:
+Thanks for your interest in contributing to **NextDeploy** — the focused, fast, and fully self-hosted deployment engine for **Next.js applications**.
 
-**NextDeploy is not a general-purpose deployment tool.**
-
-It is the **Next.js deployment engine** — focused, minimal, and engineered for developers who value control over convenience, clarity over abstraction, and performance over compatibility.
-
-If that’s you, read on. If not, fork it and build your own thing.
+We're building this project with a strong set of principles, so before you dive in, please take a moment to understand the philosophy that drives the codebase.
 
 ---
 
-## 📜 Our Mantra
+## 🚩 What NextDeploy *Is*
 
-> “If you want to build with something other than Next.js — build your own tool.”
+NextDeploy is a **Next.js-only deployment tool**.  
+It gives developers full control over shipping their Next.js apps to any VPS or infrastructure they own.
 
-NextDeploy **does one thing** and does it **violently well**:  
-Deploying **Next.js applications** to your own infrastructure, with zero fluff and full control.
-
----
-
-## 💡 What We Accept
-
-- 🔧 Improvements to the Next.js deployment flow
-- 🧠 Performance enhancements
-- 📈 Metrics, logging, monitoring for Next.js containers
-- 🛡️ Security hardening
-- ⚙️ Daemon updates that enhance orchestration
-- 🧪 New CLI commands that stay within the Next.js lifecycle
-- 📖 Clear, useful documentation improvements
-- 🧼 Bug fixes that keep the engine stable
+- It’s **framework-specific** by design.
+- It’s **plugin-free** to stay lean, testable, and secure.
+- It’s **CLI-first**, with an optional daemon for orchestration and monitoring.
+- It’s **open-source**, and we want contributions that push it forward without bloating it sideways.
 
 ---
 
-## 🚫 What We *Don't* Accept
+## 🚫 What NextDeploy *Is Not*
 
-Don’t waste your time. If your PR includes any of the following, it will be **closed immediately**:
+To avoid confusion:
 
-- ❌ Support for other frameworks (React, Vue, Remix, etc.)
-- ❌ Plugin systems or dynamic runtime extensions
-- ❌ Hosting provider lock-in (we’re infra-agnostic — use your own VPS)
-- ❌ “Make it work with Docker Compose, Heroku, Fly.io” — no.
-- ❌ Generic build tools, webhooks, or CI/CD for non-Next.js use cases
+- We do **not** support other frontend frameworks (e.g., Vue, React SPA, Astro, Remix).
+- We do **not** support vendor-specific hosting (e.g., Fly.io, Heroku, Vercel).
+- We do **not** include a plugin system or third-party extensibility layer.
+- We do **not** aim to be a one-size-fits-all DevOps tool.
 
-We are not interested in becoming a bloated platform. This project is for **Next.js developers** who want to **own their deployments**.
+This lets us keep the project simple, powerful, and laser-focused on Next.js.
+
+---
+
+## ✅ What We’d Love From You
+
+If you're aligned with that vision, here’s how you can help:
+
+- Improve the Next.js deployment flow
+- Add features to the orchestration daemon
+- Fix bugs or edge cases in the CLI/daemon lifecycle
+- Make metrics, health checks, or logging cleaner or more insightful
+- Write clear documentation, examples, and error messages
+- Help us improve developer experience for real-world VPS deployments
 
 ---
 
 ## 🧱 Design Philosophy
 
-### 1. **Next.js or Nothing**
+1. **Next.js Only**  
+   We don't support other frameworks. That’s a strength, not a limitation.
 
-NextDeploy will **never** support other frontend frameworks.  
-That’s a feature, not a limitation.
+2. **No Plugins, No Bloat**  
+   All features are native. If you want to add functionality, fork the project and propose it as a PR.
 
-### 2. **CLI-First, Daemon-Optional**
+3. **Self-Hosted, Always**  
+   NextDeploy gives developers freedom and control — no platform lock-in, ever.
 
-The CLI is 100% open-source and self-contained.  
-The daemon exists to enhance orchestration, not to replace or bloat the core.
-
-### 3. **No Plugin System**
-
-Want new behavior? Fork the project, add it yourself, and make a PR.  
-We don’t do runtime plugins. We ship fast, tight, readable Go code.
-
-### 4. **OSS with Teeth**
-
-This is open source — not open-ended.  
-The project moves fast, breaks what needs to break, and stays lean.
+4. **Open Source, With a Backbone**  
+   We move fast, review carefully, and reject what doesn't fit the mission. It’s not personal — it's about protecting the project.
 
 ---
 
-## 🧬 Branching Model
+## 🛠️ PR Checklist
 
-- `main`: latest stable release
-- `next`: active dev work
-- Feature branches: `feat/your-feature-name`
-- Fix branches: `fix/issue-description`
+Before submitting a pull request, please:
 
-Make PRs into `next`, not `main`.
-
----
-
-## ✅ Contribution Checklist
-
-Before submitting a pull request:
-
-- [ ] You’re fixing/improving something related to **Next.js deployment**
-- [ ] Your code is **tested** and **documented**
-- [ ] You’re not trying to add a plugin system
-- [ ] You’ve followed the repo structure and style
-- [ ] You understand that **Next.js is non-negotiable**
+- [ ] Make sure your feature is related to **Next.js deployment or orchestration**
+- [ ] Keep your changes modular and testable
+- [ ] Avoid introducing external plugins or runtime extensibility
+- [ ] Document your changes clearly
+- [ ] Follow the existing CLI/daemon structure
 
 ---
 
-## ✊ Our Promise
+## 🌱 New Here? Start With These
 
-If your contribution makes **Next.js deployment faster, clearer, or more powerful**, it will be reviewed, discussed, and — if it meets the bar — merged fast.
-
-But we don't merge compromises.
-
----
-
-## 🗣️ Join the Conversation
-
-Open an issue, ask a question, propose a feature. But remember:
-
-We are **not building a platform**.  
-We are building the **Next.js developer's deployment engine of choice**.
+- [x] Check out `nextdeploy.yml` usage
+- [x] Run `nextdeploy init` and follow the flow
+- [x] Review how the CLI interacts with Docker, SSH, and the optional daemon
+- [x] Try a VPS deployment and suggest improvements to DX
 
 ---
 
-Built for developers.  
-Forged for freedom.  
-No fluff. No apologies.
+## 🤝 Let’s Build It Right
 
-— The NextDeploy Core Team [Just me now]
+We care deeply about developer control, simplicity, and performance.  
+If you're here to help Next.js developers own their deployments, you're in the right place.
+
+Pull requests are welcome. Issues are open. We move fast and ship clean.
+
+Thanks for being here.
+
+— The NextDeploy Team
