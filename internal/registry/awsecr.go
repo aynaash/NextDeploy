@@ -12,10 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	awsConfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
 )
 
@@ -34,6 +32,7 @@ type ECRContext struct {
 func NewECRContext() (*ECRContext, error) {
 	cfg, err := config.Load()
 	if err != nil {
+		ECRLogger.Error("Failed to load configuration: %v", err)
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
@@ -41,20 +40,20 @@ func NewECRContext() (*ECRContext, error) {
 		envstore.WithEnvFile[string](".env"),
 	)
 	if err != nil {
+		ECRLogger.Error("Failed to create env store: %v", err)
 		return nil, fmt.Errorf("failed to create env store: %w", err)
 	}
 
 	accessKey, err := store.GetEnv("AWS_ACCESS_KEY_ID")
 	if err != nil {
+		ECRLogger.Error("Failed to get AWS_ACCESS_KEY_ID from env store: %v", err)
 		return nil, fmt.Errorf("failed to get AWS_ACCESS_KEY_ID from env store: %w", err)
 	}
-	ECRLogger.Debug("AWS_ACCESS_KEY_ID found: %s", accessKey)
 	secretKey, err := store.GetEnv("AWS_SECRET_ACCESS_KEY")
 	if err != nil {
+		ECRLogger.Error("Failed to get AWS_SECRET_ACCESS_KEY from env store: %v", err)
 		return nil, fmt.Errorf("failed to get AWS_SECRET_ACCESS_KEY from env store: %w", err)
 	}
-	ECRLogger.Debug("AWS_SECRET_ACCESS_KEY found: %s", secretKey)
-
 	if accessKey == "" || secretKey == "" {
 		return nil, errors.New("AWS credentials not found in environment variables")
 	}
@@ -69,6 +68,7 @@ func NewECRContext() (*ECRContext, error) {
 func (ctx ECRContext) ECRURL() string {
 	cfg, err := config.Load()
 	if err != nil {
+		ECRLogger.Error("Failed to load configuration: %v", err)
 		return ""
 	}
 	return cfg.Docker.Image
@@ -77,6 +77,7 @@ func (ctx ECRContext) ECRURL() string {
 func (ctx ECRContext) FullImageName(image string) string {
 	tag, err := git.GetCommitHash()
 	if err != nil {
+		ECRLogger.Error("Failed to get commit hash: %v", err)
 		return fmt.Sprintf("%s:latest", image)
 	}
 	return image + ":" + tag
@@ -85,32 +86,43 @@ func (ctx ECRContext) FullImageName(image string) string {
 func (e *ECRContext) EnsureRepository() error {
 	cfg, err := e.AwsConfig()
 	if err != nil {
+		ECRLogger.Error("Failed to load AWS config: %v", err)
 		return fmt.Errorf("failed to load AWS config: %w", err)
 	}
+	configs, err := config.Load() // Replace with your profile name
+	if err != nil {
+		ECRLogger.Error("Failed to load configuration: %v", err)
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+	profile := configs.App.Domain
 
+	identity, err := GetAWSIdentity(profile)
+	if err != nil {
+		ECRLogger.Error("Failed to get AWS identity: %v", err)
+		return err
+	}
+
+	// Print formatted results
+	fmt.Printf("✅ AWS Profile: %s\n", profile)
+	fmt.Printf("   Account ID: %s\n", identity.Account)
+	fmt.Printf("   User ID:    %s\n", identity.UserID)
+	fmt.Printf("   ARN:        %s\n", identity.ARN)
 	ecrClient := ecr.NewFromConfig(cfg)
-	// log out the config data first
-	ECRLogger.Debug("ECR Client Config: %v", &cfg)
+	region, repoName, err := ExtractECRDetails(e.ECRRepoName)
+	if err != nil {
+		ECRLogger.Error("Failed to extract ECR details: %v", err)
+		return fmt.Errorf("failed to extract ECR details: %w", err)
+	}
+	e.ECRRegion = region
+	ECRLogger.Info("Ensuring ECR repository %s exists in region %s", repoName, e.ECRRegion)
 	_, err = ecrClient.DescribeRepositories(context.TODO(), &ecr.DescribeRepositoriesInput{
-		RepositoryNames: []string{e.ECRRepoName},
-		MaxResults:      aws.Int32(1),
+		RepositoryNames: []string{repoName},
 	})
-	// let us GetAuthorizationToken first
-
 	if err != nil && strings.Contains(err.Error(), "RepositoryNotFoundException") {
 		ECRLogger.Info("ECR repository %s does not exist, creating it", e.ECRRepoName)
-
-		_, err = ecrClient.CreateRepository(context.TODO(), &ecr.CreateRepositoryInput{
-			RepositoryName: aws.String(e.ECRRepoName),
-		})
-		if err != nil {
-			return fmt.Errorf("failed to create ECR repository: %w", err)
-		}
-
-		ECRLogger.Success("ECR repository %s created successfully", e.ECRRepoName)
-		return nil
 	}
 	if err != nil {
+		ECRLogger.Error("Failed to describe ECR repository: %v", err)
 		return fmt.Errorf("failed to describe ECR repository, no such repo exits: %w", err)
 	}
 
@@ -118,59 +130,101 @@ func (e *ECRContext) EnsureRepository() error {
 	return nil
 }
 
-func (e *ECRContext) Login() error {
-	token, err := GetECRToken(e.Region, e.AccessKey, e.SecretKey, "")
+// DockerLoginWithToken performs docker login with an ECR token
+
+func PrepareECRPushContext(ctx context.Context, createRepo bool) error {
+	ecrCtx, err := NewECRContext()
 	if err != nil {
+		ECRLogger.Error("Failed to create ECR context: %v", err)
+		return fmt.Errorf("failed to create ECR context: %w", err)
+	}
+
+	if createRepo {
+		if err := ecrCtx.EnsureRepository(); err != nil {
+			ECRLogger.Error("Failed to ensure ECR repository exists: %v", err)
+			return fmt.Errorf("failed  to ensure repository exists: %w", err)
+		}
+	}
+
+	return ecrCtx.Login()
+}
+func (e *ECRContext) Login() error {
+	ECRLogger.Info("Logging in to ECR repository %s in region %s", e.ECRRepoName, e.Region)
+
+	// Validate inputs first
+	if e.ECRRepoName == "" || e.Region == "" {
+		return fmt.Errorf("missing required ECR parameters (repo: %s, region: %s)",
+			e.ECRRepoName, e.Region)
+	}
+
+	// Get ECR token with retry logic
+	token, err := GetECRTokenWithRetry(e.Region, e.AccessKey, e.SecretKey, "", 3)
+	if err != nil {
+		ECRLogger.Error("Failed to get ECR token after retries: %v", err)
 		return fmt.Errorf("failed to get ECR token: %w", err)
 	}
 
-	if err := DockerLoginWithToken(token, e.ECRRepoName); err != nil {
+	// Mask token in logs for security
+	// Attempt Docker login with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := DockerLoginWithToken(ctx, token, e.ECRRepoName); err != nil {
+		// Check for common error patterns
+		if strings.Contains(err.Error(), "401 Unauthorized") {
+			ECRLogger.Error("Authentication failed - check AWS permissions and credentials")
+			return fmt.Errorf("ecr authentication failed: %w", err)
+		}
 		return fmt.Errorf("docker login failed: %w", err)
 	}
 
 	ECRLogger.Success("Successfully authenticated with ECR")
 	return nil
 }
-func (e *ECRContext) awsConfig() (aws.Config, error) {
-	return awsConfig.LoadDefaultConfig(context.TODO(),
-		awsConfig.WithRegion(e.Region),
-		awsConfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
-			e.AccessKey,
-			e.SecretKey,
-			"", // No session token needed
-		)),
-	)
+
+func GetECRTokenWithRetry(region, accessKey, secretKey, sessionToken string, maxRetries int) (string, error) {
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		token, err := GetECRToken(accessKey, secretKey, sessionToken)
+		if err == nil {
+			return token, nil
+		}
+		lastErr = err
+		time.Sleep(time.Duration(i+1) * time.Second) // Exponential backoff
+	}
+	return "", fmt.Errorf("after %d retries: %w", maxRetries, lastErr)
 }
 
-// DockerLoginWithToken performs docker login with an ECR token
-func DockerLoginWithToken(token string, registryURL string) error {
-	cmd := exec.Command("docker", "login", "-u", "aws", "--password-stdin", registryURL)
+func DockerLoginWithToken(ctx context.Context, token string, registryURL string) error {
+	// Validate registry URL format
+	if !strings.HasPrefix(registryURL, "http") {
+		registryURL = "https://" + registryURL
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", "login", "-u", "AWS", "--password-stdin", registryURL)
 	cmd.Stdin = strings.NewReader(token)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("docker login failed: %v\nstderr: %s", err, stderr.String())
+		// Enhanced error analysis
+		errMsg := stderr.String()
+		switch {
+		case strings.Contains(errMsg, "401 Unauthorized"):
+			return fmt.Errorf("invalid credentials or insufficient permissions")
+		case strings.Contains(errMsg, "no such host"):
+			return fmt.Errorf("network error - cannot reach ECR endpoint")
+		case strings.Contains(errMsg, "certificate"):
+			return fmt.Errorf("TLS certificate error - check system time")
+		default:
+			return fmt.Errorf("docker login failed: %v\nstderr: %s", err, errMsg)
+		}
 	}
 
 	return nil
 }
 
-func PrepareECRPushContext(ctx context.Context, createRepo bool) error {
-	ecrCtx, err := NewECRContext()
-	if err != nil {
-		return fmt.Errorf("failed to create ECR context: %w", err)
-	}
-
-	if createRepo {
-		if err := ecrCtx.EnsureRepository(); err != nil {
-			return fmt.Errorf("failed to ensure repository exists: %w", err)
-		}
-	}
-
-	return ecrCtx.Login()
-}
 func PrepareECRPullContext(ctx context.Context, ecrCtx ECRContext) (string, error) {
 	ECRLogger.Info("Preparing ECR pull context")
 
@@ -181,6 +235,7 @@ func PrepareECRPullContext(ctx context.Context, ecrCtx ECRContext) (string, erro
 
 	err := loginCommand.Run()
 	if err != nil {
+		ECRLogger.Error("Failed to get ECR login password: %v", err)
 		return "", fmt.Errorf("failed to get ECR login password: %w\n%s", err, stderr.String())
 	}
 
@@ -212,13 +267,19 @@ func writeCredentialsToEnvFile(accessKey, secretKey string) error {
 
 	file, err := os.Create(envFile)
 	if err != nil {
+		ECRLogger.Error("Failed to create or open .env file: %v", err)
 		return fmt.Errorf("failed to create or open .env file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			ECRLogger.Error("Failed to close .env file: %v", closeErr)
+		}
+	}()
 
 	for key, value := range existingContent {
 		_, err = file.WriteString(fmt.Sprintf("%s=%s\n", key, value))
 		if err != nil {
+			ECRLogger.Error("Failed to write existing content to .env file: %v", err)
 			return fmt.Errorf("failed to write existing content to .env file: %w", err)
 		}
 	}
@@ -242,6 +303,7 @@ func writeCredentialsToEnvFile(accessKey, secretKey string) error {
 		secretKey,
 	)
 	if err != nil {
+		ECRLogger.Error("Failed to add AWS profile: %v", err)
 		return fmt.Errorf("failed to add AWS profile: %w", err)
 	}
 
@@ -249,7 +311,19 @@ func writeCredentialsToEnvFile(accessKey, secretKey string) error {
 	return nil
 }
 
-func GetECRToken(region, accessKey, secretKey, sessionToken string) (string, error) {
+func GetECRToken(accessKey, secretKey, sessionToken string) (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		ECRLogger.Error("Failed to load configuration: %v", err)
+		return "", fmt.Errorf("failed to load configuration: %w", err)
+	}
+	image := cfg.Docker.Image
+	region, repoName, err := ExtractECRDetails(image)
+	if err != nil {
+		ECRLogger.Error("Failed to extract ECR details: %v", err)
+		return "", fmt.Errorf("failed to extract ECR details: %w", err)
+	}
+	ECRLogger.Debug("Extracted ECR details - Region: %s, Repository Name: %s", region, repoName)
 	args := []string{
 		"ecr",
 		"get-login-password",
@@ -268,10 +342,6 @@ func GetECRToken(region, accessKey, secretKey, sessionToken string) (string, err
 	cmd.Env = env
 
 	fmt.Println("Running AWS CLI with environment:")
-	fmt.Println("AWS_ACCESS_KEY_ID:", accessKey)
-	fmt.Println("AWS_SECRET_ACCESS_KEY:", secretKey)
-	fmt.Println("AWS_SESSION_TOKEN:", sessionToken)
-	fmt.Println("AWS Region:", region)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

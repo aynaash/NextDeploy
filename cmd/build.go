@@ -141,7 +141,6 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build options for image are
-	buildlogger.Info("Build Options: %v", opts)
 	// Log what we're doing
 	cmd.Printf("Building %s image for %s environment\n", opts.ImageName, env)
 	if opts.NoCache {

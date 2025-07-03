@@ -18,7 +18,7 @@ It deploys **Next.js apps to your own VPS** — with real secrets, real Docker, 
 * 🔑 Injects secrets directly from **Doppler**, securely and dynamically
 * 📦 Ships local or CI builds with full transparency
 * 📊 Streams logs + metrics from your container
-* 🧪 Localtest: run prod-like builds locally using real secrets
+* 🧪 runimage: run prod-like builds locally using real secrets
 
 One tool. One config. No dashboards.
 
@@ -46,16 +46,18 @@ go install github.com/aynaash/nextdeploy@latest
 ```bash
 nextdeploy init       # Dockerfile + nextdeploy.yml scaffold  
 nextdeploy build      # Create production image  
-nextdeploy secrets add    # Manage Doppler secrets
-nextdeploy validate      # validate all config files
-nextdeploy localtest   # test your app locally with Doppler secrets to see if it works
-nextdeploy ship     # Push to your VPS via SSH + Doppler secrets  
+nextdeploy secrets    # Manage Doppler secrets
+nextdeploy runimage     # run your image locally with secrets 
+nextdeploy provision    # provision your server if you want to use the built-in server setup
+nextdeploy prepare    # prepare your server for deployments
+nextdeploy ship     # Push to your VPS via SSH + Doppler secrets and run it 
+nextdeploy serve    # serve your app online  now 
 ```
 
 Need to debug with prod config before deploying?
 
 ```bash
-nextdeploy localtest --env=prod
+nextdeploy runimage --prod
 ```
 
 ---

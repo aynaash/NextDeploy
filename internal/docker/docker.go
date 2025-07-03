@@ -267,14 +267,12 @@ func (dm *DockerManager) ValidateImageName(name string) error {
 		}
 	}
 
-	dlog.Success("Image name validation passed: %s", name)
 	return nil
 }
 
 // CheckDockerInstalled verifies Docker is available
 func (dm *DockerManager) CheckDockerInstalled() error {
 	dlog.Info("Checking if Docker is installed...")
-
 	path, err := exec.LookPath("docker")
 	if err != nil {
 		dlog.Error("Docker not found in PATH: %v", err)
@@ -296,7 +294,6 @@ func (dm *DockerManager) CheckDockerInstalled() error {
 // BuildImage builds a Docker image with options
 func (dm *DockerManager) BuildImage(ctx context.Context, dir string, opts BuildOptions) error {
 	// print out the options for debugging
-	dlog.Debug("Build options: %+v", opts)
 	err := dm.ValidateImageName(opts.ImageName)
 	if err != nil {
 		dlog.Error("Invalid Docker image name: %s", opts.ImageName)
@@ -342,8 +339,6 @@ func (dm *DockerManager) BuildImage(ctx context.Context, dir string, opts BuildO
 		dlog.Error("Failed to build Docker image: %v", err)
 		return fmt.Errorf("%w: %s", ErrBuildFailed, err)
 	}
-	dlog.Success("Image built successfully: %s", opts.ImageName)
-	// push image
 	return nil
 }
 

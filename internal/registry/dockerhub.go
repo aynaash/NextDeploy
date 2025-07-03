@@ -40,6 +40,7 @@ type RegistryValidator struct {
 func New() (*RegistryValidator, error) {
 	cfg, err := config.Load()
 	if err != nil {
+		rlogger.Error("Failed to load configuration: %v", err)
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 	if cfg == nil {
@@ -56,6 +57,7 @@ func New() (*RegistryValidator, error) {
 	}
 
 	if err := rv.ValidateConfig(); err != nil {
+		rlogger.Error("Invalid registry configuration: %v", err)
 		return nil, fmt.Errorf("invalid registry configuration: %w", err)
 	}
 
@@ -65,6 +67,7 @@ func New() (*RegistryValidator, error) {
 // ValidateConfig checks all required registry configuration
 func (rv *RegistryValidator) ValidateConfig() error {
 	if err := validateRequired("registry", rv.registry); err != nil {
+		rlogger.Error("Registry validation failed: %v", err)
 		return err
 	}
 	if !rv.IsValidRegistry(rv.registry) {
@@ -72,6 +75,7 @@ func (rv *RegistryValidator) ValidateConfig() error {
 	}
 
 	if err := validateRequired("image", rv.image); err != nil {
+		rlogger.Error("Image validation failed: %v", err)
 		return err
 	}
 	if !isValidImageName(rv.image) {
@@ -80,9 +84,11 @@ func (rv *RegistryValidator) ValidateConfig() error {
 
 	if rv.NeedsAuth() {
 		if err := validateRequired("username", rv.username); err != nil {
+			rlogger.Error("Username validation failed: %v", err)
 			return err
 		}
 		if err := validateRequired("password", rv.password); err != nil {
+			rlogger.Error("Password validation failed: %v", err)
 			return err
 		}
 	}
@@ -96,24 +102,29 @@ func (rv *RegistryValidator) PushImage(localImage string) error {
 		var err error
 		localImage, err = rv.findLocalImage()
 		if err != nil {
+			rlogger.Error("Failed to find local image: %v", err)
 			return fmt.Errorf("failed to find local image: %w", err)
 		}
 	}
 
 	if err := validateLocalImage(localImage); err != nil {
+		rlogger.Error("Invalid local image: %v", err)
 		return fmt.Errorf("invalid local image: %w", err)
 	}
 
 	targetTag, err := rv.BuildTargetTag()
 	if err != nil {
+		rlogger.Error("Failed to build target tag: %v", err)
 		return fmt.Errorf("failed to build target tag: %w", err)
 	}
 
 	if err := rv.tagImage(localImage, targetTag); err != nil {
+		rlogger.Error("Failed to tag image: %v", err)
 		return fmt.Errorf("failed to tag image: %w", err)
 	}
 
 	if err := rv.pushImage(targetTag); err != nil {
+		rlogger.Error("Failed to push image: %v", err)
 		return fmt.Errorf("failed to push image: %w", err)
 	}
 
@@ -125,6 +136,7 @@ func (rv *RegistryValidator) PushImage(localImage string) error {
 func (rv *RegistryValidator) BuildTargetTag() (string, error) {
 	tag, err := git.GetCommitHash()
 	if err != nil {
+		rlogger.Error("Failed to get commit hash: %v", err)
 		return "", fmt.Errorf("failed to get commit hash: %w", err)
 	}
 
@@ -161,6 +173,7 @@ func (rv *RegistryValidator) GeneratePullSecret() (string, error) {
 
 	configJSON, err := json.Marshal(authConfig)
 	if err != nil {
+		rlogger.Error("Failed to marshal auth config: %v", err)
 		return "", fmt.Errorf("failed to marshal auth config: %w", err)
 	}
 

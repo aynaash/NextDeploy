@@ -43,13 +43,16 @@ func CheckUserExists() (bool, error) {
 	ECRLogger.Info("Checking if ECR user exists")
 	cfg, err := config.Load()
 	if err != nil {
+		ECRLogger.Error("Failed to load configuration: %v", err)
 		return false, err
 	}
 
 	awsCfg, err := awsConfig.LoadDefaultConfig(context.TODO(),
 		awsConfig.WithRegion(cfg.Docker.RegistryRegion),
+		awsConfig.WithSharedConfigProfile("default"),
 	)
 	if err != nil {
+		ECRLogger.Error("Failed to load AWS config: %v", err)
 		return false, err
 	}
 
@@ -60,6 +63,7 @@ func CheckUserExists() (bool, error) {
 		UserName: aws.String(userName),
 	})
 	if err != nil {
+		ECRLogger.Error("Failed to get user %s: %v", userName, err)
 		if strings.Contains(err.Error(), "NoSuchEntity") {
 			return false, nil // User does not exist
 		}
@@ -71,6 +75,7 @@ func CheckUserExists() (bool, error) {
 func DeleteECRUserAndPolicy() error {
 	cfg, err := config.Load()
 	if err != nil {
+		ECRLogger.Error("Failed to load configuration: %v", err)
 		return err
 	}
 
@@ -79,6 +84,7 @@ func DeleteECRUserAndPolicy() error {
 	awsCfg, err := awsConfig.LoadDefaultConfig(context.TODO(),
 		awsConfig.WithRegion(cfg.Docker.RegistryRegion))
 	if err != nil {
+		ECRLogger.Error("Failed to load AWS config: %v", err)
 		return err
 	}
 
@@ -87,6 +93,7 @@ func DeleteECRUserAndPolicy() error {
 
 	err = cleanupUser(iamClient, user)
 	if err != nil {
+		ECRLogger.Error("Failed to clean up user %s: %v", user, err)
 		return err
 	}
 
@@ -95,18 +102,22 @@ func DeleteECRUserAndPolicy() error {
 }
 func cleanupUser(iamClient *iam.Client, userName string) error {
 	if err := deleteAccessKeys(iamClient, userName); err != nil {
+		ECRLogger.Error("Failed to delete access keys for user %s: %v", userName, err)
 		return err
 	}
 
 	if err := detachManagedPolicies(iamClient, userName); err != nil {
+		ECRLogger.Error("Failed to detach managed policies for user %s: %v", userName, err)
 		return err
 	}
 
 	if err := deleteInlinePolicies(iamClient, userName); err != nil {
+		ECRLogger.Error("Failed to delete inline policies for user %s: %v", userName, err)
 		return err
 	}
 
 	if err := removeFromGroups(iamClient, userName); err != nil {
+		ECRLogger.Error("Failed to remove user %s from groups: %v", userName, err)
 		return err
 	}
 
@@ -125,6 +136,7 @@ func deleteAccessKeys(iamClient *iam.Client, userName string) error {
 		UserName: aws.String(userName),
 	})
 	if err != nil {
+		ECRLogger.Error("Failed to list access keys for user %s: %v", userName, err)
 		return err
 	}
 
@@ -134,6 +146,7 @@ func deleteAccessKeys(iamClient *iam.Client, userName string) error {
 			AccessKeyId: key.AccessKeyId,
 		})
 		if err != nil {
+			ECRLogger.Error("Failed to delete access key %s for user %s: %v", *key.AccessKeyId, userName, err)
 			return err
 		}
 		ECRLogger.Info("Deleted access key %s for user %s", *key.AccessKeyId, userName)
@@ -146,6 +159,7 @@ func detachManagedPolicies(iamClient *iam.Client, userName string) error {
 		UserName: aws.String(userName),
 	})
 	if err != nil {
+		ECRLogger.Error("Failed to list attached policies for user %s: %v", userName, err)
 		return err
 	}
 
@@ -155,6 +169,7 @@ func detachManagedPolicies(iamClient *iam.Client, userName string) error {
 			PolicyArn: policy.PolicyArn,
 		})
 		if err != nil {
+			ECRLogger.Error("Failed to detach policy %s from user %s: %v", *policy.PolicyName, userName, err)
 			return err
 		}
 		ECRLogger.Info("Detached policy %s from user %s", *policy.PolicyName, userName)
@@ -167,6 +182,7 @@ func deleteInlinePolicies(iamClient *iam.Client, userName string) error {
 		UserName: aws.String(userName),
 	})
 	if err != nil {
+		ECRLogger.Error("Failed to list inline policies for user %s: %v", userName, err)
 		return err
 	}
 
@@ -176,6 +192,7 @@ func deleteInlinePolicies(iamClient *iam.Client, userName string) error {
 			PolicyName: aws.String(policyName),
 		})
 		if err != nil {
+			ECRLogger.Error("Failed to delete inline policy %s for user %s: %v", policyName, userName, err)
 			return err
 		}
 		ECRLogger.Info("Deleted inline policy %s for user %s", policyName, userName)
@@ -188,6 +205,7 @@ func removeFromGroups(iamClient *iam.Client, userName string) error {
 		UserName: aws.String(userName),
 	})
 	if err != nil {
+		ECRLogger.Error("Failed to list groups for user %s: %v", userName, err)
 		return err
 	}
 
@@ -197,6 +215,7 @@ func removeFromGroups(iamClient *iam.Client, userName string) error {
 			UserName:  aws.String(userName),
 		})
 		if err != nil {
+			ECRLogger.Error("Failed to remove user %s from group %s: %v", userName, *group.GroupName, err)
 			return err
 		}
 		ECRLogger.Info("Removed user %s from group %s", userName, *group.GroupName)
@@ -204,7 +223,7 @@ func removeFromGroups(iamClient *iam.Client, userName string) error {
 	return nil
 }
 
-func deleteLoginProfile(iamClient *iam.Client, userName string) error {
+func DeleteLoginProfile(iamClient *iam.Client, userName string) error {
 	_, err := iamClient.DeleteLoginProfile(context.TODO(), &iam.DeleteLoginProfileInput{
 		UserName: aws.String(userName),
 	})
@@ -219,14 +238,15 @@ func deleteLoginProfile(iamClient *iam.Client, userName string) error {
 func CreateECRUserAndPolicy() (*types.User, error) {
 	cfg, err := config.Load()
 	if err != nil {
+		ECRLogger.Error("Failed to load configuration: %v", err)
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 	awsCfg, err := awsConfig.LoadDefaultConfig(context.TODO(),
 		awsConfig.WithRegion(cfg.Docker.RegistryRegion),
-		//NOTE: WE MAKE SURE THIS GENERIC AND SETUP BY USER
 		awsConfig.WithSharedConfigProfile("default"),
 	)
 	if err != nil {
+		ECRLogger.Error("Failed to load AWS config: %v", err)
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
@@ -235,16 +255,19 @@ func CreateECRUserAndPolicy() (*types.User, error) {
 
 	user, err := createUser(iamClient, name)
 	if err != nil {
+		ECRLogger.Error("Failed to create IAM user for ECR access: %v", err)
 		return nil, fmt.Errorf("failed to create IAM user for ECR access: %w", err)
 	}
 
 	policyArn, err := createPolicy(iamClient, name+"-ecr-policy", policyDocument)
 	if err != nil {
+		ECRLogger.Error("Failed to create IAM policy for ECR access: %v", err)
 		return nil, fmt.Errorf("failed to create IAM policy for ECR access: %w", err)
 	}
 
 	err = attachPolicyToUser(iamClient, policyArn, name, name+"-ecr-policy")
 	if err != nil {
+		ECRLogger.Error("Failed to attach policy to user %s: %v", name, err)
 		return nil, fmt.Errorf("failed to attach policy %s to user %s: %w", name+"-ecr-policy", name, err)
 	}
 
@@ -252,6 +275,7 @@ func CreateECRUserAndPolicy() (*types.User, error) {
 
 	accessKey, secretKey, err := createAccessKey(iamClient, name)
 	if err != nil {
+		ECRLogger.Error("Failed to create access key for ECR user: %v", err)
 		return nil, fmt.Errorf("failed to create access key for ECR user: %w", err)
 	}
 
@@ -259,6 +283,7 @@ func CreateECRUserAndPolicy() (*types.User, error) {
 
 	err = writeCredentialsToEnvFile(accessKey, secretKey)
 	if err != nil {
+		ECRLogger.Error("Failed to write ECR credentials to .env file: %v", err)
 		return nil, fmt.Errorf("failed to write ECR credentials to .env file: %w", err)
 	}
 
@@ -271,10 +296,10 @@ func createUser(iamClient *iam.Client, userName string) (*types.User, error) {
 		UserName: aws.String(userName),
 	})
 	if err != nil {
+		ECRLogger.Error("Failed to create user %s: %v", userName, err)
 		return nil, err
 	}
 
-	ECRLogger.Debug("User created looks like this: %v", output.User)
 	return output.User, nil
 }
 
@@ -284,6 +309,7 @@ func createPolicy(iamClient *iam.Client, policyName string, policyDocument strin
 		MaxItems: aws.Int32(maxPolicies),
 	})
 	if err != nil {
+		ECRLogger.Error("Failed to list policies: %v", err)
 		return "", fmt.Errorf("failed to list policies: %w", err)
 	}
 
@@ -313,6 +339,7 @@ func getPolicyARN(iamClient *iam.Client, policyName string) (string, error) {
 		MaxItems: aws.Int32(maxPolicies),
 	})
 	if err != nil {
+		ECRLogger.Error("Failed to list policies: %v", err)
 		return "", fmt.Errorf("failed to list policies: %w", err)
 	}
 
@@ -331,6 +358,7 @@ func attachPolicyToUser(iamClient *iam.Client, policyArn string, userName string
 		PolicyArn: aws.String(policyArn),
 	})
 	if err != nil {
+		ECRLogger.Error("Failed to attach policy %s to user %s: %v", policyName, userName, err)
 		return err
 	}
 
@@ -353,6 +381,7 @@ func createAccessKey(iamClient *iam.Client, userName string) (string, string, er
 			})
 		}
 		if err != nil {
+			ECRLogger.Error("Failed to create access key for user %s: %v", userName, err)
 			return "", "", fmt.Errorf("failed to create access key for user %s: %w", userName, err)
 		}
 	}
@@ -367,14 +396,14 @@ func VerifyECRAccess(region, accessKey, secretKey, sessionToken string) error {
 		awsConfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, sessionToken)),
 	)
 	if err != nil {
+		ECRLogger.Error("Unable to load AWS config: %v", err)
 		return fmt.Errorf("unable to load AWS config: %w", err)
 	}
 
 	ecrClient := ecr.NewFromConfig(cfg)
-	_, err = ecrClient.DescribeRepositories(context.TODO(), &ecr.DescribeRepositoriesInput{
-		MaxResults: aws.Int32(1),
-	})
+	_, err = ecrClient.DescribeRepositories(context.TODO(), &ecr.DescribeRepositoriesInput{})
 	if err != nil {
+		ECRLogger.Error("Failed to describe ECR repositories: %v", err)
 		if strings.Contains(err.Error(), "AccessDeniedException") {
 			return fmt.Errorf("access denied to ECR in region %s with provided credentials", region)
 		}

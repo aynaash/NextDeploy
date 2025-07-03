@@ -1,8 +1,10 @@
 package registry
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -49,22 +51,25 @@ type profile struct {
 
 func parseProfiles(content string) map[string]profile {
 	profiles := make(map[string]profile)
-	currentProfile := ""
+	var currentProfile string
 
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
-		if len(line) == 0 {
+		if line == "" {
 			continue
 		}
 
-		if strings.HasPrefix(line, "[") && strings.HasPrefix(line, "]") {
-			// New profile section
+		// Detect profile section
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			currentProfile = strings.Trim(line, "[]")
 			if _, exists := profiles[currentProfile]; !exists {
 				profiles[currentProfile] = profile{}
 			}
-		} else if currentProfile != "" {
-			// Profile property
+			continue
+		}
+
+		// Parse key-value pairs only within a profile section
+		if currentProfile != "" {
 			parts := strings.SplitN(line, "=", 2)
 			if len(parts) == 2 {
 				key := strings.TrimSpace(parts[0])
@@ -77,12 +82,10 @@ func parseProfiles(content string) map[string]profile {
 				case "aws_secret_access_key":
 					p.SecretAccessKey = value
 				}
-
 				profiles[currentProfile] = p
 			}
 		}
 	}
-
 	return profiles
 }
 
@@ -104,4 +107,30 @@ func writeProfiles(path string, profiles map[string]profile) error {
 
 	// Then rename to replace original
 	return os.Rename(tempPath, path)
+}
+
+type AWSCallerIdentity struct {
+	Account string `json:"Account"`
+	UserID  string `json:"UserId"`
+	ARN     string `json:"Arn"`
+}
+
+// GetAWSIdentity fetches the AWS caller identity for a given profile
+func GetAWSIdentity(profile string) (*AWSCallerIdentity, error) {
+	// Construct the AWS CLI command
+	cmd := exec.Command("aws", "sts", "get-caller-identity", "--profile", profile)
+
+	// Run the command and capture output
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("AWS CLI error: %v\nOutput: %s", err, string(output))
+	}
+
+	// Parse JSON output
+	var identity AWSCallerIdentity
+	if err := json.Unmarshal(output, &identity); err != nil {
+		return nil, fmt.Errorf("failed to parse AWS response: %v", err)
+	}
+
+	return &identity, nil
 }

@@ -31,9 +31,8 @@ func WithEnvFile[T any](filename string) Option[T] {
 
 		// Convert env data to type T - this is simplistic and would need adaptation
 		// based on how you want to map env vars to your type T
-		for k, v := range envData {
+		for k, _ := range envData {
 			// This is a placeholder - actual conversion depends on T
-			storeLogger.Debug("Loading env var %s with value %s", k, v)
 			var value T
 			// You'd need type-specific conversion here
 			s.data[k] = value
