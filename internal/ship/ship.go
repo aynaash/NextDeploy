@@ -14,8 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/fatih/color"
 )
 
 const (
@@ -24,20 +22,12 @@ const (
 )
 
 var (
-	ShipLogs = logger.PackageLogger("ship", "🚢")
-
-	// Color definitions
-	successColor = color.New(color.FgGreen, color.Bold)
-	warnColor    = color.New(color.FgYellow, color.Bold)
-	infoColor    = color.New(color.FgCyan, color.Bold)
-	debugColor   = color.New(color.FgMagenta)
-
-	// Command flags
+	ShipLogs    = logger.PackageLogger("ship", "🚢")
 	forceDeploy bool
 )
 
 func VerifyServers(ctx context.Context, serverMgr *server.ServerStruct, servers []string, stream io.Writer) error {
-	infoColor.Println("Verifying server connectivity and requirements...")
+	ShipLogs.Info("Verifying server connectivity and requirements...")
 
 	var wg sync.WaitGroup
 	errorChan := make(chan error, len(servers))
@@ -69,7 +59,7 @@ func VerifyServers(ctx context.Context, serverMgr *server.ServerStruct, servers 
 				errorChan <- fmt.Errorf("failed to check disk space on %s: %w", serverName, err)
 				return
 			}
-			debugColor.Printf("[%s] Disk space:\n%s\n", serverName, output)
+			ShipLogs.Debug("[%s] Disk space:\n%s\n", serverName, output)
 		}(name)
 	}
 
@@ -84,10 +74,10 @@ func VerifyServers(ctx context.Context, serverMgr *server.ServerStruct, servers 
 	if len(errors) > 0 && !forceDeploy {
 		return fmt.Errorf("server verification failed: %v", errors)
 	} else if len(errors) > 0 {
-		warnColor.Println("Proceeding with deployment despite verification issues (force flag set)")
+		ShipLogs.Info("Proceeding with deployment despite verification issues (force flag set)")
 	}
 
-	successColor.Println("✓ All server checks completed")
+	ShipLogs.Success("✓ All server checks completed")
 	return nil
 }
 
@@ -101,7 +91,7 @@ func TransferRequiredFiles(ctx context.Context, serverMgr *server.ServerStruct, 
 
 	// Use a directory in the user's home folder instead of /app
 	homeDir, err := serverMgr.ExecuteCommand(ctx, serverName, "echo $HOME", stream)
-	infoColor.Printf("User home directory on %s: %s\n", serverName, homeDir)
+	ShipLogs.Debug("User home directory on %s: %s\n", serverName, homeDir)
 	if err != nil {
 		return fmt.Errorf("failed to get user home directory: %w", err)
 	}
@@ -199,9 +189,27 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 		}
 		loginCommand := fmt.Sprintf("docker login --username %s --password %s", cfg.Docker.Username, cfg.Docker.Password)
 		if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, loginCommand, stream); err != nil {
-			warnColor.Printf("  Warning: Failed to login to Docker registry: %v\n", err)
+			ShipLogs.Warn("  Warning: Failed to login to Docker registry: %v\n", err)
 
 		}
+	}
+	if cfg.Docker.Registry == "erc" {
+		if cfg.Docker.RegistryRegion == "" {
+			return fmt.Errorf("ECR registry region is not specified in configuration")
+		}
+		if cfg.Docker.Image == "" {
+			return fmt.Errorf("ECR repository name is not specified in configuration")
+		}
+
+		/*
+		* Call a function to write ecr user credentials to ~/.aws/credentials
+		* Use it those credentials to login to ECR and pull the image
+		*
+		*
+		 */
+
+		err := serverMgr.PrepareEcrCredentials()
+
 	}
 	//===== Determin curre deployment green =========
 	currentColor := ""
@@ -276,7 +284,7 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 		return fmt.Errorf("docker image not specified in configuration")
 	}
 	//===========Phase 4: Deploy new containers ==============
-	infoColor.Printf("  Deploying new %s container: %s on port %s\n", newColor, newContainerName, newContainerPort)
+	ShipLogs.Info("  Deploying new %s container: %s on port %s\n", newColor, newContainerName, newContainerPort)
 
 	if err != nil {
 		return fmt.Errorf("failed to get commit hash for image tag: %w", err)
@@ -286,13 +294,13 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 		envVars = append(envVars, fmt.Sprintf("-e %s=%s", key, value))
 	}
 	if len(envVars) > 0 {
-		infoColor.Printf("  Setting environment variables: %s\n", strings.Join(envVars, ", "))
+		ShipLogs.Debug("  Setting environment variables: %s\n", strings.Join(envVars, ", "))
 	}
 
 	if newColor == "green" {
 		newContainerPort = "3002" // green
 	}
-	infoColor.Printf("  Deploying new container: %s on port %s\n", newContainerName, newContainerPort)
+	ShipLogs.Debug("  Deploying new container: %s on port %s\n", newContainerName, newContainerPort)
 	runCommand := fmt.Sprintf("docker run -d --name %s --restart unless-stopped -p %s:3000 %s", newContainerName, newContainerPort, image)
 
 	if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, runCommand, stream); err != nil {
@@ -315,24 +323,24 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 	// ===========Phase 7: clean up old containers ==============
 	if currentColor != "" {
 		oldContainerName := fmt.Sprintf("%s-%s", serverName, currentColor)
-		infoColor.Printf("  Cleaning up old container: %s\n", oldContainerName)
+		ShipLogs.Debug("  Cleaning up old container: %s\n", oldContainerName)
 		cleanupCommand := fmt.Sprintf("docker stop %s && docker rm %s", oldContainerName, oldContainerName)
 		if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, cleanupCommand, stream); err != nil {
-			warnColor.Printf("  Warning: Failed to clean up old container %s: %v\n", oldContainerName, err)
+			ShipLogs.Warn("  Warning: Failed to clean up old container %s: %v\n", oldContainerName, err)
 		}
 	}
 
 	// ==========Phase 8: Reload caddy =============
 	reloadCommand := "sudo systemctl reload caddy"
 	if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, reloadCommand, stream); err != nil {
-		warnColor.Printf("  Warning: Failed to reload Caddy service: %v\n", err)
+		ShipLogs.Warn("  Warning: Failed to reload Caddy service: %v\n", err)
 	} else {
-		successColor.Println("✓ Caddy service reloaded successfully")
+		ShipLogs.Success("✓ Caddy service reloaded successfully")
 	}
 	//TODO:--- add way to count successfully deployments by send new deployments to api endpoint
 	//TODO: --- Add feedback collection to api endpoint: or ui from terminal
 
-	successColor.Printf("✓ Containers running:\n%s\n", output)
+	ShipLogs.Success("✓ Containers running:\n%s\n", output)
 	return nil
 }
 func VerifyContainerHealth(serverMgr *server.ServerStruct, serverName, port string, stream io.Writer) error {
@@ -442,7 +450,7 @@ func RollbackDeployment(serverMgr *server.ServerStruct, serverName, domain, prev
 }
 
 func SetupCaddy(ctx context.Context, serverMgr *server.ServerStruct, serverName string, fresh bool, stream io.Writer) error {
-	infoColor.Printf("Setting up Caddy on %s...\n", serverName)
+	ShipLogs.Info("Setting up Caddy on %s...\n", serverName)
 
 	// Check if Caddy is installed
 	if _, err := serverMgr.ExecuteCommand(ctx, serverName, "caddy version", stream); err != nil {
@@ -549,11 +557,13 @@ func SetupCaddy(ctx context.Context, serverMgr *server.ServerStruct, serverName 
 	}
 
 	ShipLogs.Success("✓ Caddy setup completed successfully")
+	// Print dns instruction
+	PrintDNSInstructions(domain)
 	return nil
 }
 
 func VerifyDeployment(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
-	infoColor.Printf("Verifying deployment on %s...\n", serverName)
+	ShipLogs.Info("Verifying deployment on %s...\n", serverName)
 	//TODO: Implement health checks for containers and application
 	// verifyCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	// defer cancel()
@@ -576,7 +586,7 @@ func VerifyDeployment(ctx context.Context, serverMgr *server.ServerStruct, serve
 	// 	return fmt.Errorf("application health check failed: %w", err)
 	// }
 
-	successColor.Println("✓ Application health check passed")
+	ShipLogs.Success("✓ Application health check passed")
 	return nil
 }
 
@@ -601,7 +611,7 @@ func retryOperation(ctx context.Context, maxAttempts int, initialDelay time.Dura
 		lastErr = err
 		if attempt < maxAttempts {
 			delay := time.Duration(attempt) * initialDelay
-			debugColor.Printf("    Attempt %d/%d failed, retrying in %v: %v\n",
+			ShipLogs.Debug("    Attempt %d/%d failed, retrying in %v: %v\n",
 				attempt, maxAttempts, delay, err)
 
 			select {
@@ -613,4 +623,20 @@ func retryOperation(ctx context.Context, maxAttempts int, initialDelay time.Dura
 	}
 
 	return fmt.Errorf("after %d attempts, last error: %w", maxAttempts, lastErr)
+}
+
+func PrintDNSInstructions(domain string) {
+	fmt.Println("\n=== DNS Setup Instructions ===")
+	fmt.Println("For your domain to work properly, you need to configure DNS records with your domain provider.")
+
+	fmt.Println("\n1. If this server has a static IP address:")
+	fmt.Printf("   - Create an A record for %s pointing to your server's IP address\n", domain)
+	fmt.Printf("   - Create an A record for www.%s pointing to the same IP (or CNAME to %s)\n", domain, domain)
+
+	fmt.Println("\n2. If you're using a dynamic DNS service:")
+	fmt.Printf("   - Configure your dynamic DNS client for %s\n", domain)
+
+	fmt.Println("\nNote: Caddy will automatically handle SSL certificate provisioning once DNS is properly configured.")
+	fmt.Println("After DNS changes, it may take up to 48 hours to propagate globally")
+	fmt.Println("You can verify DNS resolution with: dig +short " + domain)
 }

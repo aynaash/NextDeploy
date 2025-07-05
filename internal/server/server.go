@@ -5,13 +5,16 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"nextdeploy/internal/config"
 	"nextdeploy/internal/logger"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+	"nextdeploy/internal/envstore"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -65,6 +68,12 @@ func WithConfig() ServerOption {
 		}
 		s.config = cfg
 		serverlogger.Info("Configuration loaded successfully")
+		return nil
+	}
+}
+func WithDaemon() ServerOption {
+	return func(s *ServerStruct) error {
+		serverlogger.Debug("Writing NextDeploy Agent connection herer")
 		return nil
 	}
 }
@@ -129,13 +138,82 @@ func (s *ServerStruct) GetDeploymentServer() (string, error) {
 	}
 	return "", fmt.Errorf("deployment server %s not found in configuration", s.config.Deployment.Server.Host)
 }
+func AddHostToKnownHosts(ip string, knownHostsPath string) error {
+	// Validate IP/hostname
+	if net.ParseIP(ip) == nil && !isValidHostname(ip) {
+		return fmt.Errorf("invalid IP address or hostname: %s", ip)
+	}
+
+	// Set default known_hosts path if not provided
+	if knownHostsPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %v", err)
+		}
+		knownHostsPath = filepath.Join(home, ".ssh", "known_hosts")
+	}
+
+	// Create .ssh directory if it doesn't exist
+	sshDir := filepath.Dir(knownHostsPath)
+	if _, err := os.Stat(sshDir); os.IsNotExist(err) {
+		if err := os.Mkdir(sshDir, 0700); err != nil {
+			return fmt.Errorf("failed to create .ssh directory: %v", err)
+		}
+	}
+
+	// Get the host key using ssh-keyscan
+	cmd := exec.Command("ssh-keyscan", ip)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("ssh-keyscan failed: %v", err)
+	}
+
+	hostKey := strings.TrimSpace(out.String())
+	if hostKey == "" {
+		return fmt.Errorf("no host key returned for %s", ip)
+	}
+
+	// Append to known_hosts file
+	f, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to open known_hosts file: %v", err)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(hostKey + "\n"); err != nil {
+		return fmt.Errorf("failed to write to known_hosts file: %v", err)
+	}
+
+	return nil
+}
+
+// Helper function to validate hostnames
+func isValidHostname(hostname string) bool {
+	if len(hostname) > 253 {
+		return false
+	}
+	for _, part := range strings.Split(hostname, ".") {
+		if len(part) > 63 {
+			return false
+		}
+	}
+	return true
+}
 
 // connectSSH establishes an SSH connection and initializes SFTP client
 func connectSSH(cfg config.ServerConfig) (*SSHClient, error) {
 	if cfg.Port == 0 {
 		cfg.Port = 22
 	}
-
+	ip := cfg.Host
+	// FIX: add the server to know hosts
+	err := AddHostToKnownHosts(ip, "")
+	if err != nil {
+		serverlogger.Error("Failed to add host %s to known_hosts: %v", ip, err)
+		return nil, fmt.Errorf("failed to add host %s to known_hosts: %w", ip, err)
+	}
 	authMethods, err := getAuthMethods(cfg)
 	if err != nil {
 		return nil, err
@@ -639,4 +717,13 @@ func (s *ServerStruct) PrepareServer(ctx context.Context, serverName string, str
 	}
 	serverlogger.Info("Server preparation completed successfully")
 	return nil
+}
+
+func (s *ServerStruct) PrepareEcrCredentails() error {
+	// TODO: Implement ECR credentials preparation logic
+	// write aws credentials ecr user name hersi.dev from my machine to and stream
+	serverlogger.Info("Preparing ECR credentials (not implemented yet)")
+	
+	// Step one: Get the AWS credentials env store 
+	
 }

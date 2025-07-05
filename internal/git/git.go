@@ -81,3 +81,15 @@ func IsDirty() bool {
 	_ = cmd.Run()
 	return out.Len() > 0
 }
+func GetGitCommitHash() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("Failed to get Git commit hash: %v\n%s", err, out.String())
+	}
+
+	return strings.TrimSpace(out.String()), nil
+}

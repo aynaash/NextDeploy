@@ -17,7 +17,7 @@ var (
 	ShipLogs = logger.PackageLogger("ship::", "🚢::")
 	// Command flags
 	dryRun bool
-	new    bool // fresh boolean flag for caddy setup
+	serve  bool
 )
 
 var shipCmd = &cobra.Command{
@@ -34,7 +34,7 @@ var shipCmd = &cobra.Command{
 
 func init() {
 	// add fresh boolean flag for dry run
-	shipCmd.Flags().BoolVarP(&dryRun, "new ", "n", false, "Perform caddy setup")
+	shipCmd.Flags().BoolVarP(&serve, "serve ", "s", false, "Perform new caddy setup")
 	rootCmd.AddCommand(shipCmd)
 }
 
@@ -104,10 +104,11 @@ func runDeployment(ctx context.Context, serverMgr *server.ServerStruct, servers 
 	if err := ship.VerifyDeployment(ctx, serverMgr, servers[0], stream); err != nil {
 		return fmt.Errorf("post-deployment verification failed: %w", err)
 	}
-
-	ShipLogs.Info(" ==== PHASE 4: Refresh caddy  ====")
-	if err := ship.SetupCaddy(ctx, serverMgr, servers[0], fresh, stream); err != nil {
-		return fmt.Errorf("caddy setup failed: %w", err)
+	if serve {
+		ShipLogs.Info(" ==== PHASE 4: Refresh caddy  ====")
+		if err := ship.SetupCaddy(ctx, serverMgr, servers[0], fresh, stream); err != nil {
+			return fmt.Errorf("caddy setup failed: %w", err)
+		}
 	}
 
 	return nil

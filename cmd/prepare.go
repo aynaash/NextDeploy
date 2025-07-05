@@ -78,7 +78,7 @@ func runPrepare(cmd *cobra.Command, args []string) {
 		if err != nil {
 			PrepLogs.Error("Failed to close SSH connections: %v", err)
 		} else {
-			PrepLogs.Debug("SSH connections closed successfully")
+			PrepLogs.Success("SSH connections closed successfully")
 		}
 	}()
 
