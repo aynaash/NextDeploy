@@ -7,7 +7,6 @@ import (
 	"nextdeploy/internal/config"
 	"nextdeploy/internal/git"
 	"nextdeploy/internal/logger"
-	"nextdeploy/internal/registry"
 	"nextdeploy/internal/server"
 	"os"
 	"path/filepath"
@@ -172,17 +171,19 @@ func TransferRequiredFiles(ctx context.Context, serverMgr *server.ServerStruct, 
 	return nil
 }
 
-func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
+func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serverName string, credentials bool, stream io.Writer) error {
 	ShipLogs.Info("Deploying containers on %s...\n", serverName)
 
 	deployCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
+
 	// ===========Phase 1: Login to Docker registry===========
 	ShipLogs.Info("Logging in to Docker registry...")
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load configuration to get password and user for logins : %w", err)
 	}
+
 	if cfg.Docker.Registry == "dockerhub" {
 		if cfg.Docker.Username == "" || cfg.Docker.Password == "" {
 			return fmt.Errorf("Docker configuration is missing username or password")
@@ -190,9 +191,9 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 		loginCommand := fmt.Sprintf("docker login --username %s --password %s", cfg.Docker.Username, cfg.Docker.Password)
 		if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, loginCommand, stream); err != nil {
 			ShipLogs.Warn("  Warning: Failed to login to Docker registry: %v\n", err)
-
 		}
 	}
+
 	if cfg.Docker.Registry == "erc" {
 		if cfg.Docker.RegistryRegion == "" {
 			return fmt.Errorf("ECR registry region is not specified in configuration")
@@ -200,18 +201,16 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 		if cfg.Docker.Image == "" {
 			return fmt.Errorf("ECR repository name is not specified in configuration")
 		}
-
-		/*
-		* Call a function to write ecr user credentials to ~/.aws/credentials
-		* Use it those credentials to login to ECR and pull the image
-		*
-		*
-		 */
-
-		err := serverMgr.PrepareEcrCredentials()
-
+		if credentials {
+			err := serverMgr.PrepareEcrCredentials(os.Stdout)
+			if err != nil {
+				ShipLogs.Warn("  Warning: Failed to prepare ECR credentials: %v\n", err)
+				return fmt.Errorf("failed to prepare ECR credentials: %w", err)
+			}
+		}
 	}
-	//===== Determin curre deployment green =========
+
+	//===== Determine current deployment color =========
 	currentColor := ""
 	output, err := serverMgr.ExecuteCommand(deployCtx, serverName, "docker ps --format '{{.Names}}'", stream)
 	if err != nil {
@@ -224,6 +223,7 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 			currentColor = "green"
 		}
 	}
+
 	// ======= Prepare new deployment
 	newColor := "blue" // default color for new deployment
 	if currentColor == "blue" {
@@ -234,6 +234,7 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 	if newColor == "green" {
 		newContainerPort = greenPort // switch to green port if new deployment is green
 	}
+
 	image := cfg.Docker.Image
 	ShipLogs.Info("Pulling image: %s", image)
 	tag, err := git.GetCommitHash()
@@ -246,6 +247,7 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 	} else {
 		ShipLogs.Debug("  Using image without tag: %s\n", image)
 	}
+
 	if image == "" && cfg.Docker.Image != "" {
 		image = cfg.Docker.Image
 		ShipLogs.Debug("  Using image from configuration: %s\n", image)
@@ -254,41 +256,35 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 	} else {
 		ShipLogs.Debug("  Using image: %s\n", image)
 	}
+
 	ShipLogs.Debug("Image without tag is:%s", image)
+
 	if cfg.Docker.Registry == "ecr" {
-
-		ecrContext := registry.ECRContext{
-			ECRRepoName: cfg.Docker.Image,
-			ECRRegion:   cfg.Docker.RegistryRegion,
-		}
-		token, err := registry.PrepareECRPullContext(deployCtx, ecrContext)
+		err := serverMgr.PrepareEcrCredentials(stream)
 		if err != nil {
 			return err
 		}
-		//  login docker on server
-		ShipLogs.Debug("Logging in to ECR with token: %s", token)
-		_, err = serverMgr.ExecuteCommand(deployCtx, serverName, fmt.Sprintf("docker login --username AWS --password-stdin %s", token, ecrContext.ECRURL()), stream)
-		if err != nil {
-			return err
+
+		ShipLogs.Debug("Full image name: %s", image)
+		pullCommand := fmt.Sprintf("docker pull %s", image)
+
+		if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, pullCommand, stream); err != nil {
+			return fmt.Errorf("failed to pull Docker image %s  === %w", image, err)
 		}
-	}
 
-	ShipLogs.Debug("Full image name: %s", image)
-	pullCommand := fmt.Sprintf("docker pull %s", image)
+		// Check if image is specified
+		if image == "" {
+			return fmt.Errorf("docker image not specified in configuration")
+		}
+	} // <-- This closing brace was missing for the ecr if block
 
-	if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, pullCommand, stream); err != nil {
-		return fmt.Errorf("failed to pull Docker image %s  === %w", image, err)
-	}
-	// Check if image is specified
-	if image == "" {
-		return fmt.Errorf("docker image not specified in configuration")
-	}
 	//===========Phase 4: Deploy new containers ==============
 	ShipLogs.Info("  Deploying new %s container: %s on port %s\n", newColor, newContainerName, newContainerPort)
 
 	if err != nil {
 		return fmt.Errorf("failed to get commit hash for image tag: %w", err)
 	}
+
 	var envVars []string
 	for key, value := range cfg.Environment {
 		envVars = append(envVars, fmt.Sprintf("-e %s=%s", key, value))
@@ -300,6 +296,7 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 	if newColor == "green" {
 		newContainerPort = "3002" // green
 	}
+
 	ShipLogs.Debug("  Deploying new container: %s on port %s\n", newContainerName, newContainerPort)
 	runCommand := fmt.Sprintf("docker run -d --name %s --restart unless-stopped -p %s:3000 %s", newContainerName, newContainerPort, image)
 
@@ -307,19 +304,22 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 		ShipLogs.Error("Failed to start containers: %v", err)
 		return fmt.Errorf("failed to start new %s container %w", newColor, err)
 	}
+
 	//do caddy reload
 
-	//===========Phase 5: Check contaier heath =============
+	//===========Phase 5: Check container health =============
 	if err := VerifyContainerHealth(serverMgr, serverName, newContainerPort, stream); err != nil {
 		stopCommand := fmt.Sprintf("docker stop %s && docker rm %s", newContainerName, newContainerName)
 		serverMgr.ExecuteCommand(deployCtx, serverName, stopCommand, stream)
 		return fmt.Errorf("container health check failed: %w", err)
 	}
+
 	out, err := serverMgr.ExecuteCommand(deployCtx, serverName, "docker ps --filter status=running --format '{{.Names}}'", stream)
 	ShipLogs.Debug("Running containers:\n%s", out)
 	if err != nil {
 		return fmt.Errorf("failed to check running containers: %w", err)
 	}
+
 	// ===========Phase 7: clean up old containers ==============
 	if currentColor != "" {
 		oldContainerName := fmt.Sprintf("%s-%s", serverName, currentColor)
@@ -337,12 +337,14 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 	} else {
 		ShipLogs.Success("✓ Caddy service reloaded successfully")
 	}
+
 	//TODO:--- add way to count successfully deployments by send new deployments to api endpoint
 	//TODO: --- Add feedback collection to api endpoint: or ui from terminal
 
 	ShipLogs.Success("✓ Containers running:\n%s\n", output)
 	return nil
-}
+} // <-- This is the actual end of the DeployContainers function
+
 func VerifyContainerHealth(serverMgr *server.ServerStruct, serverName, port string, stream io.Writer) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -386,7 +388,6 @@ func simulateCurrentConfig() string {
 		]
 	}`
 }
-
 func simulateRouteRemoval(routes []map[string]interface{}, domain string) []map[string]interface{} {
 	// Simulate filtering out routes matching our domain
 	var filtered []map[string]interface{}

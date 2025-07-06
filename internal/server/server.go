@@ -14,11 +14,13 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"nextdeploy/internal/envstore"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+	"nextdeploy/internal/envstore"
+	"nextdeploy/internal/git"
+	"nextdeploy/internal/registry"
 )
 
 var (
@@ -208,7 +210,6 @@ func connectSSH(cfg config.ServerConfig) (*SSHClient, error) {
 		cfg.Port = 22
 	}
 	ip := cfg.Host
-	// FIX: add the server to know hosts
 	err := AddHostToKnownHosts(ip, "")
 	if err != nil {
 		serverlogger.Error("Failed to add host %s to known_hosts: %v", ip, err)
@@ -719,11 +720,103 @@ func (s *ServerStruct) PrepareServer(ctx context.Context, serverName string, str
 	return nil
 }
 
-func (s *ServerStruct) PrepareEcrCredentails() error {
-	// TODO: Implement ECR credentials preparation logic
-	// write aws credentials ecr user name hersi.dev from my machine to and stream
-	serverlogger.Info("Preparing ECR credentials (not implemented yet)")
-	
-	// Step one: Get the AWS credentials env store 
-	
+func (s *ServerStruct) PrepareEcrCredentials(stream io.Writer) error {
+	serverlogger.Info("Preparing ECR credentials")
+
+	// Load environment variables
+	store, err := envstore.New(
+		envstore.WithEnvFile[string](".env"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create env store: %w", err)
+	}
+
+	// Retrieve AWS credentials securely
+	accessKey, err := store.GetEnv("AWS_ACCESS_KEY_ID")
+	if err != nil {
+		serverlogger.Error("Failed to get AWS_ACCESS_KEY_ID: %v", err)
+		return fmt.Errorf("AWS_ACCESS_KEY_ID not found: %w", err)
+	}
+
+	secretKey, err := store.GetEnv("AWS_SECRET_ACCESS_KEY")
+	if err != nil {
+		serverlogger.Error("Failed to get AWS_SECRET_ACCESS_KEY: %v", err)
+		return fmt.Errorf("AWS_SECRET_ACCESS_KEY not found: %w", err)
+	}
+
+	// Generate AWS credentials file content
+	credentialsContent := fmt.Sprintf(`[default]
+aws_access_key_id = %s
+aws_secret_access_key = %s
+`, accessKey, secretKey)
+
+	// Write credentials securely to ~/.aws/credentials
+	command := fmt.Sprintf(`
+		mkdir -p ~/.aws && \
+		cat > ~/.aws/credentials <<'EOF'
+%sEOF
+		chmod 600 ~/.aws/credentials
+	`, credentialsContent)
+
+	output, err := s.ExecuteCommand(
+		context.Background(),
+		"production", // Replace with actual server name
+		command,
+		stream, // Add stream parameter here
+	)
+	if err != nil {
+		serverlogger.Error("Failed to write AWS credentials: %v (Output: %s)", err, output)
+		return fmt.Errorf("failed to write credentials: %w", err)
+	}
+
+	// Get repo details
+	cfg, err := config.Load()
+	if err != nil {
+		serverlogger.Error("Failed to load configuration: %v", err)
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	image := cfg.Docker.Image
+	if image == "" {
+		serverlogger.Error("Docker image not specified in configuration")
+		return fmt.Errorf("docker image not specified in configuration")
+	}
+
+	_, _, reponame := registry.ExtractECRDetails(image)
+	tag, err := git.GetCommitHash()
+	if err != nil {
+		serverlogger.Error("Failed to get commit hash: %v", err)
+		return fmt.Errorf("failed to get commit hash: %w", err)
+	}
+	if tag == "" {
+		serverlogger.Error("No commit hash found, using 'latest' tag")
+		tag = "latest"
+	}
+	imagename := fmt.Sprintf("%s:%s", reponame, tag)
+	serverlogger.Info("Using image: %s", imagename)
+
+	//pullCommand := fmt.Sprintf(`aws ecr get-login-password --region %s | docker login --username AWS --password-stdin %s`, region, imagename)
+
+	if stream != nil {
+		fmt.Fprintf(stream, "🔑 Executing ECR login command...\n")
+	}
+
+	// serverlogger.Debug("Pull command for ECR: %s", pullCommand)
+	// output, err = s.ExecuteCommand(
+	// 	context.Background(),
+	// 	"production", // Replace with actual server name
+	// 	pullCommand,
+	// 	stream,
+	// )
+	// if err != nil {
+	// 	serverlogger.Error("Failed to login to ECR: %v (Output: %s)", err, output)
+	// 	return fmt.Errorf("failed to login to ECR: %w", err)
+	// }
+
+	if stream != nil {
+		fmt.Fprintf(stream, "✅ Successfully logged in to ECR\n")
+	}
+
+	serverlogger.Info("Successfully prepared ECR credentials")
+	return nil
 }

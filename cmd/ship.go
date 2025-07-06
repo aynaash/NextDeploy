@@ -1,5 +1,6 @@
 package cmd
 
+//FIX: cobra cli issue with Flags
 import (
 	"context"
 	"fmt"
@@ -14,10 +15,10 @@ import (
 )
 
 var (
-	ShipLogs = logger.PackageLogger("ship::", "🚢::")
-	// Command flags
-	dryRun bool
-	serve  bool
+	ShipLogs    = logger.PackageLogger("ship::", "🚢::")
+	dryRun      bool
+	serve       bool
+	credentials bool
 )
 
 var shipCmd = &cobra.Command{
@@ -33,8 +34,9 @@ var shipCmd = &cobra.Command{
 }
 
 func init() {
-	// add fresh boolean flag for dry run
-	shipCmd.Flags().BoolVarP(&serve, "serve ", "s", false, "Perform new caddy setup")
+	shipCmd.Flags().BoolVarP(&serve, "serve", "s", false, "Perform new caddy setup")
+	shipCmd.Flags().BoolVarP(&credentials, "credentials", "c", false, "Use credentials for deployment")
+
 	rootCmd.AddCommand(shipCmd)
 }
 
@@ -95,7 +97,7 @@ func runDeployment(ctx context.Context, serverMgr *server.ServerStruct, servers 
 
 	if !dryRun {
 		ShipLogs.Info("=== PHASE 3: Container deployment ===")
-		if err := ship.DeployContainers(ctx, serverMgr, servers[0], stream); err != nil {
+		if err := ship.DeployContainers(ctx, serverMgr, servers[0], credentials, stream); err != nil {
 			return fmt.Errorf("container deployment failed: %w", err)
 		}
 	}

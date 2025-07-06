@@ -56,8 +56,6 @@ func New[T any](opts ...Option[T]) (*Store[T], error) {
 	return s, nil
 }
 
-// CRUD Operations with functional patterns
-
 // Create adds a new item to the store
 func (s *Store[T]) Create(key string, value T) error {
 	if _, exists := s.data[key]; exists {
