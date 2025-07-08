@@ -186,7 +186,7 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 
 	if cfg.Docker.Registry == "dockerhub" {
 		if cfg.Docker.Username == "" || cfg.Docker.Password == "" {
-			return fmt.Errorf("Docker configuration is missing username or password")
+			return fmt.Errorf("docker configuration is missing username or password")
 		}
 		loginCommand := fmt.Sprintf("docker login --username %s --password %s", cfg.Docker.Username, cfg.Docker.Password)
 		if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, loginCommand, stream); err != nil {
@@ -195,16 +195,21 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 	}
 
 	if cfg.Docker.Registry == "erc" {
+		ShipLogs.Info("Using ECR as container registry")
 		if cfg.Docker.RegistryRegion == "" {
+			ShipLogs.Error("Error no ecr region set")
 			return fmt.Errorf("ECR registry region is not specified in configuration")
 		}
 		if cfg.Docker.Image == "" {
+			ShipLogs.Error("No docker image name")
 			return fmt.Errorf("ECR repository name is not specified in configuration")
 		}
 		if credentials {
+			ShipLogs.Info("Preparing ECR server credentials")
 			err := serverMgr.PrepareEcrCredentials(os.Stdout)
 			if err != nil {
-				ShipLogs.Warn("  Warning: Failed to prepare ECR credentials: %v\n", err)
+
+				ShipLogs.Error("  Warning: Failed to prepare ECR credentials: %v\n", err)
 				return fmt.Errorf("failed to prepare ECR credentials: %w", err)
 			}
 		}
@@ -265,12 +270,12 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 			return err
 		}
 
-		ShipLogs.Debug("Full image name: %s", image)
-		pullCommand := fmt.Sprintf("docker pull %s", image)
-
-		if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, pullCommand, stream); err != nil {
-			return fmt.Errorf("failed to pull Docker image %s  === %w", image, err)
-		}
+		// ShipLogs.Debug("Full image name: %s", image)
+		// pullCommand := fmt.Sprintf("docker pull %s", image)
+		//
+		// if _, err := serverMgr.ExecuteCommand(deployCtx, serverName, pullCommand, stream); err != nil {
+		// 	return fmt.Errorf("failed to pull Docker image %s  === %w", image, err)
+		// }
 
 		// Check if image is specified
 		if image == "" {

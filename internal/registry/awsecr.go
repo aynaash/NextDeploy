@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"nextdeploy/internal/config"
+	"nextdeploy/internal/envstore"
 	"nextdeploy/internal/git"
 	"nextdeploy/internal/logger"
-	"nextdeploy/internal/envstore"
 	"os"
 	"os/exec"
 	"strings"
@@ -108,7 +108,7 @@ func (e *ECRContext) EnsureRepository() error {
 	fmt.Printf("   User ID:    %s\n", identity.UserID)
 	fmt.Printf("   ARN:        %s\n", identity.ARN)
 	ecrClient := ecr.NewFromConfig(cfg)
-	region, repoName, err := ExtractECRDetails(e.ECRRepoName)
+	_, region, repoName, err := ExtractECRDetails(e.ECRRepoName)
 	if err != nil {
 		ECRLogger.Error("Failed to extract ECR details: %v", err)
 		return fmt.Errorf("failed to extract ECR details: %w", err)
@@ -225,22 +225,22 @@ func DockerLoginWithToken(ctx context.Context, token string, registryURL string)
 	return nil
 }
 
-func PrepareECRPullContext(ctx context.Context, ecrCtx ECRContext) (string, error) {
-	ECRLogger.Info("Preparing ECR pull context")
-
-	loginCommand := exec.CommandContext(ctx, "aws", "ecr", "get-login-password", "--region", ecrCtx.ECRRegion)
-	var stdout, stderr bytes.Buffer
-	loginCommand.Stdout = &stdout
-	loginCommand.Stderr = &stderr
-
-	err := loginCommand.Run()
-	if err != nil {
-		ECRLogger.Error("Failed to get ECR login password: %v", err)
-		return "", fmt.Errorf("failed to get ECR login password: %w\n%s", err, stderr.String())
-	}
-
-	return stdout.String(), nil
-}
+// func PrepareECRPullContext(ctx context.Context, ecrCtx ECRContext) (string, error) {
+// 	ECRLogger.Info("Preparing ECR pull context")
+//
+// 	loginCommand := exec.CommandContext(ctx, "aws", "ecr", "get-login-password", "--region", ecrCtx.ECRRegion)
+// 	var stdout, stderr bytes.Buffer
+// 	loginCommand.Stdout = &stdout
+// 	loginCommand.Stderr = &stderr
+//
+// 	err := loginCommand.Run()
+// 	if err != nil {
+// 		ECRLogger.Error("Failed to get ECR login password: %v", err)
+// 		return "", fmt.Errorf("failed to get ECR login password: %w\n%s", err, stderr.String())
+// 	}
+//
+// 	return stdout.String(), nil
+// }
 
 func writeCredentialsToEnvFile(accessKey, secretKey string) error {
 	ECRLogger.Info("Writing AWS credentials to .env file")
@@ -318,7 +318,7 @@ func GetECRToken(accessKey, secretKey, sessionToken string) (string, error) {
 		return "", fmt.Errorf("failed to load configuration: %w", err)
 	}
 	image := cfg.Docker.Image
-	region, repoName, err := ExtractECRDetails(image)
+	_, region, repoName, err := ExtractECRDetails(image)
 	if err != nil {
 		ECRLogger.Error("Failed to extract ECR details: %v", err)
 		return "", fmt.Errorf("failed to extract ECR details: %w", err)

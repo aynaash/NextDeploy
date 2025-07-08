@@ -1,13 +1,12 @@
 package registry
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
-	"fmt"
-
 )
 
-func ExtractECRDetails(ecrURI string) (string, string, error) {
+func ExtractECRDetails(ecrURI string) (string, string, string, error) {
 	// Trim whitespace (in case input has leading/trailing spaces)
 	trimmedURI := strings.TrimSpace(ecrURI)
 
@@ -17,12 +16,16 @@ func ExtractECRDetails(ecrURI string) (string, string, error) {
 	matches := re.FindStringSubmatch(trimmedURI)
 
 	if len(matches) < 4 {
-		return "", "", fmt.Errorf("invalid ECR URI format: %s", trimmedURI)
+		return "", "", "", fmt.Errorf("invalid ECR URI format: %s", trimmedURI)
 	}
+
+	accountID := matches[1]
+	region := matches[2]
+	repoName := matches[3]
 
 	// matches[0] = full string
 	// matches[1] = account ID (285688593966)
 	// matches[2] = region (us-east-1)
 	// matches[3] = repo name (hersiyussuf/hersi.dev)
-	return matches[2], matches[3], nil
+	return accountID, region, repoName, nil
 }

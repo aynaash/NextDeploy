@@ -782,7 +782,13 @@ aws_secret_access_key = %s
 		return fmt.Errorf("docker image not specified in configuration")
 	}
 
-	_, _, reponame := registry.ExtractECRDetails(image)
+	accountID, region, reponame, err := registry.ExtractECRDetails(image)
+	// log out repo details
+	serverlogger.Debug("Extracted ECR details - Account ID: %s, Region: %s, Repository Name: %s", accountID, region, reponame)
+	if err != nil {
+		serverlogger.Error("Failed to extract ECR details from image %s: %v", image, err)
+		return fmt.Errorf("failed to extract ECR details from image %s: %w", image, err)
+	}
 	tag, err := git.GetCommitHash()
 	if err != nil {
 		serverlogger.Error("Failed to get commit hash: %v", err)
@@ -795,23 +801,23 @@ aws_secret_access_key = %s
 	imagename := fmt.Sprintf("%s:%s", reponame, tag)
 	serverlogger.Info("Using image: %s", imagename)
 
-	//pullCommand := fmt.Sprintf(`aws ecr get-login-password --region %s | docker login --username AWS --password-stdin %s`, region, imagename)
-
+	ecrRegistry := fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com", accountID, region)
+	pullCommand := fmt.Sprintf(`aws ecr get-login-password --region %s | docker login --username AWS --password-stdin %s`, region, ecrRegistry)
 	if stream != nil {
 		fmt.Fprintf(stream, "🔑 Executing ECR login command...\n")
 	}
 
-	// serverlogger.Debug("Pull command for ECR: %s", pullCommand)
-	// output, err = s.ExecuteCommand(
-	// 	context.Background(),
-	// 	"production", // Replace with actual server name
-	// 	pullCommand,
-	// 	stream,
-	// )
-	// if err != nil {
-	// 	serverlogger.Error("Failed to login to ECR: %v (Output: %s)", err, output)
-	// 	return fmt.Errorf("failed to login to ECR: %w", err)
-	// }
+	serverlogger.Debug("Pull command for ECR: %s", pullCommand)
+	output, err = s.ExecuteCommand(
+		context.Background(),
+		"production", // Replace with actual server name
+		pullCommand,
+		stream,
+	)
+	if err != nil {
+		serverlogger.Error("Failed to login to ECR: %v (Output: %s)", err, output)
+		return fmt.Errorf("failed to login to ECR: %w", err)
+	}
 
 	if stream != nil {
 		fmt.Fprintf(stream, "✅ Successfully logged in to ECR\n")

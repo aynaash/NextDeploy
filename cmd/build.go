@@ -104,7 +104,7 @@ func init() {
 	rootCmd.AddCommand(buildCmd)
 	// provision-ecr-user --fresh
 	buildCmd.Flags().BoolVarP(&fresh, "fresh", "f", false, "Delete current existing user and start fresh")
-	buildCmd.Flags().BoolVar(&ProvisionEcrUser, "provision-ecr-user", false, "Provision ECR user for pushing images")
+	buildCmd.Flags().BoolVarP(&ProvisionEcrUser, "provision-ecr-user", "p", false, "Provision ECR user for pushing images")
 }
 
 func buildCmdFunction(cmd *cobra.Command, args []string) error {
