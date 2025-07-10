@@ -65,7 +65,7 @@ func Ship(cmd *cobra.Command, args []string) {
 		return
 	}
 	defer func() {
-		if err := serverMgr.CloseSSHConnections(); err != nil {
+		if err := serverMgr.CloseSSHConnection(); err != nil {
 			ShipLogs.Error("Error closing connections: %v\n", err)
 		}
 	}()

@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"nextdeploy/internal/config"
-	"nextdeploy/internal/detect"
 	"nextdeploy/internal/logger"
+	"nextdeploy/internal/nextcore/detect"
 	"nextdeploy/internal/registry"
 	"os"
 	"os/exec"
@@ -250,9 +250,9 @@ func (dm *DockerManager) ValidateImageName(name string) error {
 		return fmt.Errorf("%w: exceeds 255 characters", ErrInvalidImageName)
 	}
 
-	// Regex from Docker's implementation
+	// Updated regex patterns with better support for git commit hashes
 	validImageName := regexp.MustCompile(`^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$`)
-	validTag := regexp.MustCompile(`^[\w][\w.-]{0,127}$`)
+	validTag := regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
 
 	parts := strings.SplitN(name, ":", 2)
 	if !validImageName.MatchString(parts[0]) {
@@ -261,13 +261,33 @@ func (dm *DockerManager) ValidateImageName(name string) error {
 	}
 
 	if len(parts) == 2 {
-		if !validTag.MatchString(parts[1]) {
-			dlog.Error("Invalid tag format: %s", parts[1])
+		tag := parts[1]
+		if len(tag) > 128 {
+			dlog.Error("Tag exceeds maximum length (128 characters)")
+			return fmt.Errorf("%w: tag exceeds maximum length", ErrInvalidImageName)
+		}
+
+		// Special case for git commit hashes (7-40 hex chars)
+		if isGitCommitHash(tag) {
+			return nil
+		}
+
+		if !validTag.MatchString(tag) {
+			dlog.Error("Invalid tag format: %s", tag)
 			return fmt.Errorf("%w: invalid tag format", ErrInvalidImageName)
 		}
 	}
 
 	return nil
+}
+
+// isGitCommitHash checks if the tag is a valid git commit hash (7-40 hex characters)
+func isGitCommitHash(tag string) bool {
+	if len(tag) < 7 || len(tag) > 40 {
+		return false
+	}
+	matched, _ := regexp.MatchString(`^[a-f0-9]+$`, tag)
+	return matched
 }
 
 // CheckDockerInstalled verifies Docker is available
@@ -294,8 +314,10 @@ func (dm *DockerManager) CheckDockerInstalled() error {
 // BuildImage builds a Docker image with options
 func (dm *DockerManager) BuildImage(ctx context.Context, dir string, opts BuildOptions) error {
 	// print out the options for debugging
+	dlog.Debug("Build options: %+v", opts)
 	err := dm.ValidateImageName(opts.ImageName)
 	if err != nil {
+		dlog.Info("The docker image looks like this :%s", opts.ImageName)
 		dlog.Error("Invalid Docker image name: %s", opts.ImageName)
 		return fmt.Errorf("%w: %s", ErrInvalidImageName, err)
 	}

@@ -1,20 +1,7 @@
 [build]
-# Simplified build command
-cmd = "go build -o ./tmp/main ."
-bin = "tmp/main"
-full_bin = "./tmp/main"
-
-# Watch settings
-delay = 1000
-exclude_dir = ["vendor", "tmp", "testdata", "docs", "dist"]
-include_ext = ["go", "mod", "sum"]
-
-[build.env]
-# Basic build environment
-GOFLAGS = "-trimpath"
-CGO_ENABLED = "0"
-
-[color]
-main = "magenta"
-build = "yellow"
-runner = "green"
+[build]
+  cmd = "go install ."  # Installs into $GOPATH/bin
+  bin = ""  # Leave empty to prevent auto-running
+  delay = 1000
+  exclude_dir = ["vendor", "tmp"]
+  include_ext = ["go", "mod", "sum"]

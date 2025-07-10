@@ -15,12 +15,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pkg/sftp"
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/knownhosts"
 	"nextdeploy/internal/envstore"
 	"nextdeploy/internal/git"
 	"nextdeploy/internal/registry"
+	"nextdeploy/internal/server/preparation"
+
+	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 var (
@@ -75,7 +77,7 @@ func WithConfig() ServerOption {
 }
 func WithDaemon() ServerOption {
 	return func(s *ServerStruct) error {
-		serverlogger.Debug("Writing NextDeploy Agent connection herer")
+		serverlogger.Debug("Writing NextDeploy Agent connection here")
 		return nil
 	}
 }
@@ -503,8 +505,71 @@ func (s *ServerStruct) PingServer(serverName string) error {
 	return nil
 }
 
+// FIX:implement this methods
+func (s *ServerStruct) InstallNginx(ctx context.Context, serverName string, stream io.Writer) error {
+	// Implementation here
+	return nil
+}
+
+func (s *ServerStruct) PackageManagerFactory(ctx context.Context, serverName string, stream io.Writer) (preparation.PackageManager, error) {
+	// Detect package manager
+	pkgType, err := s.DetectPackageManager(ctx, serverName, stream)
+	if err != nil {
+		return nil, fmt.Errorf("failed to detect package manager: %w", err)
+	}
+
+	switch pkgType {
+	case preparation.Apt:
+		return preparation.NewAptManager(s, serverName), nil
+	case preparation.Yum, preparation.Dnf:
+		return preparation.NewYumManager(s, serverName), nil
+	default:
+		return nil, fmt.Errorf("unsupported package manager: %s", pkgType)
+	}
+
+}
+
+func (s *ServerStruct) ListServer() []string {
+	return nil
+}
+func (s *ServerStruct) InstallPackages(ctx context.Context, serverName string, stream io.Writer) error {
+	// Implementation here
+	return nil
+}
+func (s *ServerStruct) CloseConnection(ctx context.Context, serverName string, stream io.Writer) error {
+	return nil
+}
+func (s *ServerStruct) InstallDocker(ctx context.Context, serverName string, stream io.Writer) error {
+	// Implementation here
+	return nil
+}
+
+func (s *ServerStruct) SetupDirectories(ctx context.Context, serverName string, stream io.Writer) error {
+	// Implementation here
+	return nil
+}
+
+func (s *ServerStruct) VerifyInstallation(ctx context.Context, serverName string, stream io.Writer) error {
+	// Implementation here
+	return nil
+}
+
+func (s *ServerStruct) VerifyPreRequisites(ctx context.Context, serverName string, stream io.Writer) error {
+	// Implementation here
+	return nil
+}
+func (s *ServerStruct) DetectPackageManager(ctx context.Context, serverName string, stream io.Writer) (preparation.PackageManagerType, error) {
+	output, err := s.ExecuteCommand(ctx, serverName, "command -v apt-get && echo 'apt' || echo 'yum'", stream)
+	if err != nil {
+		return "", fmt.Errorf("failed to detect package manager: %w", err)
+	}
+
+	pkgManager := strings.TrimSpace(output)
+	return preparation.PackageManagerType(pkgManager), nil
+}
+
 // CloseSSHConnections closes all active SSH connections
-func (s *ServerStruct) CloseSSHConnections() error {
+func (s *ServerStruct) CloseSSHConnection() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -620,105 +685,105 @@ func (s *ServerStruct) GetServerStatus(serverName string, stream io.Writer) (str
 
 // PrepareServer installs required tools on the target server
 // PrepareServer installs required tools on the target server with streaming output
-func (s *ServerStruct) PrepareServer(ctx context.Context, serverName string, stream io.Writer) error {
-	client, err := s.getSSHClient(serverName)
-	if err != nil {
-		return fmt.Errorf("failed to get SSH client: %w", err)
-	}
-
-	client.mu.Lock()
-	defer client.mu.Unlock()
-
-	// Check if preparation is already done
-	if _, err := s.ExecuteCommand(ctx, serverName, "which docker && which caddy && which go", stream); err == nil {
-		if stream != nil {
-			fmt.Fprintf(stream, "Server already has required tools installed\n")
-		}
-		serverlogger.Info("Server already has required tools installed")
-		return nil
-	}
-
-	if stream != nil {
-		fmt.Fprintf(stream, "Preparing server %s by installing required tools...\n", serverName)
-	}
-	serverlogger.Info("Preparing server %s by installing required tools...", serverName)
-
-	// Determine package manager (apt/yum/dnf)
-	pkgManagerCmd := "command -v apt-get >/dev/null && echo apt || echo yum"
-	pkgManager, err := s.ExecuteCommand(ctx, serverName, pkgManagerCmd, stream)
-	if err != nil {
-		return fmt.Errorf("failed to detect package manager: %w", err)
-	}
-
-	// Install base dependencies
-	baseDepsCmd := ""
-	switch strings.TrimSpace(pkgManager) {
-	case "apt":
-		baseDepsCmd = `sudo apt-get update && 
-            sudo apt-get install -y curl git make gcc build-essential
-            ca-certificates software-properties-common apt-transport-https`
-	case "yum":
-		baseDepsCmd = `sudo yum install -y curl git make gcc glibc-static
-            ca-certificates yum-utils device-mapper-persistent-data lvm2`
-	default:
-		return fmt.Errorf("unsupported package manager: %s", pkgManager)
-	}
-
-	if _, err := s.ExecuteCommand(ctx, serverName, baseDepsCmd, stream); err != nil {
-		return fmt.Errorf("failed to install base dependencies: %w", err)
-	}
-
-	// Install Docker
-	dockerInstallCmd := `curl -fsSL https://get.docker.com | sudo sh && 
-        sudo usermod -aG docker $USER && 
-        sudo systemctl enable docker && 
-        sudo systemctl start docker`
-
-	if _, err := s.ExecuteCommand(ctx, serverName, dockerInstallCmd, stream); err != nil {
-		return fmt.Errorf("failed to install Docker: %w", err)
-	}
-
-	// Install Caddy
-	caddyInstallCmd := `sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https && 
-        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg && 
-        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list && 
-        sudo apt update && 
-        sudo apt install -y caddy`
-
-	if strings.TrimSpace(pkgManager) == "yum" {
-		caddyInstallCmd = `sudo yum install -y yum-plugin-copr && 
-            sudo yum copr enable -y @caddy/caddy && 
-            sudo yum install -y caddy`
-	}
-
-	if _, err := s.ExecuteCommand(ctx, serverName, caddyInstallCmd, stream); err != nil {
-		return fmt.Errorf("failed to install Caddy: %w", err)
-	}
-
-	// Install Go
-	goInstallCmd := `curl -OL https://golang.org/dl/go1.21.0.linux-amd64.tar.gz && 
-        sudo rm -rf /usr/local/go && 
-        sudo tar -C /usr/local -xzf go1.21.0.linux-amd64.tar.gz && 
-        echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc && 
-        source ~/.bashrc && 
-        rm go1.21.0.linux-amd64.tar.gz`
-
-	if _, err := s.ExecuteCommand(ctx, serverName, goInstallCmd, stream); err != nil {
-		return fmt.Errorf("failed to install Go: %w", err)
-	}
-
-	// Verify installations
-	verifyCmd := `docker --version && caddy version && go version`
-	if _, err := s.ExecuteCommand(ctx, serverName, verifyCmd, stream); err != nil {
-		return fmt.Errorf("verification failed: %w", err)
-	}
-
-	if stream != nil {
-		fmt.Fprintf(stream, "Server preparation completed successfully\n")
-	}
-	serverlogger.Info("Server preparation completed successfully")
-	return nil
-}
+// func (s *ServerStruct) PrepareServer(ctx context.Context, serverName string, stream io.Writer) error {
+// 	client, err := s.getSSHClient(serverName)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to get SSH client: %w", err)
+// 	}
+//
+// 	client.mu.Lock()
+// 	defer client.mu.Unlock()
+//
+// 	// Check if preparation is already done
+// 	if _, err := s.ExecuteCommand(ctx, serverName, "which docker && which caddy && which go", stream); err == nil {
+// 		if stream != nil {
+// 			fmt.Fprintf(stream, "Server already has required tools installed\n")
+// 		}
+// 		serverlogger.Info("Server already has required tools installed")
+// 		return nil
+// 	}
+//
+// 	if stream != nil {
+// 		fmt.Fprintf(stream, "Preparing server %s by installing required tools...\n", serverName)
+// 	}
+// 	serverlogger.Info("Preparing server %s by installing required tools...", serverName)
+//
+// 	// Determine package manager (apt/yum/dnf)
+// 	pkgManagerCmd := "command -v apt-get >/dev/null && echo apt || echo yum"
+// 	pkgManager, err := s.ExecuteCommand(ctx, serverName, pkgManagerCmd, stream)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to detect package manager: %w", err)
+// 	}
+//
+// 	// Install base dependencies
+// 	baseDepsCmd := ""
+// 	switch strings.TrimSpace(pkgManager) {
+// 	case "apt":
+// 		baseDepsCmd = `sudo apt-get update &&
+//             sudo apt-get install -y curl git make gcc build-essential
+//             ca-certificates software-properties-common apt-transport-https`
+// 	case "yum":
+// 		baseDepsCmd = `sudo yum install -y curl git make gcc glibc-static
+//             ca-certificates yum-utils device-mapper-persistent-data lvm2`
+// 	default:
+// 		return fmt.Errorf("unsupported package manager: %s", pkgManager)
+// 	}
+//
+// 	if _, err := s.ExecuteCommand(ctx, serverName, baseDepsCmd, stream); err != nil {
+// 		return fmt.Errorf("failed to install base dependencies: %w", err)
+// 	}
+//
+// 	// Install Docker
+// 	dockerInstallCmd := `curl -fsSL https://get.docker.com | sudo sh &&
+//         sudo usermod -aG docker $USER &&
+//         sudo systemctl enable docker &&
+//         sudo systemctl start docker`
+//
+// 	if _, err := s.ExecuteCommand(ctx, serverName, dockerInstallCmd, stream); err != nil {
+// 		return fmt.Errorf("failed to install Docker: %w", err)
+// 	}
+//
+// 	// Install Caddy
+// 	caddyInstallCmd := `sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https &&
+//         curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg &&
+//         curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list &&
+//         sudo apt update &&
+//         sudo apt install -y caddy`
+//
+// 	if strings.TrimSpace(pkgManager) == "yum" {
+// 		caddyInstallCmd = `sudo yum install -y yum-plugin-copr &&
+//             sudo yum copr enable -y @caddy/caddy &&
+//             sudo yum install -y caddy`
+// 	}
+//
+// 	if _, err := s.ExecuteCommand(ctx, serverName, caddyInstallCmd, stream); err != nil {
+// 		return fmt.Errorf("failed to install Caddy: %w", err)
+// 	}
+//
+// 	// Install Go
+// 	goInstallCmd := `curl -OL https://golang.org/dl/go1.21.0.linux-amd64.tar.gz &&
+//         sudo rm -rf /usr/local/go &&
+//         sudo tar -C /usr/local -xzf go1.21.0.linux-amd64.tar.gz &&
+//         echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc &&
+//         source ~/.bashrc &&
+//         rm go1.21.0.linux-amd64.tar.gz`
+//
+// 	if _, err := s.ExecuteCommand(ctx, serverName, goInstallCmd, stream); err != nil {
+// 		return fmt.Errorf("failed to install Go: %w", err)
+// 	}
+//
+// 	// Verify installations
+// 	verifyCmd := `docker --version && caddy version && go version`
+// 	if _, err := s.ExecuteCommand(ctx, serverName, verifyCmd, stream); err != nil {
+// 		return fmt.Errorf("verification failed: %w", err)
+// 	}
+//
+// 	if stream != nil {
+// 		fmt.Fprintf(stream, "Server preparation completed successfully\n")
+// 	}
+// 	serverlogger.Info("Server preparation completed successfully")
+// 	return nil
+// }
 
 func (s *ServerStruct) PrepareEcrCredentials(stream io.Writer) error {
 	serverlogger.Info("Preparing ECR credentials")

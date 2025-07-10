@@ -1,132 +1,118 @@
 //go:build ignore
 // +build ignore
 
-package playground
+// internal/server/preparation/manager.go
+package preparation
 
 import (
+	"context"
 	"fmt"
-	"os"
-	"path/filepath"
+	"io"
 	"strings"
+
+	"nextdeploy/internal/logger"
 )
 
-// AddAWSProfile adds or updates an AWS profile in ~/.aws/credentials
-func AddAWSProfile(profileName, accessKeyID, secretAccessKey string) error {
-	// Get the user's home directory
-	homeDir, err := os.UserHomeDir()
+var (
+	PrepLogs = logger.PackageLogger("preparation", "🔧")
+)
+
+type PreparationManager struct {
+	serverMgr      ServerManager
+	packageManager PackageManager
+	installAWS     bool
+	forceInstall   bool
+	installNginx   bool // Changed from field to method to avoid name collision
+	verbose        bool
+}
+
+func NewPreparationManager(serverMgr ServerManager, pm PackageManager, installAWS, forceInstall, installNginx, verbose bool) *PreparationManager {
+	return &PreparationManager{
+		serverMgr:      serverMgr,
+		packageManager: pm,
+		installAWS:     installAWS,
+		forceInstall:   forceInstall,
+		installNginx:   installNginx,
+		verbose:        verbose,
+	}
+}
+
+func (pm *PreparationManager) installNginx(ctx context.Context, serverName string, stream io.Writer) error {
+	PrepLogs.Info("Checking Nginx installation...")
+	installed, err := pm.packageManager.IsInstalled(ctx, "nginx")
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		PrepLogs.Error("Failed to check Nginx installation: %v", err)
+		return fmt.Errorf("nginx check failed: %w", err)
 	}
 
-	// Path to AWS credentials file
-	credPath := filepath.Join(homeDir, ".aws", "credentials")
-
-	// Create .aws directory if it doesn't exist
-	if err := os.MkdirAll(filepath.Dir(credPath), 0700); err != nil {
-		return fmt.Errorf("failed to create .aws directory: %w", err)
-	}
-
-	// Read existing content if file exists
-	var existingContent string
-	if _, err := os.Stat(credPath); err == nil {
-		content, err := os.ReadFile(credPath)
-		if err != nil {
-			return fmt.Errorf("failed to read credentials file: %w", err)
+	if !installed || pm.forceInstall {
+		PrepLogs.Info("Installing Nginx...")
+		if err := pm.packageManager.Install(ctx, []string{"nginx"}, stream); err != nil {
+			PrepLogs.Error("Nginx installation failed: %v", err)
+			return fmt.Errorf("nginx installation failed: %w", err)
 		}
-		existingContent = string(content)
+
+		cmds := []string{
+			"sudo systemctl enable nginx",
+			"sudo systemctl start nginx",
+		}
+
+		for _, cmd := range cmds {
+			if _, err := pm.serverMgr.ExecuteCommand(ctx, serverName, cmd, stream); err != nil {
+				PrepLogs.Error("Nginx service setup failed: %v", err)
+				return fmt.Errorf("nginx service setup failed: %w", err)
+			}
+		}
+		PrepLogs.Success("Nginx installed and started")
+	} else {
+		PrepLogs.Info("Nginx already installed")
 	}
-
-	// Parse existing profiles
-	profiles := parseProfiles(existingContent)
-
-	// Add/update the profile
-	profiles[profileName] = profile{
-		AccessKeyID:     accessKeyID,
-		SecretAccessKey: secretAccessKey,
-	}
-
-	// Write back to file
-	if err := writeProfiles(credPath, profiles); err != nil {
-		return fmt.Errorf("failed to write credentials file: %w", err)
-	}
-
 	return nil
 }
 
-type profile struct {
-	AccessKeyID     string
-	SecretAccessKey string
-}
-
-func parseProfiles(content string) map[string]profile {
-	profiles := make(map[string]profile)
-	currentProfile := ""
-
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-
-		if strings.HasPrefix(line, "[") && strings.HasPrefix(line, "]") {
-			// New profile section
-			currentProfile = strings.Trim(line, "[]")
-			if _, exists := profiles[currentProfile]; !exists {
-				profiles[currentProfile] = profile{}
-			}
-		} else if currentProfile != "" {
-			// Profile property
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				key := strings.TrimSpace(parts[0])
-				value := strings.TrimSpace(parts[1])
-				p := profiles[currentProfile]
-
-				switch key {
-				case "aws_access_key_id":
-					p.AccessKeyID = value
-				case "aws_secret_access_key":
-					p.SecretAccessKey = value
-				}
-
-				profiles[currentProfile] = p
-			}
-		}
+func (pm *PreparationManager) InstallPackages(ctx context.Context, serverName string, stream io.Writer) error {
+	// Update package lists first
+	if err := pm.packageManager.Update(ctx, stream); err != nil {
+		PrepLogs.Error("Failed to update package lists: %v", err)
+		return fmt.Errorf("package update failed: %w", err)
 	}
 
-	return profiles
-}
-
-func writeProfiles(path string, profiles map[string]profile) error {
-	var builder strings.Builder
-
-	for name, p := range profiles {
-		builder.WriteString(fmt.Sprintf("[%s]\n", name))
-		builder.WriteString(fmt.Sprintf("aws_access_key_id = %s\n", p.AccessKeyID))
-		builder.WriteString(fmt.Sprintf("aws_secret_access_key = %s\n", p.SecretAccessKey))
-		builder.WriteString("\n")
+	// Install base packages
+	basePkgs := []string{
+		"curl", "git", "make", "gcc",
+		"ca-certificates", "software-properties-common",
 	}
 
-	// Write to temp file first
-	tempPath := path + ".tmp"
-	if err := os.WriteFile(tempPath, []byte(builder.String()), 0600); err != nil {
+	if err := pm.installBasePackages(ctx, serverName, basePkgs, stream); err != nil {
 		return err
 	}
 
-	// Then rename to replace original
-	return os.Rename(tempPath, path)
+	// Install Docker
+	if err := pm.installDocker(ctx, serverName, stream); err != nil {
+		return err
+	}
+
+	// Install Caddy
+	if err := pm.installCaddy(ctx, serverName, stream); err != nil {
+		return err
+	}
+
+	// Install AWS CLI if requested
+	if pm.installAWS {
+		if err := pm.installAWScli(ctx, serverName, stream); err != nil {
+			return err
+		}
+	}
+
+	// Install Nginx if requested - fixed the boolean condition
+	if pm.installNginx {
+		if err := pm.installNginx(ctx, serverName, stream); err != nil {
+			return err
+		}
+	}
+
+	PrepLogs.Success("All packages installed successfully")
+	return nil
 }
 
-func main() {
-	// Example usage
-	err := AddAWSProfile(
-		"my-new-profile",
-		"AKIAXXXXXXXXXXXXXXXX",
-		"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-	)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-	} else {
-		fmt.Println("Profile added successfully")
-	}
-}
+// ... rest of the methods remain unchanged ...

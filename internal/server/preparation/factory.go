@@ -1,45 +1,43 @@
+// internal/server/preparation/factory.go
 package preparation
 
 import (
 	"context"
+	"fmt"
 	"io"
-
-	"github.com/gohugoio/hugo/output"
+	"strings"
 )
 
+// Then wrap your server struct when passing to functions:
+// PackageManagerFactory creates the appropriate package manager
 func PackageManagerFactory(
 	ctx context.Context,
 	serverMgr ServerManager,
 	serverName string,
 	stream io.Writer,
-) (
-	PackageManager, error,
-) {
+) (PackageManager, error) {
+	// Detect package manager
 	pkgType, err := detectPackageManager(ctx, serverMgr, serverName, stream)
+	//FIX: The package manager is not returned correctly
+	PrepLogs.Debug("Detected package manager:%s", pkgType)
 	if err != nil {
-		PrepLogs.Error("failed to detect package manager: %v", err)
+		PrepLogs.Error("Error detecting package manager:", err)
 		return nil, err
 	}
 
 	switch pkgType {
 	case Apt:
-		return NewAptManager(serverMgr.Executor(), stream), nil
-	case Yum:
-		return NewYumManager(serverMgr.Executor(), stream, Yum), nil
-	case Dnf:
-		return NewYumManager(serverMgr.Executor(), stream, Dnf), nil
-	case Zypp:
-		return NewYumManager(serverMgr.Executor(), stream, Zypp), nil
+		return NewAptManager(serverMgr, serverName), nil
+	case Yum, Dnf:
+		return NewYumManager(serverMgr, serverName), nil
 	default:
-		PrepLogs.Error("unsupported package manager type: %s", pkgType)
-		return nil, err
-
+		return nil, fmt.Errorf("unsupported package manager: %s", pkgType)
 	}
 }
 
 func detectPackageManager(ctx context.Context, serverMgr ServerManager, serverName string, stream io.Writer) (PackageManagerType, error) {
 	detectCmd := `
-	if command -v apt-get >/dev/null 2>&1; then echo "apt";
+		if command -v apt-get >/dev/null 2>&1; then echo "apt";
 		elif command -v dnf >/dev/null 2>&1; then echo "dnf";
 		elif command -v yum >/dev/null 2>&1; then echo "yum";
 		else echo "unknown"; fi
@@ -47,21 +45,9 @@ func detectPackageManager(ctx context.Context, serverMgr ServerManager, serverNa
 
 	output, err := serverMgr.ExecuteCommand(ctx, serverName, detectCmd, stream)
 	if err != nil {
-		PrepLogs.Error("failed to execute package manager detection command: %v", err)
-		return "", err
+		PrepLogs.Error("Failed to execute command to detect package manager:", err)
+		return "", fmt.Errorf("failed to detect package manager: %w", err)
 	}
-	output = output.TrimSpace()
-	switch output {
-	case "apt":
-		return Apt, nil
-	case "dnf":
-		return Dnf, nil
-	case "yum":
-		return Yum, nil
-	case "zypp":
-		return Zypp, nil
-	default:
-		PrepLogs.Error("unknown package manager detected: %s", output)
-		return "", err
-	}
+
+	return PackageManagerType(strings.TrimSpace(output)), nil
 }

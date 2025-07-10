@@ -2,53 +2,49 @@ package preparation
 
 import (
 	"context"
-	"io"
-	"nextdeploy/internal/logger"
 	"fmt"
+	"io"
 	"strings"
+
+	"nextdeploy/internal/logger"
 )
 
 var (
-	PrepLogs = logger.PackageLogger("preparation", "PreparationLogs")
+	PrepLogs = logger.PackageLogger("preparation", "🔧")
 )
 
 type PreparationManager struct {
 	serverMgr      ServerManager
 	packageManager PackageManager
-	InstallAWS     bool
+	installAWS     bool
 	forceInstall   bool
+	installNginx   bool
 	verbose        bool
 }
 
-func NewPreparationManager(serverMgr ServerManager, pm PackageManager, installAWS, forceInstall, verbose bool) *PreparationManager {
+func NewPreparationManager(serverMgr ServerManager, pm PackageManager, installAWS, forceInstall, installNginx, verbose bool) *PreparationManager {
 	return &PreparationManager{
 		serverMgr:      serverMgr,
 		packageManager: pm,
-		InstallAWS:     installAWS,
+		installAWS:     installAWS,
 		forceInstall:   forceInstall,
+		installNginx:   installNginx,
 		verbose:        verbose,
 	}
 }
 
-func (pm *PreparationManager) VerifyPrerequisites(ctx context.Context, serverName string, stream io.Write) error {
+func (pm *PreparationManager) VerifyPrerequisites(ctx context.Context, serverName string, stream io.Writer) error {
+	PrepLogs.Info("Verifying prerequisites for server %s", serverName)
 
-	PrepLogs.Info("Verifying prerequisites for server")
 	checks := []struct {
 		command string
 		message string
 	}{
-		{"uname -a", "Checking system information"},
-		{"df -h --output=size, used, avail, pcent", "Checking disk space"},
-		{"free -h", "Checking memory usage"},
-		{"lscpu", "Checking CPU information"},
-		{"cat /etc/os-release", "Checking OS release information"},
-		{"cat /proc/cpuinfo", "Checking CPU details"},
-		{"cat /proc/meminfo", "Checking memory details"},
-		{"cat /proc/version", "Checking kernel version"},
-		{"ip a", "Checking network interfaces"},
-		{"hostname", "Checking hostname"},
-		{"nproc", "Checking number of processors"},
-		{"uptime", "Checking system uptime"},
+		{"uname -a", "System information"},
+		{"df -h --output=size,used,avail,pcent", "Disk space"},
+		{"free -h", "Memory usage"},
+		{"lscpu", "CPU information"},
+		{"nproc", "Processor count"},
 	}
 
 	for _, check := range checks {
@@ -56,31 +52,29 @@ func (pm *PreparationManager) VerifyPrerequisites(ctx context.Context, serverNam
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			PrepLogs.Info("Checking %s:", check.message)
+			PrepLogs.Debug("Checking %s...", check.message)
 			output, err := pm.serverMgr.ExecuteCommand(ctx, serverName, check.command, stream)
 			if err != nil {
-				PrepLogs.Error("Failed to execute command '%s': %v", check.command, err)
-				return err
-			}
-			if pm.verbose {
-				PrepLogs.Info("Output of '%s':\n%s", check.command, strings.TrimSpace(output))
-			} else {
-				PrepLogs.Info("Command '%s' executed successfully", check.command)
+				PrepLogs.Error("Prerequisite check failed for %s: %v", check.message, err)
+				return fmt.Errorf("%s check failed: %w", check.message, err)
 			}
 
+			if pm.verbose {
+				PrepLogs.Debug("%s output:\n%s", check.message, strings.TrimSpace(output))
+			}
 		}
 	}
-	PrepLogs.Success("All prerequisite checks completed successfully")
 
+	PrepLogs.Success("All prerequisites verified")
 	return nil
 }
 
-// internal/server/preparation/manager.go (additional methods)
-
 func (pm *PreparationManager) InstallPackages(ctx context.Context, serverName string, stream io.Writer) error {
+	PrepLogs.Info("Starting package installation on server %s", serverName)
+
 	// Update package lists first
-	if err := pm.pkgManager.Update(ctx, stream); err != nil {
-		logToStream(stream, "Failed to update package lists", color.FgRed)
+	if err := pm.packageManager.Update(ctx, stream); err != nil {
+		PrepLogs.Error("Failed to update package lists: %v", err)
 		return fmt.Errorf("package update failed: %w", err)
 	}
 
@@ -111,29 +105,38 @@ func (pm *PreparationManager) InstallPackages(ctx context.Context, serverName st
 		}
 	}
 
+	// Install Nginx if requested
+	if pm.installNginx {
+		if err := pm.InstallNginx(ctx, serverName, stream); err != nil {
+			return err
+		}
+	}
+
+	PrepLogs.Success("All packages installed successfully")
 	return nil
 }
 
 func (pm *PreparationManager) installBasePackages(ctx context.Context, serverName string, packages []string, stream io.Writer) error {
-	logToStream(stream, "Installing base packages...", color.FgYellow)
-	if err := pm.pkgManager.Install(ctx, packages, stream); err != nil {
-		logToStream(stream, "Failed to install base packages", color.FgRed)
+	PrepLogs.Info("Installing base packages: %v", packages)
+	if err := pm.packageManager.Install(ctx, packages, stream); err != nil {
+		PrepLogs.Error("Base package installation failed: %v", err)
 		return fmt.Errorf("base package installation failed: %w", err)
 	}
-	logToStream(stream, "✓ Base packages installed", color.FgGreen)
+	PrepLogs.Success("Base packages installed")
 	return nil
 }
 
 func (pm *PreparationManager) installDocker(ctx context.Context, serverName string, stream io.Writer) error {
-	logToStream(stream, "Checking Docker installation...", color.FgCyan)
+	PrepLogs.Info("Checking Docker installation...")
 
-	installed, err := pm.pkgManager.IsInstalled(ctx, "docker")
+	installed, err := pm.packageManager.IsInstalled(ctx, "docker")
 	if err != nil {
-		return fmt.Errorf("failed to check Docker installation: %w", err)
+		PrepLogs.Error("Failed to check Docker installation: %v", err)
+		return fmt.Errorf("docker check failed: %w", err)
 	}
 
 	if !installed || pm.forceInstall {
-		logToStream(stream, "Installing Docker...", color.FgYellow)
+		PrepLogs.Info("Installing Docker...")
 		cmds := []string{
 			"curl -fsSL https://get.docker.com | sudo sh",
 			"sudo usermod -aG docker $USER",
@@ -142,30 +145,33 @@ func (pm *PreparationManager) installDocker(ctx context.Context, serverName stri
 		}
 
 		for _, cmd := range cmds {
-			if err := pm.serverMgr.ExecuteCommand(ctx, serverName, cmd, stream); err != nil {
+			if _, err := pm.serverMgr.ExecuteCommand(ctx, serverName, cmd, stream); err != nil {
+				PrepLogs.Error("Docker installation failed: %v", err)
 				return fmt.Errorf("docker installation failed: %w", err)
 			}
 		}
-		logToStream(stream, "✓ Docker installed", color.FgGreen)
+		PrepLogs.Success("Docker installed")
 	} else {
-		logToStream(stream, "✓ Docker already installed", color.FgGreen)
+		PrepLogs.Info("Docker already installed")
 	}
 	return nil
 }
 
 func (pm *PreparationManager) installCaddy(ctx context.Context, serverName string, stream io.Writer) error {
-	logToStream(stream, "Checking Caddy installation...", color.FgCyan)
-
-	installed, err := pm.pkgManager.IsInstalled(ctx, "caddy")
+	PrepLogs.Info("Checking Caddy installation...")
+	installed, err := pm.packageManager.IsInstalled(ctx, "caddy")
 	if err != nil {
-		return fmt.Errorf("failed to check Caddy installation: %w", err)
+		PrepLogs.Error("Failed to check Caddy installation: %v", err)
+		return fmt.Errorf("caddy check failed: %w", err)
 	}
 
 	if !installed || pm.forceInstall {
-		logToStream(stream, "Installing Caddy...", color.FgYellow)
-
+		PrepLogs.Info("Installing Caddy...")
 		var cmds []string
-		if _, ok := pm.pkgManager.(*AptManager); ok {
+
+		// Determine package manager type
+		switch pm.packageManager.(type) {
+		case *AptManager:
 			cmds = []string{
 				"sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https",
 				"curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg",
@@ -175,7 +181,7 @@ func (pm *PreparationManager) installCaddy(ctx context.Context, serverName strin
 				"sudo systemctl enable caddy",
 				"sudo systemctl start caddy",
 			}
-		} else {
+		default: // Assume yum/dnf
 			cmds = []string{
 				"sudo yum install -y yum-plugin-copr",
 				"sudo yum copr enable -y @caddy/caddy",
@@ -186,49 +192,122 @@ func (pm *PreparationManager) installCaddy(ctx context.Context, serverName strin
 		}
 
 		for _, cmd := range cmds {
-			if err := pm.serverMgr.ExecuteCommand(ctx, serverName, cmd, stream); err != nil {
+			if _, err := pm.serverMgr.ExecuteCommand(ctx, serverName, cmd, stream); err != nil {
+				PrepLogs.Error("Caddy installation failed: %v", err)
 				return fmt.Errorf("caddy installation failed: %w", err)
 			}
 		}
-		logToStream(stream, "✓ Caddy installed", color.FgGreen)
+		PrepLogs.Success("Caddy installed")
 	} else {
-		logToStream(stream, "✓ Caddy already installed", color.FgGreen)
+		PrepLogs.Info("Caddy already installed")
 	}
 	return nil
 }
 
 func (pm *PreparationManager) installAWScli(ctx context.Context, serverName string, stream io.Writer) error {
-	logToStream(stream, "Checking AWS CLI installation...", color.FgCyan)
+	PrepLogs.Info("Checking AWS CLI installation...")
 
-	installed, err := pm.pkgManager.IsInstalled(ctx, "aws")
+	// Check both possible locations
+	checkCmd := "[ -x /usr/local/bin/aws ] || [ -x /usr/bin/aws ]"
+	if _, err := pm.serverMgr.ExecuteCommand(ctx, serverName, checkCmd, stream); err == nil && !pm.forceInstall {
+		PrepLogs.Success("AWS CLI already installed")
+		return nil
+	}
+
+	PrepLogs.Info("Installing AWS CLI...")
+
+	// First try official Ubuntu package (simpler)
+	// TODO: we would need to add the actual intsll logic
+	if err := pm.packageManager.Install(ctx, []string{"awscli"}, stream); err == nil {
+		PrepLogs.Success("Installed via apt")
+		return nil
+	}
+
+	PrepLogs.Info("Falling back to manual installation...")
+	// we need to check if unzip and curl are installed
+	unzipInstalled, err := pm.packageManager.IsInstalled(ctx, "unzip")
 	if err != nil {
-		return fmt.Errorf("failed to check AWS CLI installation: %w", err)
+		PrepLogs.Error("Failed to check unzip installation: %v", err)
+		return fmt.Errorf("unzip check failed: %w", err)
+	}
+	if !unzipInstalled {
+		PrepLogs.Info("Installing unzip...")
+		if err := pm.packageManager.Install(ctx, []string{"unzip"}, stream); err != nil {
+			PrepLogs.Error("Unzip installation failed: %v", err)
+			return fmt.Errorf("unzip installation failed: %w", err)
+		}
+	}
+	curlInstalled, err := pm.packageManager.IsInstalled(ctx, "curl")
+	if err != nil {
+		PrepLogs.Error("Failed to check curl installation: %v", err)
+		return fmt.Errorf("curl check failed: %w", err)
+	}
+	if !curlInstalled {
+		PrepLogs.Info("Installing curl...")
+		if err := pm.packageManager.Install(ctx, []string{"curl"}, stream); err != nil {
+			PrepLogs.Error("Curl installation failed: %v", err)
+			return fmt.Errorf("curl installation failed: %w", err)
+		}
+	}
+
+	cmds := []string{
+		"sudo rm -rf /tmp/awscli*", // Cleanup
+		"cd /tmp",
+		"curl -L https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip",
+		"unzip awscliv2.zip",
+		"sudo ./aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update",
+		"sudo ln -sf /usr/local/bin/aws /usr/bin/aws", // Ensure system-wide access
+		"rm -rf awscliv2.zip aws",
+		"aws --version", // Verify
+	}
+
+	for _, cmd := range cmds {
+		output, err := pm.serverMgr.ExecuteCommand(ctx, serverName, cmd, stream)
+		if err != nil {
+			PrepLogs.Error("AWS CLI installation failed at command '%s': %v\nOutput: %s", cmd, err, output)
+			return fmt.Errorf("aws cli installation failed at '%s': %w", cmd, err)
+		}
+	}
+
+	PrepLogs.Success("AWS CLI installed successfully")
+	return nil
+}
+func (pm *PreparationManager) InstallNginx(ctx context.Context, serverName string, stream io.Writer) error {
+	PrepLogs.Info("Checking Nginx installation...")
+	installed, err := pm.packageManager.IsInstalled(ctx, "nginx")
+	if err != nil {
+		PrepLogs.Error("Failed to check Nginx installation: %v", err)
+		return fmt.Errorf("nginx check failed: %w", err)
 	}
 
 	if !installed || pm.forceInstall {
-		logToStream(stream, "Installing AWS CLI...", color.FgYellow)
+		PrepLogs.Info("Installing Nginx...")
+		if err := pm.packageManager.Install(ctx, []string{"nginx"}, stream); err != nil {
+			PrepLogs.Error("Nginx installation failed: %v", err)
+			return fmt.Errorf("nginx installation failed: %w", err)
+		}
+
 		cmds := []string{
-			"curl -sL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip",
-			"unzip -q awscliv2.zip",
-			"sudo ./aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update",
-			"rm -rf awscliv2.zip aws",
+			"sudo systemctl enable nginx",
+			"sudo systemctl start nginx",
 		}
 
 		for _, cmd := range cmds {
-			if err := pm.serverMgr.ExecuteCommand(ctx, serverName, cmd, stream); err != nil {
-				return fmt.Errorf("aws cli installation failed: %w", err)
+			if _, err := pm.serverMgr.ExecuteCommand(ctx, serverName, cmd, stream); err != nil {
+				PrepLogs.Error("Nginx service setup failed: %v", err)
+				return fmt.Errorf("nginx service setup failed: %w", err)
 			}
 		}
-		logToStream(stream, "✓ AWS CLI installed", color.FgGreen)
+		PrepLogs.Success("Nginx installed and started")
 	} else {
-		logToStream(stream, "✓ AWS CLI already installed", color.FgGreen)
+		PrepLogs.Info("Nginx already installed")
 	}
 	return nil
 }
 
 func (pm *PreparationManager) SetupDirectories(ctx context.Context, serverName string, stream io.Writer) error {
 	const appDir = "/opt/nextjs-app"
-	logToStream(stream, fmt.Sprintf("Creating application directory at %s", appDir), color.FgBlue)
+	PrepLogs.Info("Setting up application directory at %s", appDir)
 
 	cmds := []string{
 		fmt.Sprintf("sudo mkdir -p %s", appDir),
@@ -237,17 +316,18 @@ func (pm *PreparationManager) SetupDirectories(ctx context.Context, serverName s
 	}
 
 	for _, cmd := range cmds {
-		if err := pm.serverMgr.ExecuteCommand(ctx, serverName, cmd, stream); err != nil {
-			return fmt.Errorf("failed to create application directory: %w", err)
+		if _, err := pm.serverMgr.ExecuteCommand(ctx, serverName, cmd, stream); err != nil {
+			PrepLogs.Error("Directory setup failed: %v", err)
+			return fmt.Errorf("directory setup failed: %w", err)
 		}
 	}
 
-	logToStream(stream, fmt.Sprintf("✓ Application directory ready at %s", appDir), color.FgGreen)
+	PrepLogs.Success("Application directory setup complete")
 	return nil
 }
 
 func (pm *PreparationManager) VerifyInstallation(ctx context.Context, serverName string, stream io.Writer) error {
-	logToStream(stream, "🔍 Verifying installations...", color.FgBlue)
+	PrepLogs.Info("Verifying installations...")
 
 	tools := []struct {
 		name    string
@@ -264,25 +344,31 @@ func (pm *PreparationManager) VerifyInstallation(ctx context.Context, serverName
 		}{"AWS CLI", "aws --version"})
 	}
 
+	if pm.installNginx {
+		tools = append(tools, struct {
+			name    string
+			command string
+		}{"Nginx", "nginx -v"})
+	}
+
 	for _, tool := range tools {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			logToStream(stream, fmt.Sprintf("Checking %s installation...", tool.name), color.FgCyan)
-
+			PrepLogs.Debug("Verifying %s installation...", tool.name)
 			output, err := pm.serverMgr.ExecuteCommand(ctx, serverName, tool.command, stream)
 			if err != nil {
-				logToStream(stream, fmt.Sprintf("%s verification failed", tool.name), color.FgRed)
+				PrepLogs.Error("%s verification failed: %v", tool.name, err)
 				return fmt.Errorf("%s verification failed: %w", tool.name, err)
 			}
 
 			if pm.verbose {
-				logToStream(stream, fmt.Sprintf("%s version: %s", tool.name, strings.TrimSpace(output)), color.FgCyan)
+				PrepLogs.Info("%s version: %s", tool.name, strings.TrimSpace(output))
 			}
 		}
 	}
 
-	logToStream(stream, "✓ All tools verified successfully", color.FgGreen)
+	PrepLogs.Success("All installations verified")
 	return nil
 }

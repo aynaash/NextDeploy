@@ -8,7 +8,6 @@ import (
 	"nextdeploy/internal/server"
 	"nextdeploy/internal/server/preparation"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -28,6 +27,7 @@ var (
 	installAWS   bool
 	forceInstall bool
 	skipVerify   bool
+	installNginx bool
 )
 
 var prepareCmd = &cobra.Command{
@@ -43,6 +43,7 @@ This command will:
 }
 
 func init() {
+	prepareCmd.Flags().BoolVarP(&installNginx, "nginx", "n", false, "Install Nginx instead of Caddy")
 	prepareCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	prepareCmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "Timeout for the preparation process")
 	prepareCmd.Flags().BoolVar(&streamMode, "stream", true, "Stream command output in real-time")
@@ -59,7 +60,7 @@ func runPrepare(cmd *cobra.Command, args []string) {
 	}()
 	// setup signal handling
 	signalChan := make(chan os.Signal, 1)
-	signalChan.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-signalChan
 		PrepLogs.Warn("Preparation interrupted by user")
@@ -84,9 +85,9 @@ func runPrepare(cmd *cobra.Command, args []string) {
 		PrepLogs.Error("Failed to initialize server manager: %v", err)
 		return
 	}
-	PrepLogs.Info("Preparing server with configuration: %s", serverMgr.ConfigPath)
+	PrepLogs.Info("Preparing server with configuration")
 	defer func() {
-		serverMgr.CloseSSHConnections()
+		serverMgr.CloseSSHConnection()
 	}()
 
 	serverName, err := selectTargetServer(ctx, serverMgr)
@@ -111,9 +112,10 @@ func runPrepare(cmd *cobra.Command, args []string) {
 		pkgManager,
 		installAWS,
 		forceInstall,
+		installNginx,
 		verbose,
 	)
-	if err := executePreparation(ctx, serverMgr, serverName, outputStream); err != nil {
+	if err := executePreparation(ctx, serverMgr, serverName, outputStream, skipVerify); err != nil {
 		PrepLogs.Error("Preparation failed: %v", err)
 		return
 	}
@@ -150,7 +152,7 @@ func executePreparation(
 	}{
 		{
 			"Prerequisite Verification",
-			func() error { return prepManager.VerifyPrerequisites(ctx, serverName, stream) },
+			func() error { return prepManager.VerifyPreRequisites(ctx, serverName, stream) },
 		},
 		{
 			"Package Installation",

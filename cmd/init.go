@@ -5,7 +5,7 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-	"nextdeploy/internal/detect"
+	"nextdeploy/internal/nextcore/detect"
 	"nextdeploy/internal/initialcommand"
 )
 

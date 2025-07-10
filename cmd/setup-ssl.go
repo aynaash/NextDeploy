@@ -106,7 +106,7 @@ func runSSLCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to initialize server manager: %w", err)
 	}
 	sslogs.Debug("Server manager initialized")
-	defer serverMgr.CloseSSHConnections()
+	defer serverMgr.CloseSSHConnection()
 
 	// Get deployment server
 

@@ -8,6 +8,7 @@ import (
 	"nextdeploy/internal/git"
 	"nextdeploy/internal/logger"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -22,8 +23,13 @@ var (
 
 var buildCmd = &cobra.Command{
 	Use:   "build",
-	Short: "Build Docker image from the Dockerfile",
-	Long: `Builds a Docker image with smart defaults and configuration.
+	Short: "Build Docker image from the Dockerfile using metadata from nextcore collected by nextdeploy",
+	Long: `
+	Builds a Docker image with smart defaults and configuration data 
+	collected by nextcore engine. 
+	Our system that enables developer to use next all features in container 
+	Envirenment built for cloud in a cloud agnostic way.
+	.
 
 The command automatically:
 - Detects your Git repository state
@@ -127,6 +133,12 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 		buildlogger.Debug("Build args look like this %v", builArgs)
 	}
 	tag, _ := git.GetCommitHash()
+	//Validate the tag
+	if !ValidateDockerTag(tag) {
+		buildlogger.Debug("Invalid Docker tag format: %s", tag)
+		return fmt.Errorf("invalid Docker tag format: %s", tag)
+	}
+
 	imagename := cfg.Docker.Image + ":" + tag
 	// Auto-configure build options based on environment
 	opts := docker.BuildOptions{
@@ -189,4 +201,31 @@ func checkBuildConditionsMet(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+func isGitCommitHash(tag string) bool {
+	if len(tag) < 7 || len(tag) > 40 {
+		return false
+	}
+	matched, _ := regexp.MatchString(`^[a-f0-9]+$`, tag)
+	return matched
+}
+func ValidateDockerTag(tag string) bool {
+	// Check for simple git hash (7-40 hex chars)
+	if isGitCommitHash(tag) {
+		return true
+	}
+
+	// Check for git hash with suffix (separated by - or _)
+	hashWithSuffix := regexp.MustCompile(`^[a-f0-9]{7,40}[-_][a-z0-9][a-z0-9._-]{0,126}$`)
+	if hashWithSuffix.MatchString(tag) {
+		return true
+	}
+
+	// Check for semantic version (v1.0.0)
+	semVer := regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+	if semVer.MatchString(tag) {
+		return true
+	}
+
+	return false
 }
