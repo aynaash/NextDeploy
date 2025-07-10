@@ -74,7 +74,7 @@ func runPrepare(cmd *cobra.Command, args []string) {
 	failfast.Failfast(err, failfast.Error, "Error setting up server")
 
 	defer func() {
-		err := serverMgr.CloseSSHConnections()
+		err := serverMgr.CloseSSHConnection()
 		if err != nil {
 			PrepLogs.Error("Failed to close SSH connections: %v", err)
 		} else {
