@@ -15,14 +15,12 @@ import (
 	"sync"
 	"time"
 
-	"nextdeploy/internal/envstore"
-	"nextdeploy/internal/git"
-	"nextdeploy/internal/registry"
-	"nextdeploy/internal/server/preparation"
-
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+	"nextdeploy/internal/envstore"
+	"nextdeploy/internal/git"
+	"nextdeploy/internal/registry"
 )
 
 var (
@@ -503,69 +501,6 @@ func (s *ServerStruct) PingServer(serverName string) error {
 
 	client.LastUsed = time.Now()
 	return nil
-}
-
-// FIX:implement this methods
-func (s *ServerStruct) InstallNginx(ctx context.Context, serverName string, stream io.Writer) error {
-	// Implementation here
-	return nil
-}
-
-func (s *ServerStruct) PackageManagerFactory(ctx context.Context, serverName string, stream io.Writer) (preparation.PackageManager, error) {
-	// Detect package manager
-	pkgType, err := s.DetectPackageManager(ctx, serverName, stream)
-	if err != nil {
-		return nil, fmt.Errorf("failed to detect package manager: %w", err)
-	}
-
-	switch pkgType {
-	case preparation.Apt:
-		return preparation.NewAptManager(s, serverName), nil
-	case preparation.Yum, preparation.Dnf:
-		return preparation.NewYumManager(s, serverName), nil
-	default:
-		return nil, fmt.Errorf("unsupported package manager: %s", pkgType)
-	}
-
-}
-
-func (s *ServerStruct) ListServer() []string {
-	return nil
-}
-func (s *ServerStruct) InstallPackages(ctx context.Context, serverName string, stream io.Writer) error {
-	// Implementation here
-	return nil
-}
-func (s *ServerStruct) CloseConnection(ctx context.Context, serverName string, stream io.Writer) error {
-	return nil
-}
-func (s *ServerStruct) InstallDocker(ctx context.Context, serverName string, stream io.Writer) error {
-	// Implementation here
-	return nil
-}
-
-func (s *ServerStruct) SetupDirectories(ctx context.Context, serverName string, stream io.Writer) error {
-	// Implementation here
-	return nil
-}
-
-func (s *ServerStruct) VerifyInstallation(ctx context.Context, serverName string, stream io.Writer) error {
-	// Implementation here
-	return nil
-}
-
-func (s *ServerStruct) VerifyPreRequisites(ctx context.Context, serverName string, stream io.Writer) error {
-	// Implementation here
-	return nil
-}
-func (s *ServerStruct) DetectPackageManager(ctx context.Context, serverName string, stream io.Writer) (preparation.PackageManagerType, error) {
-	output, err := s.ExecuteCommand(ctx, serverName, "command -v apt-get && echo 'apt' || echo 'yum'", stream)
-	if err != nil {
-		return "", fmt.Errorf("failed to detect package manager: %w", err)
-	}
-
-	pkgManager := strings.TrimSpace(output)
-	return preparation.PackageManagerType(pkgManager), nil
 }
 
 // CloseSSHConnections closes all active SSH connections

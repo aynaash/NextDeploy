@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>NextCore Test</title>
+</head>
+
+<body>
+  <h2>Send Fake NextCore Payload</h2>
+  <button onclick="send()">Send</button>
+
+  <script>
+    function send() {
+      fetch('http://127.0.0.1:8371/nextcore/intake', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          app_name: "blog",
+          next_version: "14.2.1",
+          env: {
+            "DATABASE_URL": "postgres://db",
+            "JWT_SECRET": "s3cr3t"
+          },
+          routes: ["/", "/about", "/blog/[slug]"],
+          build_command: "next build",
+          start_command: "next start",
+          has_image_assets: true,
+          cdn_enabled: false,
+          domain: "blog.nextdeploy.dev"
+        })
+      })
+        .then(res => res.json())
+        .then(data => alert(JSON.stringify(data)))
+        .catch(err => alert(err));
+    }
+  </script>
+</body>
+
+</html>

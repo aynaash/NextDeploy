@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"nextdeploy/internal/config"
 	"nextdeploy/internal/logger"
-	"nextdeploy/internal/nextcore/detect"
+	"nextdeploy/internal/nextcore"
 	"nextdeploy/internal/registry"
 	"os"
 	"os/exec"

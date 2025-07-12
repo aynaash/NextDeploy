@@ -2,117 +2,174 @@
 // +build ignore
 
 // internal/server/preparation/manager.go
-package preparation
+package nextdeploy
 
 import (
-	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
-	"strings"
+	"os"
+	"path/filepath"
+	"time"
 
-	"nextdeploy/internal/logger"
+	"yourapp/git"
 )
 
-var (
-	PrepLogs = logger.PackageLogger("preparation", "🔧")
-)
-
-type PreparationManager struct {
-	serverMgr      ServerManager
-	packageManager PackageManager
-	installAWS     bool
-	forceInstall   bool
-	installNginx   bool // Changed from field to method to avoid name collision
-	verbose        bool
+type Metadata struct {
+	Routes     map[string][]string `json:"routes"`
+	Env        map[string]string   `json:"env"`
+	Middleware []string            `json:"middleware"`
 }
 
-func NewPreparationManager(serverMgr ServerManager, pm PackageManager, installAWS, forceInstall, installNginx, verbose bool) *PreparationManager {
-	return &PreparationManager{
-		serverMgr:      serverMgr,
-		packageManager: pm,
-		installAWS:     installAWS,
-		forceInstall:   forceInstall,
-		installNginx:   installNginx,
-		verbose:        verbose,
+type BuildLock struct {
+	GitCommit     string    `json:"git_commit"`
+	GitDirty      bool      `json:"git_dirty"`
+	GeneratedAt   time.Time `json:"generated_at"`
+	MetadataFile  string    `json:"metadata_file"`
+}
+
+const (
+	LockFilePath        = ".nextdeploy/build.lock"
+	MetadataFilePath    = ".nextdeploy/metadata.json"
+	AssetsOutputDir     = ".nextdeploy/assets"
+	PublicDir           = "public"
+)
+
+func GenerateMetadata() error {
+	fmt.Println("Running `next build`...")
+	if err := runNextBuild(); err != nil {
+		return err
 	}
-}
 
-func (pm *PreparationManager) installNginx(ctx context.Context, serverName string, stream io.Writer) error {
-	PrepLogs.Info("Checking Nginx installation...")
-	installed, err := pm.packageManager.IsInstalled(ctx, "nginx")
+	fmt.Println("Extracting metadata...")
+	metadata, err := extractMetadata()
 	if err != nil {
-		PrepLogs.Error("Failed to check Nginx installation: %v", err)
-		return fmt.Errorf("nginx check failed: %w", err)
+		return err
 	}
 
-	if !installed || pm.forceInstall {
-		PrepLogs.Info("Installing Nginx...")
-		if err := pm.packageManager.Install(ctx, []string{"nginx"}, stream); err != nil {
-			PrepLogs.Error("Nginx installation failed: %v", err)
-			return fmt.Errorf("nginx installation failed: %w", err)
-		}
-
-		cmds := []string{
-			"sudo systemctl enable nginx",
-			"sudo systemctl start nginx",
-		}
-
-		for _, cmd := range cmds {
-			if _, err := pm.serverMgr.ExecuteCommand(ctx, serverName, cmd, stream); err != nil {
-				PrepLogs.Error("Nginx service setup failed: %v", err)
-				return fmt.Errorf("nginx service setup failed: %w", err)
-			}
-		}
-		PrepLogs.Success("Nginx installed and started")
-	} else {
-		PrepLogs.Info("Nginx already installed")
+	if err := saveMetadata(metadata); err != nil {
+		return err
 	}
+
+	fmt.Println("Extracting static assets...")
+	if err := extractAssets(); err != nil {
+		return err
+	}
+
+	snapshot, err := git.GetGitSnapshot(MetadataFilePath)
+	if err != nil {
+		return err
+	}
+	return saveBuildLock(snapshot)
+}
+
+func ValidateMetadata() (bool, error) {
+	lock, err := loadBuildLock()
+	if err != nil {
+		return false, err
+	}
+
+	currentCommit, err := git.CurrentCommit()
+	if err != nil {
+		return false, err
+	}
+
+	isDirty, err := git.IsDirty()
+	if err != nil {
+		return false, err
+	}
+
+	if currentCommit != lock.GitCommit || isDirty {
+		fmt.Println("⚠️ Git state changed since last metadata snapshot.")
+		fmt.Printf("Last commit: %s, Current commit: %s\n", lock.GitCommit, currentCommit)
+		fmt.Printf("Dirty: %v\n", isDirty)
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func runNextBuild() error {
+	// TODO: Run `next build` via exec.Command
+	fmt.Println("(Simulated) next build complete.")
 	return nil
 }
 
-func (pm *PreparationManager) InstallPackages(ctx context.Context, serverName string, stream io.Writer) error {
-	// Update package lists first
-	if err := pm.packageManager.Update(ctx, stream); err != nil {
-		PrepLogs.Error("Failed to update package lists: %v", err)
-		return fmt.Errorf("package update failed: %w", err)
-	}
-
-	// Install base packages
-	basePkgs := []string{
-		"curl", "git", "make", "gcc",
-		"ca-certificates", "software-properties-common",
-	}
-
-	if err := pm.installBasePackages(ctx, serverName, basePkgs, stream); err != nil {
-		return err
-	}
-
-	// Install Docker
-	if err := pm.installDocker(ctx, serverName, stream); err != nil {
-		return err
-	}
-
-	// Install Caddy
-	if err := pm.installCaddy(ctx, serverName, stream); err != nil {
-		return err
-	}
-
-	// Install AWS CLI if requested
-	if pm.installAWS {
-		if err := pm.installAWScli(ctx, serverName, stream); err != nil {
-			return err
-		}
-	}
-
-	// Install Nginx if requested - fixed the boolean condition
-	if pm.installNginx {
-		if err := pm.installNginx(ctx, serverName, stream); err != nil {
-			return err
-		}
-	}
-
-	PrepLogs.Success("All packages installed successfully")
-	return nil
+func extractMetadata() (*Metadata, error) {
+	// TODO: Parse .next/build-manifest.json, routes-manifest.json, etc.
+	return &Metadata{
+		Routes: map[string][]string{
+			"static":  {"/about", "/contact"},
+			"dynamic": {"/user/[id]"},
+		},
+		Env: map[string]string{
+			"NEXT_PUBLIC_API_URL": "https://api.example.com",
+		},
+		Middleware: []string{"middleware.ts"},
+	}, nil
 }
 
-// ... rest of the methods remain unchanged ...
+func extractAssets() error {
+	source := PublicDir
+	destination := AssetsOutputDir
+
+	if err := os.MkdirAll(destination, 0755); err != nil {
+		return err
+	}
+
+	return filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		relPath, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		destPath := filepath.Join(destination, relPath)
+		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(destPath, data, 0644)
+	})
+}
+
+func saveMetadata(metadata *Metadata) error {
+	if err := os.MkdirAll(filepath.Dir(MetadataFilePath), 0755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(MetadataFilePath, data, 0644)
+}
+
+func saveBuildLock(lock *git.GitSnapshot) error {
+	if err := os.MkdirAll(filepath.Dir(LockFilePath), 0755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(lock, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(LockFilePath, data, 0644)
+}
+
+func loadBuildLock() (*BuildLock, error) {
+	data, err := os.ReadFile(LockFilePath)
+	if err != nil {
+		return nil, errors.New("build.lock not found")
+	}
+	var lock BuildLock
+	if err := json.Unmarshal(data, &lock); err != nil {
+		return nil, err
+	}
+	return &lock, nil
+}

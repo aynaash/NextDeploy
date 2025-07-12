@@ -26,7 +26,7 @@ func SendFakeData() error {
 		return fmt.Errorf("marshal error: %w", err)
 	}
 
-	resp, err := http.Post("http://localhost:8080/nextcore", "application/json", bytes.NewBuffer(payload))
+	resp, err := http.Post("http://127.0.0.1:8371/nextcore/intake", "application/json", bytes.NewBuffer(payload))
 	if err != nil {
 		return fmt.Errorf("post failed: %w", err)
 	}
