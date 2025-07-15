@@ -16,7 +16,7 @@ It gives developers full control over shipping their Next.js apps to any VPS or 
 
 - It’s **framework-specific** by design.
 - It’s **plugin-free** to stay lean, testable, and secure.
-- It’s **CLI-first**, with an optional daemon for orchestration and monitoring.
+- It’s **CLI-first**, with  daemon for orchestration and monitoring.
 - It’s **open-source**, and we want contributions that push it forward without bloating it sideways.
 
 ---
@@ -44,6 +44,9 @@ If you're aligned with that vision, here’s how you can help:
 - Make metrics, health checks, or logging cleaner or more insightful
 - Write clear documentation, examples, and error messages
 - Help us improve developer experience for real-world VPS deployments
+- Improve overall performance and reliability of the deployment process 
+- Suggest improvements to the `nextdeploy.yml` configuration
+- and so on....
 
 ---
 
@@ -79,7 +82,7 @@ Before submitting a pull request, please:
 
 - [x] Check out `nextdeploy.yml` usage
 - [x] Run `nextdeploy init` and follow the flow
-- [x] Review how the CLI interacts with Docker, SSH, and the optional daemon
+- [x] Review how the CLI interacts with Docker, SSH, and the daemon
 - [x] Try a VPS deployment and suggest improvements to DX
 
 ---
@@ -93,4 +96,4 @@ Pull requests are welcome. Issues are open. We move fast and ship clean.
 
 Thanks for being here.
 
-— The NextDeploy Team
+— The NextDeploy Team [Just me now]

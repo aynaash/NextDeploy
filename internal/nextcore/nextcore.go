@@ -39,7 +39,7 @@ func GenerateMetadata() (NextCorePayload, error) {
 	NextCoreLogger.Info("Next.js version: %s", NextJsVersion)
 
 	// Get the environment variables
-	// TODO:-- DO boot.dev encryption course fully
+	// TODO: e
 	//      -- integrate envstore and secrets manager and encrypt mini doppler extensible
 	//      -- version that can be used in production using knowledge learned from bootdev
 

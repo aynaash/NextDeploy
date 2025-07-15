@@ -5,8 +5,8 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-	"nextdeploy/internal/nextcore/detect"
 	"nextdeploy/internal/initialcommand"
+	"nextdeploy/internal/nextcore"
 )
 
 type PackageManager string
@@ -22,7 +22,7 @@ var initCmd = &cobra.Command{
 - Dockerfile for containerization
 - nextdeploy.yml configuration
 - Optional sample files and gitignore updates`,
-	PreRunE: detect.ValidateNextJSProject,
+	PreRunE: nextcore.ValidateNextJSProject,
 	RunE:    initialcommand.RunInitCommand,
 }
 
