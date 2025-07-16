@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"nextdeploy/internal/config"
 	"nextdeploy/internal/logger"
+	"nextdeploy/internal/nextcore"
 	"nextdeploy/internal/registry"
 	"os"
 	"os/exec"
@@ -458,7 +459,7 @@ func HandleDockerfileSetup(cmd *cobra.Command, dm *DockerManager, reader *bufio.
 				dlog.Error("Failed to get current directory: %v", err)
 				return fmt.Errorf("failed to get current directory: %w", err)
 			}
-			detectManager, err := detect.DetectPackageManager(cwd)
+			detectManager, err := nextcore.DetectPackageManager(cwd)
 			if err != nil {
 				dlog.Error("Failed to detect package manager: %v", err)
 				return fmt.Errorf("failed to detect package manager: %w", err)

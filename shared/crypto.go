@@ -2,7 +2,6 @@ package shared
 
 import (
 	"crypto/aes"
-	"crypto/base64"
 	"crypto/cipher"
 	"crypto/ecdh"
 	"crypto/ed25519"
@@ -14,8 +13,6 @@ import (
 	"io"
 	"nextdeploy/internal/logger"
 	"os"
-
-	"golang.org/x/tools/go/analysis/passes/defers"
 )
 
 const (

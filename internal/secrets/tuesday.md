@@ -979,7 +979,7 @@ import (
 	"yourproject/shared"
 )
 
-func EncryptAndSendEnv(env *shared.EnvFile, daemonKey *shared.TrustedKey, daemonAddr string) error {
+func  EncryptAndSendEnv(env *shared.EnvFile, daemonKey *shared.TrustedKey, daemonAddr string) error {
 	// Generate ephemeral key pair for this session
 	keyPair, err := shared.GenerateKeyPair()
 	if err != nil {
