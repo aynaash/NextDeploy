@@ -16,6 +16,24 @@ type EncryptedEnv struct {
 	CLIPublicKey string            `json:"cli_public_key"` // Base64 encoded CLI's ECDH public key
 }
 
+// RBAC Roles
+const (
+	RoleOwner    = "owner"
+	RoleAdmin    = "admin"
+	RoleDeployer = "deployer"
+	RoleReader   = "reader"
+)
+
+type Identity struct {
+	Fingerprint string    `json:"fingerprint"` // SHA-256 of public key
+	PublicKey   string    `json:"public_key"`  // Base64 encoded public key
+	SignPublic  string    `json:"sign_public"` // Base64 encoded Ed25519 public key
+	Role        string    `json:"role"`        // RBAC role (owner, admin, deployer, etc.)
+	Email       string    `json:"email"`       // User email/identifier
+	AddedBy     string    `json:"added_by"`    // Who added this identity
+	CreatedAt   time.Time `json:"created_at"`  // When this identity was added
+}
+
 type Envelope struct {
 	Payload   string `json:"payload"`   // JSON string of EncryptedEnv
 	Signature string `json:"signature"` // Base64 encoded signature of the payload
@@ -38,7 +56,17 @@ type TrustedKey struct {
 
 // TrustStore is a collection of trusted keys
 type TrustStore struct {
-	Keys []TrustedKey `json:"keys"`
+	Keys       []TrustedKey `json:"keys"`
+	Identities []Identity
+}
+
+type AuditLogEntry struct {
+	Action    string    `json:"action"`       // What happened
+	Actor     string    `json:"actor"`        // Who did it (fingerprint)
+	Target    string    `json:"target"`       // What was affected
+	Timestamp time.Time `json:"timestamp"`    // When it happened
+	Signature string    `json:"signature"`    // Signature of the action
+	IP        string    `json:"ip,omitempty"` // Optional IP address
 }
 
 // EnvFile represents a parsed .env file

@@ -1,50 +1,32 @@
 package main
 
-// TODO(nextdeploy): Critical daemon improvements for production readiness
+// Command nextdeploy-daemon
+//
+// NextDeploy Daemon is a system-level service responsible for managing and
+// orchestrating deployed Next.js applications on remote virtual servers (VPS).
+//
+// It performs container lifecycle management, system metrics collection,
+// real-time logging, and failover detection for hosted applications.
+//
+// This daemon is designed to be used **insecurely behind trusted infrastructure** (e.g., SSH, VPN).
+// DO NOT expose it directly to the public internet without proper authentication.
+//
+// Author: Yussuf Hersi <dev@hersi.dev> || yussufhersi219@gmail.com
+// License: MIT
+// Source: https://github.com/aynaash/nextdeploy
 //
 // ─────────────────────────────────────────────────────────────────────────────
-// 🔒 SECURITY / PORTABILITY
-// ─────────────────────────────────────────────────────────────────────────────
-// - [ ] Add TLS support for both main and metrics servers (self-signed or config-driven).
-// - [ ] Replace hardcoded paths (/var/lib, /var/run, /var/log) with configurable or XDG-based paths.
-// - [ ] Add ENV var + config file (YAML/TOML) support using a config loader (e.g., Viper or custom).
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// ⚙️  SYSTEM RESILIENCE / ABSTRACTION
-// ─────────────────────────────────────────────────────────────────────────────
-// - [ ] Wrap all goroutines (e.g., startServer) with panic recovery + stack trace logging.
-// - [ ] Create a `DaemonApp` struct to encapsulate and manage lifecycle of components (keyManager, servers, etc).
-// - [ ] Decouple core component initialization out of main(); use start()/stop() methods per subsystem.
-// - [ ] Add startup readiness vs liveness health endpoints (/health/startup, /health/live).
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// 📈 OBSERVABILITY
-// ─────────────────────────────────────────────────────────────────────────────
-// - [ ] Add request correlation ID middleware to all HTTP handlers (traceability).
-// - [ ] Integrate OpenTelemetry support for tracing + metrics.
-// - [ ] Expand /metrics to include more detailed runtime stats (GC, memory, goroutines, etc).
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// 🤖 BACKGROUND DAEMONS + SUPERVISION
-// ─────────────────────────────────────────────────────────────────────────────
-// - [ ] Build a Supervisor pattern to manage background daemons (deployment monitor, log stream, container checker).
-// - [ ] Add daemon health probes + restart policies for background workers.
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// 🧠 FUTURE-SCALING ARCHITECTURE
-// ─────────────────────────────────────────────────────────────────────────────
-// - [ ] Prepare coordination/locking layer (Redis, etcd, or file-based) for future HA/multi-node deployments.
-// - [ ] Allow dynamic reloading of config (SIGHUP logic needs to reload flags/config/env).
 import (
 	"context"
 	"flag"
-	"fmt"
+	"log"
 	"log/slog"
 	"net/http"
 	"nextdeploy/daemon/core"
+	"nextdeploy/shared"
 	"os"
-	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 )
@@ -80,167 +62,6 @@ func init() {
 	flag.StringVar(&config.logFile, "log-file", "/var/log/nextdeploy.log", "Log file path")
 }
 
-func daemonize(logger *slog.Logger) {
-	if os.Getppid() != 1 {
-		args := []string{}
-		for _, arg := range os.Args[1:] {
-			if arg != "--daemon" {
-				args = append(args, arg)
-			}
-		}
-
-		cmd := exec.Command(os.Args[0], args...)
-		cmd.Stdout = nil
-		cmd.Stderr = nil
-		cmd.Stdin = nil
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-
-		if err := cmd.Start(); err != nil {
-			logger.Error("failed to daemonize", "error", err)
-			os.Exit(1)
-		}
-
-		if err := os.WriteFile(config.pidFile, []byte(fmt.Sprintf("%d", cmd.Process.Pid)), 0644); err != nil {
-			logger.Error("failed to write PID file", "error", err)
-			os.Exit(1)
-		}
-
-		os.Exit(0)
-	}
-}
-
-func setupLogger() (*slog.Logger, *os.File) {
-	var logOutput *os.File
-	var err error
-
-	if config.daemonize {
-		logOutput, err = os.OpenFile(config.logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			fmt.Printf("failed to open log file: %v\n", err)
-			os.Exit(1)
-		}
-	} else {
-		logOutput = os.Stdout
-	}
-
-	opts := &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}
-	if config.debug {
-		opts.Level = slog.LevelDebug
-	}
-
-	var handler slog.Handler
-	if config.logFormat == "json" {
-		handler = slog.NewJSONHandler(logOutput, opts)
-	} else {
-		handler = slog.NewTextHandler(logOutput, opts)
-	}
-
-	return slog.New(handler), logOutput
-}
-
-func setupKeyManager(logger *slog.Logger) (*core.KeyManager, error) {
-	logger.Info("initializing key manager", "key_dir", config.keyDir, "rotation_interval", config.rotateFreq)
-
-	if err := os.MkdirAll(config.keyDir, 0700); err != nil {
-		logger.Error("failed to create key directory", "error", err)
-		return nil, err
-	}
-
-	keyManager, err := core.NewKeyManager(config.keyDir, config.rotateFreq)
-	if err != nil {
-		logger.Error("failed to initialize key manager", "error", err)
-		return nil, err
-	}
-
-	keyManager.StartRotation()
-	logger.Info("key manager initialized successfully")
-	return keyManager, nil
-}
-
-func setupServers(logger *slog.Logger, keyManager *core.KeyManager) (*http.Server, *http.Server) {
-	// Main server with all routes
-	mux := http.NewServeMux()
-
-	// Application management routes
-	mux.HandleFunc("/deploy", core.ChainMiddleware(
-		core.HandleDeploy,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-		core.AuthMiddleware(keyManager),
-		core.CORSMiddleware(true),
-	))
-
-	mux.HandleFunc("/stop", core.ChainMiddleware(
-		core.HandleStop,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-		core.AuthMiddleware(keyManager),
-	))
-
-	mux.HandleFunc("/restart", core.ChainMiddleware(
-		core.HandleRestart,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-		core.AuthMiddleware(keyManager),
-	))
-
-	mux.HandleFunc("/status", core.ChainMiddleware(
-		core.HandleStatus,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-		core.AuthMiddleware(keyManager),
-	))
-
-	// Monitoring routes
-	mux.HandleFunc("/metrics", core.ChainMiddleware(
-		core.HandleSystemMetrics,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-	))
-
-	// Infrastructure routes
-	mux.HandleFunc("/secrets/sync", core.ChainMiddleware(
-		core.HandleSecretsSync,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-		core.AuthMiddleware(keyManager),
-	))
-
-	// Health check (no auth)
-	mux.HandleFunc("/health", core.ChainMiddleware(
-		core.HandleHealthCheck,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-	))
-
-	mainServer := &http.Server{
-		Addr:         fmt.Sprintf("%s:%s", config.host, config.port),
-		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
-		ErrorLog:     slog.NewLogLogger(logger.Handler(), slog.LevelError),
-	}
-
-	// Metrics server (simpler, separate port)
-	metricsMux := http.NewServeMux()
-	metricsMux.HandleFunc("/metrics", core.HandleSystemMetrics)
-	metricsMux.HandleFunc("/health", core.HandleHealthCheck)
-
-	metricsServer := &http.Server{
-		Addr:         fmt.Sprintf("%s:%s", config.host, config.metricsPort),
-		Handler:      metricsMux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  15 * time.Second,
-		ErrorLog:     slog.NewLogLogger(logger.Handler(), slog.LevelError),
-	}
-
-	return mainServer, metricsServer
-}
-
 func startServer(server *http.Server, name string, logger *slog.Logger, errChan chan<- error) {
 	logger.Info("starting server", "name", name, "address", server.Addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -249,37 +70,14 @@ func startServer(server *http.Server, name string, logger *slog.Logger, errChan 
 	}
 }
 
-func gracefulShutdown(ctx context.Context, mainServer *http.Server, metricsServer *http.Server, logger *slog.Logger) {
-	logger.Info("initiating graceful shutdown")
-
-	shutdownCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-
-	if err := mainServer.Shutdown(shutdownCtx); err != nil {
-		logger.Error("main server shutdown error", "error", err)
-	}
-
-	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
-		logger.Error("metrics server shutdown error", "error", err)
-	}
-
-	if config.daemonize {
-		if err := os.Remove(config.pidFile); err != nil && !os.IsNotExist(err) {
-			logger.Error("failed to remove PID file", "error", err)
-		}
-	}
-
-	logger.Info("shutdown completed")
-}
-
 func main() {
 	flag.Parse()
 
-	logger, logFile := setupLogger()
+	logger, logFile := SetupLogger()
 	defer logFile.Close()
 
 	if config.daemonize {
-		daemonize(logger)
+		Daemonize(logger)
 	}
 
 	logger.Info("starting NextDeploy daemon",
@@ -296,10 +94,29 @@ func main() {
 	if err != nil {
 		os.Exit(1)
 	}
+	// Run health checks
+	if err := shared.RunCryptoHealthChecks(); err != nil {
+		log.Fatalf("Crypto health checks failed: %v", err)
+	}
+
+	defer keyManager.StopRotation()
+
+	//FIX: fix this logic for bettertrust store management
+	auditLog, err := core.NewAuditLog(filepath.Join("audit.log"))
+	if err != nil {
+		logger.Error("failed to initialize audit log", "error", err)
+		os.Exit(1)
+	}
+
+	auditLog.AddEntry(shared.AuditLogEntry{
+		Timestamp: time.Now(),
+		Action:    "start",
+	})
+
 	defer keyManager.StopRotation()
 
 	// Setup HTTP servers with all routes
-	mainServer, metricsServer := setupServers(logger, keyManager)
+	mainServer, metricsServer := SetupServers(logger, keyManager)
 
 	// Start servers
 	errChan := make(chan error, 2)
@@ -324,13 +141,13 @@ func main() {
 				// Implement config reload here
 			default:
 				core.SetGlobalStatus("shutting_down")
-				gracefulShutdown(ctx, mainServer, metricsServer, logger)
+				GracefulShutdown(ctx, mainServer, metricsServer, logger)
 				return
 			}
 		case err := <-errChan:
 			logger.Error("server error", "error", err)
 			core.SetGlobalStatus("unhealthy")
-			gracefulShutdown(ctx, mainServer, metricsServer, logger)
+			GracefulShutdown(ctx, mainServer, metricsServer, logger)
 			return
 		}
 	}

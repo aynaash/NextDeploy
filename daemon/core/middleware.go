@@ -1,11 +1,112 @@
 package core
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
-	"log/slog"
+
+	"nextdeploy/shared" // import your shared package
 )
+
+// AuthenticateRequest verifies the signature and checks RBAC permissions
+func AuthenticateRequest(r *http.Request, trustStore *shared.TrustStore, requiredRole string) (*shared.Identity, error) {
+	// Step 1: Extract and validate headers
+	signature := r.Header.Get("X-Signature")
+	fingerprint := r.Header.Get("X-Fingerprint")
+	if signature == "" || fingerprint == "" {
+		return nil, errors.New("missing authentication headers")
+	}
+
+	// Step 2: Find identity in trust store
+	identity, err := findIdentity(trustStore, fingerprint)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 3: Verify RBAC permissions
+	if err := verifyRBAC(identity.Role, requiredRole); err != nil {
+		return nil, err
+	}
+
+	// Step 4: Verify cryptographic signature
+	if err := verifyRequestSignature(r, identity.SignPublic, signature); err != nil {
+		return nil, err
+	}
+
+	return identity, nil
+}
+
+// Helper function to find identity in trust store
+func findIdentity(trustStore *shared.TrustStore, fingerprint string) (*shared.Identity, error) {
+	for _, id := range trustStore.Identities {
+		if id.Fingerprint == fingerprint {
+			// Return a copy of the identity to prevent modification of the original
+			identity := id
+			return &identity, nil
+		}
+	}
+	return nil, errors.New("unauthorized: unknown identity")
+}
+
+// Helper function for RBAC verification
+func verifyRBAC(userRole, requiredRole string) error {
+	roleHierarchy := map[string]int{
+		shared.RoleOwner:    4,
+		shared.RoleAdmin:    3,
+		shared.RoleDeployer: 2,
+		shared.RoleReader:   1,
+	}
+
+	userLevel, userOk := roleHierarchy[userRole]
+	requiredLevel, requiredOk := roleHierarchy[requiredRole]
+
+	if !userOk || !requiredOk {
+		return fmt.Errorf("forbidden: invalid role specified")
+	}
+
+	if userLevel < requiredLevel {
+		return fmt.Errorf("forbidden: role %s required", requiredRole)
+	}
+
+	return nil
+}
+
+// Helper function for signature verification
+func verifyRequestSignature(r *http.Request, publicKeyB64, signatureB64 string) error {
+	// Decode signature
+	sigBytes, err := base64.StdEncoding.DecodeString(signatureB64)
+	if err != nil {
+		return errors.New("invalid signature encoding")
+	}
+
+	// Decode public key
+	pubKey, err := base64.StdEncoding.DecodeString(publicKeyB64)
+	if err != nil {
+		return errors.New("invalid public key encoding")
+	}
+
+	// Reconstruct signed message (method + path + body)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return errors.New("failed to read request body")
+	}
+	// Restore the body for subsequent reads
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
+
+	message := fmt.Sprintf("%s %s %s", r.Method, r.URL.Path, string(body))
+	if !ed25519.Verify(ed25519.PublicKey(pubKey), []byte(message), sigBytes) {
+		return errors.New("invalid signature")
+	}
+
+	return nil
+}
 
 // corsMiddleware adds CORS headers to responses
 func CORSMiddleware(enabled bool) func(http.HandlerFunc) http.HandlerFunc {

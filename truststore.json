@@ -1,0 +1,30 @@
+{
+  "keys": [
+    {
+      "key_id": "daemon-1",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEXAMpRZJkX7J6Jw6z8YJY7X9Z1J2K...",
+      "sign_public": "MCowBQYDK2VwAyEAEXAMpRZJkX7J6Jw6z8YJY7X9Z1J2K...",
+      "fingerprint": "SHA256:daemon1pubkeyhash"
+    }
+  ],
+  "identities": [
+    {
+      "fingerprint": "SHA256:user1pubkeyhash",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEXAMpRZJkX7J6Jw6z8YJY7X9Z1J2K...",
+      "sign_public": "MCowBQYDK2VwAyEAEXAMpRZJkX7J6Jw6z8YJY7X9Z1J2K...",
+      "role": "admin",
+      "email": "admin@example.com",
+      "added_by": "system",
+      "created_at": "2023-01-15T10:00:00Z"
+    },
+    {
+      "fingerprint": "SHA256:user2pubkeyhash",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEXAMpRZJkX7J6Jw6z8YJY7X9Z1J2K...",
+      "sign_public": "MCowBQYDK2VwAyEAEXAMpRZJkX7J6Jw6z8YJY7X9Z1J2K...",
+      "role": "deployer",
+      "email": "deployer@example.com",
+      "added_by": "admin@example.com",
+      "created_at": "2023-01-16T14:30:00Z"
+    }
+  ]
+}

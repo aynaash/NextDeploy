@@ -1,5 +1,8 @@
 package core
+import (
 
+	"time"
+)
 type AppStatus struct {
 	AppName   string   `json:"app_name"`
 	Image     string   `json:"image"`
@@ -18,7 +21,18 @@ type DeployRequest struct {
 	BuildTarget string   `json:"build_target"`
 	ProxyRoute  string   `json:"proxy_route"` // cadyy or nginx
 }
-
+type Config struct {
+	host        string
+	port        string
+	keyDir      string
+	rotateFreq  time.Duration
+	debug       bool
+	logFormat   string
+	metricsPort string
+	daemonize   bool
+	pidFile     string
+	logFile     string
+}
 type DaemonResponse struct {
 	Success bool        `json:"success"`
 	Message string      `json:"message"`

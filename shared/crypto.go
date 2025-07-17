@@ -11,8 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"nextdeploy/internal/logger"
 	"os"
+	"runtime"
+	"syscall"
+	"unsafe"
 )
 
 const (
@@ -39,6 +43,38 @@ type KeyPair struct {
 
 // Generate key pair create a new ecdh (x25519) key pair and a new ed25519 signing key pair.
 
+func SecureKeyMemory(key []byte) {
+	// Use platform-specific secure memory functions
+	if len(key) == 0 {
+		return
+	}
+
+	// For Linux/Unix:
+	if _, _, err := syscall.Syscall(syscall.SYS_MLOCK, uintptr(unsafe.Pointer(&key[0])), uintptr(len(key)), 0); err != 0 {
+		log.Printf("Warning: failed to lock memory: %v", err)
+	}
+}
+
+// ZeroKey securely wipes keys from memory
+
+func ZeroKey(key []byte) {
+	if len(key) == 0 {
+		return
+	}
+
+	// Use constant-time zeroing
+	for i := range key {
+		key[i] = 0
+	}
+
+	// Ensure compiler doesn't optimize this away
+	runtime.KeepAlive(key)
+
+	// For Linux/Unix:
+	if _, _, err := syscall.Syscall(syscall.SYS_MUNLOCK, uintptr(unsafe.Pointer(&key[0])), uintptr(len(key)), 0); err != 0 {
+		log.Printf("Warning: failed to unlock memory: %v", err)
+	}
+}
 func GenerateKeyPair() (*KeyPair, error) {
 	curve := ecdh.X25519()
 	// generate ECDH key pair
@@ -73,6 +109,11 @@ func GenerateKeyPair() (*KeyPair, error) {
 		KeyID:       hex.EncodeToString(KeyID),
 	}, nil
 
+}
+func RunCryptoHealthChecks() error {
+	// TODO:Test ECDH key exchange
+
+	return nil
 }
 
 // DeriveSharedKey derives a shared key from the ECDH private key and the public key of the peer.

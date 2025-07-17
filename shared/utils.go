@@ -30,6 +30,10 @@ func DecodeFromHex(encoded string) ([]byte, error) {
 	return data, nil
 }
 
+func HasRequiredRole(role Identity, Role string) bool {
+	return false
+}
+
 // serialize
 func SerializeToJSON(data interface{}) (string, error) {
 	jsonData, err := json.Marshal(data)

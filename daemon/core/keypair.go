@@ -14,6 +14,36 @@ import (
 	"time"
 )
 
+type SecureKeyPair struct {
+	*shared.KeyPair
+}
+
+func (skp *SecureKeyPair) Close() {
+	if skp.KeyPair == nil {
+		return
+	}
+
+	// securely wipe private keys
+	shared.ZeroKey(skp.ECDHPrivate.Bytes())
+	shared.ZeroKey(skp.SignPrivate)
+}
+
+// NewSecureKeyManager creates a memory protected key manager
+
+func NewSecureKeyManager(keyDir string, rotateFreq time.Duration) (*KeyManager, error) {
+	km, err := NewKeyManager(keyDir, rotateFreq)
+	if err != nil {
+		return nil, err
+	}
+
+	if km.currentKey != nil {
+		shared.SecureKeyMemory(km.currentKey.ECDHPrivate.Bytes())
+		shared.SecureKeyMemory(km.currentKey.SignPrivate)
+	}
+
+	return km, nil
+}
+
 type KeyManager struct {
 	keyDir       string
 	rotateFreq   time.Duration

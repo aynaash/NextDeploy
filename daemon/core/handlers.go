@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"nextdeploy/shared"
+	"time"
 )
 
 type APIHandler struct {
@@ -19,6 +20,16 @@ func nextCoreHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	identity, err := AuthenticateRequest(r, &shared.TrustStore{}, shared.RoleAdmin)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	fmt.Printf("🧠 Identity authenticated: %s (%s)\n", identity.Fingerprint, identity.Role)
+
+	// TODO: use the identity to give user what to and not do
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -44,6 +55,16 @@ func nextCoreHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("NextCore data received"))
 }
 func HandleDeploy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	identity, err := AuthenticateRequest(r, &shared.TrustStore{}, shared.RoleDeployer)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	fmt.Printf("🧠 Identity authenticated: %s (%s)\n", identity.Fingerprint, identity.Role)
 	var req DeployRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, DaemonResponse{
@@ -57,6 +78,17 @@ func HandleDeploy(w http.ResponseWriter, r *http.Request) {
 func HandleReadinessCheck(w http.ResponseWriter, r *http.Request) {
 	healthMutex.RLock()
 	defer healthMutex.RUnlock()
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	identity, err := AuthenticateRequest(r, &shared.TrustStore{}, shared.RoleAdmin)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	fmt.Printf("🧠 Identity authenticated: %s (%s)\n", identity.Fingerprint, identity.Role)
 
 	if healthStatus.Status == "healthy" && checkDependencies() {
 		w.WriteHeader(http.StatusOK)
@@ -138,8 +170,14 @@ func HandleSubmitEnv(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	identity, err := AuthenticateRequest(r, &shared.TrustStore{}, shared.RoleAdmin)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	fmt.Printf("🧠 Identity authenticated: %s (%s)\n", identity.Fingerprint, identity.Role)
 	var envelope shared.Envelope
-	err := json.NewDecoder(r.Body).Decode(&envelope)
+	err = json.NewDecoder(r.Body).Decode(&envelope)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, DaemonResponse{
 			Success: false,
@@ -264,7 +302,153 @@ func HandleSubmitEnv(w http.ResponseWriter, r *http.Request) {
 		}
 
 	}
+	auditLog, _ := NewAuditLog("./audit_log.json")
+	auditLog.AddEntry(shared.AuditLogEntry{
+		Action:    "submit_env",
+		Actor:     identity.Fingerprint,
+		Target:    "environment",
+		Timestamp: time.Now(),
+		Signature: envelope.Signature,
+		IP:        r.RemoteAddr,
+	})
 
+}
+
+func HandleAddIdentity(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	identity, err := AuthenticateRequest(r, &shared.TrustStore{}, shared.RoleAdmin)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if !shared.HasRequiredRole(*identity, shared.RoleAdmin) {
+		http.Error(w, "Insufficient permissions", http.StatusForbidden)
+		return
+	}
+	var newIdentity shared.Identity
+	if err := json.NewDecoder(r.Body).Decode(&newIdentity); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+	// Validate the new identity
+	if newIdentity.Fingerprint == "" || newIdentity.Role == "" {
+		http.Error(w, "Invalid identity data", http.StatusBadRequest)
+		return
+	}
+	// // Add the new identity to the trust store
+	// newIdentity.AddedBy = identity.Fingerprint
+	// newIdentity.CreatedAt = time.Now()
+	// shared.TrustStore.Identities = append(shared.TrustStore.Identities, newIdentity)
+	//
+	// if err := shared.SaveTrustStore(&trustStore); err != nil {
+	// 	http.Error(w, "Failed to save trust store", http.StatusInternalServerError)
+	// 	return
+	// }
+	tms := NewTrustStoreManager("./truststore.json")
+	newId := shared.Identity{
+		Fingerprint: "SHA256:newuserpubkeyhash",
+		PublicKey:   "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEXAMpRZJkX7J6Jw6z8YJY7X9Z1J2K...",
+		SignPublic:  "MCowBQYDK2VwAyEAEXAMpRZJkX7J6Jw6z8YJY7X9Z1J2K...",
+		Role:        "reader",
+		Email:       "reader@reader.com",
+		AddedBy:     "admin@example.com",
+		CreatedAt:   time.Now(),
+	}
+	fmt.Println("Adding new identity...")
+	if err := tms.AddIdentity(newId); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to add identity: %v", err), http.StatusInternalServerError)
+		return
+	}
+	// Respond with success
+	writeJSON(w, http.StatusCreated, DaemonResponse{
+		Success: true,
+		Message: "Identity added successfully",
+		Payload: newIdentity,
+	})
+
+	auditLog, _ := NewAuditLog("./audit_log.json")
+	auditLog.AddEntry(shared.AuditLogEntry{
+		Action:    "add_identity",
+		Actor:     identity.Fingerprint,
+		Target:    newIdentity.Fingerprint,
+		Timestamp: time.Now(),
+		Signature: r.Header.Get("X-Signature"),
+	})
+}
+
+func HandleRevokeIdentity(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	identity, err := AuthenticateRequest(r, &shared.TrustStore{}, shared.RoleAdmin)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if !shared.HasRequiredRole(*identity, shared.RoleAdmin) {
+		http.Error(w, "Insufficient permissions", http.StatusForbidden)
+		return
+	}
+	var revokeReq struct {
+		Fingerprint string `json:"fingerprint"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&revokeReq); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+	if revokeReq.Fingerprint == "" {
+		http.Error(w, "Fingerprint is required", http.StatusBadRequest)
+		return
+	}
+	tms := NewTrustStoreManager("./truststore.json")
+	if err := tms.RemoveIdentity(revokeReq.Fingerprint); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to revoke identity: %v", err), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, DaemonResponse{
+		Success: true,
+		Message: "Identity revoked successfully",
+	})
+	auditLog, _ := NewAuditLog("./audit_log.json")
+	auditLog.AddEntry(shared.AuditLogEntry{
+		Action:    "revoke_identity",
+		Actor:     identity.Fingerprint,
+		Target:    revokeReq.Fingerprint,
+		Timestamp: time.Now(),
+	})
+
+}
+func HandleListIdentities(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	identity, err := AuthenticateRequest(r, &shared.TrustStore{}, shared.RoleAdmin)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if !shared.HasRequiredRole(*identity, shared.RoleAdmin) {
+		http.Error(w, "Insufficient permissions", http.StatusForbidden)
+		return
+	}
+	tms := NewTrustStoreManager("./truststore.json")
+	trustStore := tms.GetTrustStore()
+	writeJSON(w, http.StatusOK, DaemonResponse{
+		Success: true,
+		Message: "Identities retrieved successfully",
+		Payload: trustStore.Identities,
+	})
+	auditLog, _ := NewAuditLog("./audit_log.json")
+	auditLog.AddEntry(shared.AuditLogEntry{
+		Action:    "list_identities",
+		Actor:     identity.Fingerprint,
+		Timestamp: time.Now(),
+	})
 }
 func HandlePublicKey(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
