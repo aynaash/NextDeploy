@@ -2,7 +2,7 @@ package core
 
 import (
 	"fmt"
-	"nextdeploy/internal/nextcore"
+	"nextdeploy/shared/nextcore"
 )
 
 // TODO: Later we can add: secrets, proxy, TLS, CDN setup here

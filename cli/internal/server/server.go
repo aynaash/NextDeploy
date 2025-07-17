@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"nextdeploy/internal/config"
-	"nextdeploy/internal/logger"
+	"nextdeploy/shared/config"
+	"nextdeploy/shared"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,13 +18,13 @@ import (
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
-	"nextdeploy/internal/envstore"
-	"nextdeploy/internal/git"
-	"nextdeploy/internal/registry"
+	"nextdeploy/cli/internal/envstore"
+	"nextdeploy/cli/internal/git"
+	"nextdeploy/cli/internal/registry"
 )
 
 var (
-	serverlogger = logger.PackageLogger("Server", "🅱)SERVERLOGGER")
+	serverlogger = shared.PackageLogger("Server", "🅱)SERVERLOGGER")
 )
 
 // ServerStruct manages multiple SSH connections and provides operations

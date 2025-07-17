@@ -2,9 +2,9 @@ package build
 
 import (
 	"fmt"
-	"nextdeploy/internal/git"
-	"nextdeploy/internal/logger"
-	"nextdeploy/internal/nextdeploy"
+	"nextdeploy/cli/internal/git"
+	"nextdeploy/shared"
+	"nextdeploy/cli/internal/nextdeploy"
 	"strings"
 	"time"
 )
@@ -19,7 +19,7 @@ type ImageNameBuilder struct {
 	branchName   string
 }
 
-var buildlogger = logger.PackageLogger("BUILD", "🧱 BUILD")
+var buildlogger = shared.PackageLogger("BUILD", "🧱 BUILD")
 
 // NewImageNameBuilder creates a new image name builder with default values
 func NewImageNameBuilder(baseName, registry string) *ImageNameBuilder {

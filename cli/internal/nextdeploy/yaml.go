@@ -34,20 +34,13 @@ package nextdeploy
 //   - e.g., // AddContainerVolume adds a volume mount to the container configuration.
 //   - Improves code readability and discoverability for other contributors.
 
-// TODO(yussuf): Add unit tests for:
-//   - Load()
-//   - Save()
-//   - Validate()
-//   - Add/Remove helper logic
-//   Ensures robustness, catches regressions early.
-
 // TODO(yussuf): Consider JSON Schema or YAML schema validation for full structure validation in CI.
 //   Optional, but helps validate user-provided config outside Go code.
 import (
 	"errors"
 	"fmt"
 	"gopkg.in/yaml.v3"
-	"nextdeploy/internal/logger"
+	"nextdeploy/shared"
 	"os"
 	"path/filepath"
 )
@@ -55,7 +48,7 @@ import (
 // Config represents the structure of a nextdeploy.yml file
 // New creates a new Config with default values
 var (
-	ylogger = logger.PackageLogger("YAML", "↪ YAML")
+	ylogger = shared.PackageLogger("YAML", "↪ YAML")
 )
 
 func New() *Config {

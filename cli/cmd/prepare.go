@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"nextdeploy/internal/failfast"
-	"nextdeploy/internal/logger"
-	"nextdeploy/internal/server"
+	"nextdeploy/cli/internal/failfast"
+	"nextdeploy/cli/internal/server"
+	"nextdeploy/shared"
 	"os"
 	"os/signal"
 	"strings"
@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	PrepLogs = logger.PackageLogger("prepare", "🔧 PREPARE")
+	PrepLogs = shared.PackageLogger("prepare", "🔧 PREPARE")
 
 	// Command flags
 	verbose    bool

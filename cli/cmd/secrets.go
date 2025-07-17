@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"nextdeploy/internal/logger"
-	"nextdeploy/internal/secrets"
+	"nextdeploy/shared"
+	"nextdeploy/cli/internal/secrets"
 	"os"
 )
 import (
@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	Elogs = logger.PackageLogger("EncryptFiles::", "🔐 Encrypt Files::")
+	Elogs = shared.PackageLogger("EncryptFiles::", "🔐 Encrypt Files::")
 )
 var (
 	encryptfiles = &cobra.Command{

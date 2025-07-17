@@ -12,11 +12,11 @@ package cmd
 import (
 	"fmt"
 	"github.com/spf13/cobra"
-	"nextdeploy/internal/failfast"
-	"nextdeploy/internal/git"
-	"nextdeploy/internal/logger"
-	"nextdeploy/internal/nextdeploy"
-	"nextdeploy/internal/secrets"
+	"nextdeploy/cli/internal/failfast"
+	"nextdeploy/cli/internal/git"
+	"nextdeploy/shared"
+	"nextdeploy/cli/internal/nextdeploy"
+	"nextdeploy/cli/internal/secrets"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,7 +27,7 @@ type Config struct {
 }
 
 var (
-	runLogger = logger.PackageLogger("RunImage::", "🚀 Run Image::")
+	runLogger = shared.PackageLogger("RunImage::", "🚀 Run Image::")
 )
 
 var runimageCmd = &cobra.Command{

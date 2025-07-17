@@ -3,10 +3,10 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"nextdeploy/internal/config"
-	"nextdeploy/internal/docker"
-	"nextdeploy/internal/git"
-	"nextdeploy/internal/logger"
+	"nextdeploy/shared/config"
+	"nextdeploy/cli/internal/docker"
+	"nextdeploy/cli/internal/git"
+	"nextdeploy/shared"
 	"os"
 	"regexp"
 	"strings"
@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	buildlogger      = logger.PackageLogger("BUILD", "🧱 BUILD")
+	buildlogger      = shared.PackageLogger("BUILD", "🧱 BUILD")
 	ProvisionEcrUser bool
 	fresh            = false // delete current exisiting user start a fresh
 )

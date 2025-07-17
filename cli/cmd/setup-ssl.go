@@ -6,9 +6,9 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"net/url"
-	"nextdeploy/internal/config"
-	"nextdeploy/internal/logger"
-	"nextdeploy/internal/server"
+	"nextdeploy/shared/config"
+	"nextdeploy/shared"
+	"nextdeploy/cli/internal/server"
 	"strings"
 	"time"
 )
@@ -46,7 +46,7 @@ var SSLCommand = &cobra.Command{
 	RunE: runSSLCommand,
 }
 var (
-	sslogs = logger.PackageLogger("ssl", "SSL")
+	sslogs = shared.PackageLogger("ssl", "SSL")
 )
 
 func init() {

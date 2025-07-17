@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"nextdeploy/internal/config"
-	"nextdeploy/internal/git"
-	"nextdeploy/internal/logger"
-	"nextdeploy/internal/server"
+	"nextdeploy/shared/config"
+	"nextdeploy/cli/internal/git"
+	"nextdeploy/shared"
+	"nextdeploy/cli/internal/server"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,7 +21,7 @@ const (
 )
 
 var (
-	ShipLogs    = logger.PackageLogger("ship", "🚢")
+	ShipLogs    = shared.PackageLogger("ship", "🚢")
 	forceDeploy bool
 )
 

@@ -5,8 +5,8 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-	"nextdeploy/internal/initialcommand"
-	"nextdeploy/internal/nextcore"
+	"nextdeploy/cli/internal/initialcommand"
+	"nextdeploy/shared/nextcore"
 )
 
 type PackageManager string

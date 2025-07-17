@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"nextdeploy/internal/logger"
 	"os"
 	"runtime"
 	"syscall"
@@ -30,7 +29,7 @@ const (
 )
 
 var (
-	SharedLogger = logger.PackageLogger("shared", "🔗 SHARED")
+	SharedLogger = PackageLogger("shared", "🔗 SHARED")
 )
 
 type KeyPair struct {

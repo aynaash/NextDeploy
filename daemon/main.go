@@ -8,7 +8,6 @@ package main
 // It performs container lifecycle management, system metrics collection,
 // real-time logging, and failover detection for hosted applications.
 //
-// This daemon is designed to be used **insecurely behind trusted infrastructure** (e.g., SSH, VPN).
 // DO NOT expose it directly to the public internet without proper authentication.
 //
 // Author: Yussuf Hersi <dev@hersi.dev> || yussufhersi219@gmail.com
@@ -73,11 +72,11 @@ func startServer(server *http.Server, name string, logger *slog.Logger, errChan 
 func main() {
 	flag.Parse()
 
-	logger, logFile := SetupLogger()
+	logger, logFile := core.SetupLogger()
 	defer logFile.Close()
 
 	if config.daemonize {
-		Daemonize(logger)
+		core.Daemonize(logger)
 	}
 
 	logger.Info("starting NextDeploy daemon",
@@ -90,7 +89,7 @@ func main() {
 	defer cancel()
 
 	// Setup key manager
-	keyManager, err := setupKeyManager(logger)
+	keyManager, err := core.SetupKeyManager(logger)
 	if err != nil {
 		os.Exit(1)
 	}
@@ -116,7 +115,7 @@ func main() {
 	defer keyManager.StopRotation()
 
 	// Setup HTTP servers with all routes
-	mainServer, metricsServer := SetupServers(logger, keyManager)
+	mainServer, metricsServer := core.SetupServers(logger, keyManager)
 
 	// Start servers
 	errChan := make(chan error, 2)
@@ -141,13 +140,13 @@ func main() {
 				// Implement config reload here
 			default:
 				core.SetGlobalStatus("shutting_down")
-				GracefulShutdown(ctx, mainServer, metricsServer, logger)
+				core.GracefulShutdown(ctx, mainServer, metricsServer, logger)
 				return
 			}
 		case err := <-errChan:
 			logger.Error("server error", "error", err)
 			core.SetGlobalStatus("unhealthy")
-			GracefulShutdown(ctx, mainServer, metricsServer, logger)
+			core.GracefulShutdown(ctx, mainServer, metricsServer, logger)
 			return
 		}
 	}

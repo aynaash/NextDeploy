@@ -4,100 +4,99 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"nextdeploy/daemon/core"
 	"time"
 )
 
-func SetupServers(logger *slog.Logger, keyManager *core.KeyManager) (*http.Server, *http.Server) {
+func SetupServers(logger *slog.Logger, keyManager *KeyManager) (*http.Server, *http.Server) {
 	// Main server with all routes
 	mux := http.NewServeMux()
 
 	// Application management routes
-	mux.HandleFunc("/deploy", core.ChainMiddleware(
-		core.HandleDeploy,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-		core.AuthMiddleware(keyManager),
-		core.CORSMiddleware(true),
+	mux.HandleFunc("/deploy", ChainMiddleware(
+		HandleDeploy,
+		LoggingMiddleware,
+		RecoveryMiddleware,
+		AuthMiddleware(keyManager),
+		CORSMiddleware(true),
 	))
 
-	mux.HandleFunc("/stop", core.ChainMiddleware(
-		core.HandleStop,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-		core.AuthMiddleware(keyManager),
+	mux.HandleFunc("/stop", ChainMiddleware(
+		HandleStop,
+		LoggingMiddleware,
+		RecoveryMiddleware,
+		AuthMiddleware(keyManager),
 	))
 
-	mux.HandleFunc("/restart", core.ChainMiddleware(
-		core.HandleRestart,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-		core.AuthMiddleware(keyManager),
+	mux.HandleFunc("/restart", ChainMiddleware(
+		HandleRestart,
+		LoggingMiddleware,
+		RecoveryMiddleware,
+		AuthMiddleware(keyManager),
 	))
 
-	mux.HandleFunc("/status", core.ChainMiddleware(
-		core.HandleStatus,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-		core.AuthMiddleware(keyManager),
+	mux.HandleFunc("/status", ChainMiddleware(
+		HandleStatus,
+		LoggingMiddleware,
+		RecoveryMiddleware,
+		AuthMiddleware(keyManager),
 	))
 
 	// Monitoring routes
-	mux.HandleFunc("/metrics", core.ChainMiddleware(
-		core.HandleSystemMetrics,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
+	mux.HandleFunc("/metrics", ChainMiddleware(
+		HandleSystemMetrics,
+		LoggingMiddleware,
+		RecoveryMiddleware,
 	))
 
 	//Identity endpoints
-	mux.HandleFunc("/submit-env", core.ChainMiddleware(
-		core.HandleSecretsSync,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-		core.AuthMiddleware(keyManager),
+	mux.HandleFunc("/submit-env", ChainMiddleware(
+		HandleSecretsSync,
+		LoggingMiddleware,
+		RecoveryMiddleware,
+		AuthMiddleware(keyManager),
 	))
-	mux.HandleFunc("/add-identity", core.ChainMiddleware(
-		core.HandleAddIdentity,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-		core.AuthMiddleware(keyManager),
+	mux.HandleFunc("/add-identity", ChainMiddleware(
+		HandleAddIdentity,
+		LoggingMiddleware,
+		RecoveryMiddleware,
+		AuthMiddleware(keyManager),
 	))
-	mux.HandleFunc("/revoke-identity", core.ChainMiddleware(
-		core.HandleRevokeIdentity,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-		core.AuthMiddleware(keyManager),
+	mux.HandleFunc("/revoke-identity", ChainMiddleware(
+		HandleRevokeIdentity,
+		LoggingMiddleware,
+		RecoveryMiddleware,
+		AuthMiddleware(keyManager),
 	))
 
-	mux.HandleFunc("/list-identities", core.ChainMiddleware(
-		core.HandleListIdentities,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-		core.AuthMiddleware(keyManager),
+	mux.HandleFunc("/list-identities", ChainMiddleware(
+		HandleListIdentities,
+		LoggingMiddleware,
+		RecoveryMiddleware,
+		AuthMiddleware(keyManager),
 	))
-	mux.HandleFunc("/public-key", core.ChainMiddleware(
-		core.HandlePublicKey,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-		core.AuthMiddleware(keyManager),
+	mux.HandleFunc("/public-key", ChainMiddleware(
+		HandlePublicKey,
+		LoggingMiddleware,
+		RecoveryMiddleware,
+		AuthMiddleware(keyManager),
 	))
 	// Infrastructure routes
-	mux.HandleFunc("/secrets/sync", core.ChainMiddleware(
-		core.HandleSecretsSync,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
-		core.AuthMiddleware(keyManager),
+	mux.HandleFunc("/secrets/sync", ChainMiddleware(
+		HandleSecretsSync,
+		LoggingMiddleware,
+		RecoveryMiddleware,
+		AuthMiddleware(keyManager),
 	))
 
 	// Health check (no auth)
-	mux.HandleFunc("/health", core.ChainMiddleware(
-		core.HandleHealthCheck,
-		core.LoggingMiddleware,
-		core.RecoveryMiddleware,
+	mux.HandleFunc("/health", ChainMiddleware(
+		HandleHealthCheck,
+		LoggingMiddleware,
+		RecoveryMiddleware,
 	))
 
 	mainServer := &http.Server{
-		Addr:         fmt.Sprintf("%s:%s", config.host, config.port),
+		Addr:         fmt.Sprintf("%s:%s", Config.host, Config.port),
 		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
@@ -107,11 +106,11 @@ func SetupServers(logger *slog.Logger, keyManager *core.KeyManager) (*http.Serve
 
 	// Metrics server (simpler, separate port)
 	metricsMux := http.NewServeMux()
-	metricsMux.HandleFunc("/metrics", core.HandleSystemMetrics)
-	metricsMux.HandleFunc("/health", core.HandleHealthCheck)
+	metricsMux.HandleFunc("/metrics", HandleSystemMetrics)
+	metricsMux.HandleFunc("/health", HandleHealthCheck)
 
 	metricsServer := &http.Server{
-		Addr:         fmt.Sprintf("%s:%s", config.host, config.metricsPort),
+		Addr:         fmt.Sprintf("%s:%s", Config.host, Config.metricsPort),
 		Handler:      metricsMux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,

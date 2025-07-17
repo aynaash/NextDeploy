@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-func setupKeyManager(logger *slog.Logger) (*KeyManager, error) {
+func SetupKeyManager(logger *slog.Logger) (*KeyManager, error) {
 	logger.Info("initializing key manager", "key_dir", config.keyDir, "rotation_interval", config.rotateFreq)
 
 	if err := os.MkdirAll(config.keyDir, 0700); err != nil {

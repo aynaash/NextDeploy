@@ -6,9 +6,9 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"nextdeploy/internal/logger"
-	"nextdeploy/internal/server"
-	"nextdeploy/internal/ship"
+	"nextdeploy/cli/internal/server"
+	"nextdeploy/cli/internal/ship"
+	"nextdeploy/shared"
 	"os"
 	"os/signal"
 
@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	ShipLogs    = logger.PackageLogger("ship::", "🚢::")
+	ShipLogs    = shared.PackageLogger("ship::", "🚢::")
 	dryRun      bool
 	serve       bool
 	credentials bool

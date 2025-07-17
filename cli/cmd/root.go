@@ -24,7 +24,7 @@ var (
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "nextdeploy",
-	Short: "CLI for automating Next.js deployments on any VPS",
+	Short: "CLI for automating Next.js deployments on any VPS with a custom daemon.",
 	Long: fmt.Sprintf(`%s %s
 
 %s
