@@ -3,10 +3,10 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"nextdeploy/shared/config"
-	"nextdeploy/cli/internal/docker"
-	"nextdeploy/cli/internal/git"
 	"nextdeploy/shared"
+	"nextdeploy/shared/config"
+	"nextdeploy/shared/docker"
+	"nextdeploy/shared/git"
 	"os"
 	"regexp"
 	"strings"
@@ -189,6 +189,7 @@ func checkBuildConditionsMet(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check for Dockerfile
+	// FIX: we should generate the metdata need and use that to build the image
 	if exists, err := dm.DockerfileExists("."); err != nil {
 		return fmt.Errorf("failed to check for Dockerfile: %w", err)
 	} else if !exists {

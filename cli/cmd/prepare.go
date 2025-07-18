@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"nextdeploy/cli/internal/failfast"
+	"nextdeploy/shared/failfast"
 	"nextdeploy/cli/internal/server"
 	"nextdeploy/shared"
 	"os"

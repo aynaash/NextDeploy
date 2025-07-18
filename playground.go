@@ -5,48 +5,99 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"nextdeploy/core"
-	"nextdeploy/shared"
-	"time"
+	"io/ioutil"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
 )
 
+type NextBuildMetadata struct {
+	BuildID               string      `json:"buildId"`
+	BuildManifest         interface{} `json:"buildManifest"`
+	AppBuildManifest      interface{} `json:"appBuildManifest"`
+	PrerenderManifest     interface{} `json:"prerenderManifest"`
+	RoutesManifest        interface{} `json:"routesManifest"`
+	ImagesManifest        interface{} `json:"imagesManifest"`
+	AppPathRoutesManifest interface{} `json:"appPathRoutesManifest"`
+	ReactLoadableManifest interface{} `json:"reactLoadableManifest"`
+	Diagnostics           []string    `json:"diagnostics"`
+}
+
 func main() {
-	// Initialize trust store manager
-	tsm := core.NewTrustStoreManager("./truststore.json")
-
-	// Create a new identity to add
-	newIdentity := shared.Identity{
-		Fingerprint: "SHA256:newuserpubkeyhash",
-		PublicKey:   "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEXAMpRZJkX7J6Jw6z8YJY7X9Z1J2K...",
-		SignPublic:  "MCowBQYDK2VwAyEAEXAMpRZJkX7J6Jw6z8YJY7X9Z1J2K...",
-		Role:        "reader",
-		Email:       "reader@example.com",
-		AddedBy:     "admin@example.com",
-		CreatedAt:   time.Now(),
+	projectDir := "." // current directory, can be parameterized
+	metadata, err := collectNextBuildMetadata(projectDir)
+	if err != nil {
+		log.Fatalf("Error collecting Next.js build metadata: %v", err)
 	}
 
-	// Add the new identity
-	fmt.Println("Adding new identity...")
-	if err := tsm.AddIdentity(newIdentity); err != nil {
-		fmt.Printf("Failed to add identity: %v\n", err)
-	} else {
-		fmt.Println("Successfully added new identity")
+	// Print or process the collected metadata
+	prettyMetadata, _ := json.MarshalIndent(metadata, "", "  ")
+	fmt.Println(string(prettyMetadata))
+}
+
+func collectNextBuildMetadata(projectDir string) (*NextBuildMetadata, error) {
+	// Run npm build
+	cmd := exec.Command("npm", "run", "build")
+	cmd.Dir = projectDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("npm build failed: %w", err)
 	}
 
-	// Remove an existing identity
-	fingerprintToRemove := "SHA256:user2pubkeyhash"
-	fmt.Printf("\nRemoving identity with fingerprint %s...\n", fingerprintToRemove)
-	if err := tsm.RemoveIdentity(fingerprintToRemove); err != nil {
-		fmt.Printf("Failed to remove identity: %v\n", err)
-	} else {
-		fmt.Println("Successfully removed identity")
+	// Path to .next directory
+	nextDir := filepath.Join(projectDir, ".next")
+
+	// Read BUILD_ID
+	buildID, err := ioutil.ReadFile(filepath.Join(nextDir, "BUILD_ID"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read BUILD_ID: %w", err)
 	}
 
-	// Display current identities
-	fmt.Println("\nCurrent identities in trust store:")
-	trustStore := tsm.GetTrustStore()
-	for _, identity := range trustStore.Identities {
-		fmt.Printf("- %s (%s) - Role: %s\n", identity.Email, identity.Fingerprint, identity.Role)
+	// Helper function to read and parse JSON files
+	readJSON := func(filename string) (interface{}, error) {
+		data, err := ioutil.ReadFile(filepath.Join(nextDir, filename))
+		if err != nil {
+			return nil, err
+		}
+		var result interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			return nil, err
+		}
+		return result, nil
 	}
+
+	// Collect all manifests
+	buildManifest, _ := readJSON("build-manifest.json")
+	appBuildManifest, _ := readJSON("app-build-manifest.json")
+	prerenderManifest, _ := readJSON("prerender-manifest.json")
+	routesManifest, _ := readJSON("routes-manifest.json")
+	imagesManifest, _ := readJSON("images-manifest.json")
+	appPathRoutesManifest, _ := readJSON("app-path-routes-manifest.json")
+	reactLoadableManifest, _ := readJSON("react-loadable-manifest.json")
+
+	// Collect diagnostics files
+	var diagnostics []string
+	diagnosticsDir := filepath.Join(nextDir, "diagnostics")
+	if files, err := ioutil.ReadDir(diagnosticsDir); err == nil {
+		for _, file := range files {
+			diagnostics = append(diagnostics, file.Name())
+		}
+	}
+
+	return &NextBuildMetadata{
+		BuildID:               string(buildID),
+		BuildManifest:         buildManifest,
+		AppBuildManifest:      appBuildManifest,
+		PrerenderManifest:     prerenderManifest,
+		RoutesManifest:        routesManifest,
+		ImagesManifest:        imagesManifest,
+		AppPathRoutesManifest: appPathRoutesManifest,
+		ReactLoadableManifest: reactLoadableManifest,
+		Diagnostics:           diagnostics,
+	}, nil
 }

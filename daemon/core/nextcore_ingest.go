@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"nextdeploy/internal/nextcore"
+	"nextdeploy/shared/nextcore"
 )
 
 func HandleNextCoreIntake(w http.ResponseWriter, r *http.Request) {

@@ -3,11 +3,13 @@ package initialcommand
 import (
 	"bufio"
 	"fmt"
-	"github.com/spf13/cobra"
-	"nextdeploy/shared/config"
-	"nextdeploy/cli/internal/docker"
 	"nextdeploy/shared"
+	"nextdeploy/shared/config"
+	"nextdeploy/shared/docker"
+	"nextdeploy/shared/nextcore"
 	"os"
+
+	"github.com/spf13/cobra"
 )
 
 func RunInitCommand(cmd *cobra.Command, args []string) error {
@@ -15,6 +17,11 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	reader := bufio.NewReader(os.Stdin)
 	log := shared.PackageLogger("Initialization", "Initialization")
 
+	buildMetaData, err := nextcore.GenerateMetadata()
+	if err != nil {
+		return err
+	}
+	log.Debug("The build meta generated is: %v", buildMetaData)
 	//	cmd.Println("🚀 NextDeploy Initialization")
 	log.Info("🚀 NextDeploy Initialization")
 	log.Info("----------------------------------------")

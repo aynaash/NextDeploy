@@ -3,6 +3,7 @@ package cmd
 
 // FEATURE: GIVE USER  ABILITY TO START FROM ZERO USING OUR OWN NEXTJS TEMPLATES
 
+//TODO: this commands main job should be to give developers a Scaffolded and opionated NextJS web app templates
 import (
 	"github.com/spf13/cobra"
 	"nextdeploy/cli/internal/initialcommand"

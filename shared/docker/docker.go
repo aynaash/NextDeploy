@@ -6,8 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"nextdeploy/shared/config"
 	"nextdeploy/shared"
+	"nextdeploy/shared/config"
 	"nextdeploy/shared/nextcore"
 	"nextdeploy/shared/registry"
 	"os"
@@ -313,6 +313,7 @@ func (dm *DockerManager) CheckDockerInstalled() error {
 
 // BuildImage builds a Docker image with options
 func (dm *DockerManager) BuildImage(ctx context.Context, dir string, opts BuildOptions) error {
+	//FIX: here we need to use nextcore metadata to build the using docker client not commands
 	// print out the options for debugging
 	dlog.Debug("Build options: %+v", opts)
 	err := dm.ValidateImageName(opts.ImageName)

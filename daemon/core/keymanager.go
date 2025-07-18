@@ -3,17 +3,18 @@ package core
 import (
 	"log/slog"
 	"os"
+	"time"
 )
 
-func SetupKeyManager(logger *slog.Logger) (*KeyManager, error) {
-	logger.Info("initializing key manager", "key_dir", config.keyDir, "rotation_interval", config.rotateFreq)
+func SetupKeyManager(logger *slog.Logger, keyDir string, rotateFreq time.Duration) (*KeyManager, error) {
+	logger.Info("initializing key manager", "key_dir", keyDir, "rotation_interval", rotateFreq)
 
-	if err := os.MkdirAll(config.keyDir, 0700); err != nil {
+	if err := os.MkdirAll(keyDir, 0700); err != nil {
 		logger.Error("failed to create key directory", "error", err)
 		return nil, err
 	}
 
-	keyManager, err := core.NewKeyManager(config.keyDir, config.rotateFreq)
+	keyManager, err := NewKeyManager(keyDir, rotateFreq)
 	if err != nil {
 		logger.Error("failed to initialize key manager", "error", err)
 		return nil, err

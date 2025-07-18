@@ -1,4 +1,3 @@
-
 ---
 
 ## 🛠️ NextDeploy CLI — Real DevOps for Developers Who care
@@ -8,7 +7,6 @@ Sick of being trapped in a walled garden? Done fighting opaque CI/CD pipelines a
 **NextDeploy CLI** is your escape hatch.
 
 It deploys **Next.js apps to your own VPS** — with real secrets, real Docker, and zero pain. You get full-stack control from local dev to live prod using nothing but your terminal and Doppler.
-
 ---
 
 ### ⚙️ What It Actually Does
@@ -21,7 +19,6 @@ It deploys **Next.js apps to your own VPS** — with real secrets, real Docker, 
 * 🧪 runimage: run prod-like builds locally using real secrets
 
 One tool. One config. No dashboards.
-
 ---
 
 ### 🔐 Doppler First. No `.env` Theater.

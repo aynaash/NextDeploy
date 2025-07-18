@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func SetupServers(logger *slog.Logger, keyManager *KeyManager) (*http.Server, *http.Server) {
+func SetupServers(logger *slog.Logger, keyManager *KeyManager, port string, host string, metricsPort string) (*http.Server, *http.Server) {
 	// Main server with all routes
 	mux := http.NewServeMux()
 
@@ -96,7 +96,7 @@ func SetupServers(logger *slog.Logger, keyManager *KeyManager) (*http.Server, *h
 	))
 
 	mainServer := &http.Server{
-		Addr:         fmt.Sprintf("%s:%s", Config.host, Config.port),
+		Addr:         fmt.Sprintf("%s:%s", host, port),
 		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
@@ -110,7 +110,7 @@ func SetupServers(logger *slog.Logger, keyManager *KeyManager) (*http.Server, *h
 	metricsMux.HandleFunc("/health", HandleHealthCheck)
 
 	metricsServer := &http.Server{
-		Addr:         fmt.Sprintf("%s:%s", Config.host, Config.metricsPort),
+		Addr:         fmt.Sprintf("%s:%s", host, metricsPort),
 		Handler:      metricsMux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,

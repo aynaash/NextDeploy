@@ -1,7 +1,6 @@
 package core
 
 import (
-	"fmt"
 	"nextdeploy/shared/nextcore"
 )
 
@@ -33,50 +32,50 @@ func RestartApp(appName string) error {
 }
 
 func DeployAppFromNextCore(data nextcore.NextCorePayload) error {
-	app := data.AppName
-	image := data.AppName + ":latest" // or from DockerHub
-	port := data.Port
+	// app := data.AppName
+	// image := data.AppName + ":latest" // or from DockerHub
+	// port := data.Port
 
 	// 1. Inject secrets
-	env := ConvertSecretsToEnvVars(data.EnvVariables)
-	if err := InjectSecrets(app, data.EnvVariables); err != nil {
-		return err
-	}
-
-	// 2. Kill old container (if exists)
-	existing, _ := FindContainerByAppName(app)
-	if existing != "" {
-		_ = KillContainer(existing)
-	}
-
-	// 3. Run container
-	containerID, err := RunContainer(app, image, env, port)
-	if err != nil {
-		return err
-	}
-
-	// 4. Healthcheck
-	status, _ := ProbeContainerHealth(containerID)
-	if status != "healthy" {
-		return fmt.Errorf("container unhealthy")
-	}
-
-	// 5. Reverse Proxy Config
-	if err := ConfigureProxy(ProxyRoute{
-		App:    app,
-		Domain: data.Domain,
-		Port:   port,
-	}); err != nil {
-		return err
-	}
-
-	// 6. TLS Cert
-	if err := RotateCert(data.Domain); err != nil {
-		return err
-	}
-
-	// 7. Register app
-	RegisterApp(app, containerID, port)
-
+	// env := ConvertSecretsToEnvVars(data.EnvVariables)
+	// if err := InjectSecrets(app, data.EnvVariables); err != nil {
+	// 	return err
+	// }
+	//
+	// // 2. Kill old container (if exists)
+	// existing, _ := FindContainerByAppName(app)
+	// if existing != "" {
+	// 	_ = KillContainer(existing)
+	// }
+	//
+	// // 3. Run container
+	// containerID, err := RunContainer(app, image, env, port)
+	// if err != nil {
+	// 	return err
+	// }
+	//
+	// // 4. Healthcheck
+	// status, _ := ProbeContainerHealth(containerID)
+	// if status != "healthy" {
+	// 	return fmt.Errorf("container unhealthy")
+	// }
+	//
+	// // 5. Reverse Proxy Config
+	// if err := ConfigureProxy(ProxyRoute{
+	// 	App:    app,
+	// 	Domain: data.Domain,
+	// 	Port:   port,
+	// }); err != nil {
+	// 	return err
+	// }
+	//
+	// // 6. TLS Cert
+	// if err := RotateCert(data.Domain); err != nil {
+	// 	return err
+	// }
+	//
+	// // 7. Register app
+	// RegisterApp(app, containerID, port)
+	//
 	return nil
 }

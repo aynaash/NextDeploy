@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"nextdeploy/shared/config"
-	"nextdeploy/cli/internal/git"
+	"nextdeploy/shared/git"
 	"nextdeploy/shared"
 	"nextdeploy/cli/internal/server"
 	"os"

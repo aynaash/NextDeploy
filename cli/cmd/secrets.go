@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"nextdeploy/shared"
-	"nextdeploy/cli/internal/secrets"
+	"nextdeploy/shared/secrets"
 	"os"
 )
 import (

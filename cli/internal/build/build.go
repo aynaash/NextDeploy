@@ -2,9 +2,9 @@ package build
 
 import (
 	"fmt"
-	"nextdeploy/cli/internal/git"
+	"nextdeploy/shared/git"
 	"nextdeploy/shared"
-	"nextdeploy/cli/internal/nextdeploy"
+	"nextdeploy/shared/nextdeploy"
 	"strings"
 	"time"
 )

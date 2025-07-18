@@ -18,9 +18,9 @@ import (
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
-	"nextdeploy/cli/internal/envstore"
-	"nextdeploy/cli/internal/git"
-	"nextdeploy/cli/internal/registry"
+	"nextdeploy/shared/envstore"
+	"nextdeploy/shared/git"
+	"nextdeploy/shared/registry"
 )
 
 var (

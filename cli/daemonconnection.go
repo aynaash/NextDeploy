@@ -13,7 +13,7 @@ var (
 	trustStore = flag.String("trust-store", ".trusted_keys.json", "Path to trust store")
 )
 
-func daemonConnection() {
+func DaemonConnection() {
 	flag.Parse()
 
 	// Load or initialize trust store

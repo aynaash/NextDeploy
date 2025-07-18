@@ -12,6 +12,7 @@ import (
 	"time"
 )
 
+// FIX: this logic should exist on both daemon and cli sides
 func LoadTrustStore(path string) (*shared.TrustStore, error) {
 	file, err := os.Open(path)
 	if err != nil {

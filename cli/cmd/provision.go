@@ -21,13 +21,15 @@ The 'provision' command automates the setup of required cloud infrastructure for
 Next.js applications. It handles the creation and configuration of:
 
 Core Components:
-- Elastic Container Registry (ECR) repositories for Docker image storage
+- Container Registry repositories for Docker image storage
 - Identity and Access Management (IAM) roles with least-privilege policies
 - Dedicated deployment users with appropriate permissions
 - Infrastructure as Code (IaC) templates for consistent environments
 
 This command ensures your cloud environment is properly configured 
 before application deployment, following infrastructure best practices.
+This command should be built in cloud agnostic way. By providing user with as many cloud options as 
+possible. User should be able to pass their prefered cloud as flag.
 `,
 	// PreRunE performs validation and data collection before execution
 	PreRunE: collectResourcesData,

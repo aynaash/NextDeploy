@@ -61,6 +61,19 @@ func init() {
 	flag.StringVar(&config.logFile, "log-file", "/var/log/nextdeploy.log", "Log file path")
 }
 
+var (
+	host        = "0.0.0.0"
+	port        = 8080
+	keyDir      = "/var/lib/nextdeploy/keys"
+	rotateFreq  = 24 * time.Hour
+	debug       = true
+	logFormat   = "json"
+	metricsPort = 9090
+	daemonize   = true
+	pidfile     = "/var/run/nextdeploy.pid"
+	logFile     = "var/log/nextdeployd.log"
+)
+
 func startServer(server *http.Server, name string, logger *slog.Logger, errChan chan<- error) {
 	logger.Info("starting server", "name", name, "address", server.Addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -72,11 +85,11 @@ func startServer(server *http.Server, name string, logger *slog.Logger, errChan 
 func main() {
 	flag.Parse()
 
-	logger, logFile := core.SetupLogger()
+	logger, logFile := core.SetupLogger(config.daemonize, config.debug, config.logFormat, config.logFile)
 	defer logFile.Close()
 
 	if config.daemonize {
-		core.Daemonize(logger)
+		core.Daemonize(logger, config.pidFile)
 	}
 
 	logger.Info("starting NextDeploy daemon",
@@ -89,7 +102,7 @@ func main() {
 	defer cancel()
 
 	// Setup key manager
-	keyManager, err := core.SetupKeyManager(logger)
+	keyManager, err := core.SetupKeyManager(logger, config.keyDir, config.rotateFreq)
 	if err != nil {
 		os.Exit(1)
 	}
@@ -99,6 +112,8 @@ func main() {
 	}
 
 	defer keyManager.StopRotation()
+
+	// Setup routes
 
 	//FIX: fix this logic for bettertrust store management
 	auditLog, err := core.NewAuditLog(filepath.Join("audit.log"))
@@ -115,7 +130,7 @@ func main() {
 	defer keyManager.StopRotation()
 
 	// Setup HTTP servers with all routes
-	mainServer, metricsServer := core.SetupServers(logger, keyManager)
+	mainServer, metricsServer := core.SetupServers(logger, keyManager, config.port, config.host, config.metricsPort)
 
 	// Start servers
 	errChan := make(chan error, 2)
@@ -140,13 +155,13 @@ func main() {
 				// Implement config reload here
 			default:
 				core.SetGlobalStatus("shutting_down")
-				core.GracefulShutdown(ctx, mainServer, metricsServer, logger)
+				core.GracefulShutdown(ctx, mainServer, metricsServer, logger, config.daemonize, config.pidFile)
 				return
 			}
 		case err := <-errChan:
 			logger.Error("server error", "error", err)
 			core.SetGlobalStatus("unhealthy")
-			core.GracefulShutdown(ctx, mainServer, metricsServer, logger)
+			core.GracefulShutdown(ctx, mainServer, metricsServer, logger, config.daemonize, config.pidFile)
 			return
 		}
 	}

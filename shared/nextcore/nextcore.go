@@ -1,8 +1,13 @@
 package nextcore
 
 import (
-	"nextdeploy/shared/config"
+	"encoding/json"
+	"fmt"
 	"nextdeploy/shared"
+	"nextdeploy/shared/config"
+	"os"
+	"os/exec"
+	"path/filepath"
 )
 
 const (
@@ -37,65 +42,80 @@ func GenerateMetadata() (NextCorePayload, error) {
 		return NextCorePayload{}, err
 	}
 	NextCoreLogger.Info("Next.js version: %s", NextJsVersion)
-
-	// Get the environment variables
-	// TODO: e
-	//      -- integrate envstore and secrets manager and encrypt mini doppler extensible
-	//      -- version that can be used in production using knowledge learned from bootdev
+	// get the build meta data
+	NextCoreLogger.Info("Collecting build metadata...")
+	buildMeta, err := CollectBuildMetadata()
+	NextCoreLogger.Debug("The build metadata looks like this:%v", buildMeta)
+	// add config data to the metadata also
+	config, err := config.Load()
 
 	return NextCorePayload{
-		AppName:     AppName,
-		NextVersion: NextJsVersion,
+		AppName:           AppName,
+		NextVersion:       NextJsVersion,
+		NextBuildMetadata: *buildMeta,
+		Config:            config,
 	}, nil
 }
-func (p *NextCorePayload) CollectMetaForDockerBuild() (metadata NextCorePayload, err error) {
-	// This function will collect metadata for Docker build
-	// and return a NextCorePayload with the necessary fields filled.
-	// For now, we will just return the payload as is.
-	AppName := "contextbytes"
-	NextVersion := "15.2.0"
-	EnvVariables := map[string]string{
-		"NODE_ENV":                 "production",
-		"NEXT_PUBLIC_API_URL":      "https://api.example.com",
-		"NEXT_PUBLIC_ANALYTICS_ID": "UA-123456789-1",
-		"NEXT_PUBLIC_CDN_URL":      "https://cdn.example.com",
-		"NEXT_PUBLIC_FEATURE_FLAG": "true",
-		"NEXT_PUBLIC_CUSTOM_VAR":   "custom_value",
-		"NEXT_PUBLIC_ANOTHER_VAR":  "another_value",
-	}
-	StaticRoutes := []string{
-		"/",
-		"/about",
-		"/contact",
-		"/blog",
-		"/products",
-		"/services",
-		"/terms",
-		"/privacy",
-		"/sitemap.xml",
-	}
-	Dynamic := []string{
-		"/api/data",
-		"/api/user",
-	}
-	BuildCommand := "npm run build"
-	StartCommand := "npm start"
-	HasImageAssets := true
-	CDNEnabled := true
-	Domain := "contextbytes.com"
-	Port := 3000
 
-	return NextCorePayload{
-		AppName:        AppName,
-		NextVersion:    NextVersion,
-		EnvVariables:   EnvVariables,
-		StaticRoutes:   StaticRoutes,
-		Dynamic:        Dynamic,
-		BuildCommand:   BuildCommand,
-		StartCommand:   StartCommand,
-		HasImageAssets: HasImageAssets,
-		CDNEnabled:     CDNEnabled,
-		Domain:         Domain,
-		Port:           Port,
-	}, err
+func CollectBuildMetadata() (*NextBuildMetadata, error) {
+	projectDir, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	//TODO: use detected package manager
+	NextCoreLogger.Debug("Build the next to generate build metadata")
+	cmd := exec.Command("npm", "run", "build")
+	cmd.Dir = projectDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stdout
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("build failed:%w", err)
+	}
+
+	nextDir := filepath.Join(projectDir, ".next")
+	buildID, err := os.ReadFile(filepath.Join(nextDir, "BUILD_ID"))
+	if err != nil {
+		return nil, fmt.Errorf("faileed to read BUILD_ID:%s", err)
+	}
+	readJSON := func(filename string) (interface{}, error) {
+		data, err := os.ReadFile(filepath.Join(nextDir, filename))
+		if err != nil {
+			return nil, err
+		}
+		var result interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+
+	// Collect all manifests
+	buildManifest, _ := readJSON("build-manifest.json")
+	appBuildManifest, _ := readJSON("app-build-manifest.json")
+	prerenderManifest, _ := readJSON("prerender-manifest.json")
+	routesManifest, _ := readJSON("routes-manifest.json")
+	imagesManifest, _ := readJSON("images-manifest.json")
+	appPathRoutesManifest, _ := readJSON("app-path-routes-manifest.json")
+	reactLoadableManifest, _ := readJSON("react-loadable-manifest.json")
+	var diagnostics []string
+	diagnosticsDir := filepath.Join(nextDir, "diagnostics")
+	if files, err := os.ReadDir(diagnosticsDir); err != nil {
+		for _, file := range files {
+			diagnostics = append(diagnostics, file.Name())
+		}
+	}
+
+	return &NextBuildMetadata{
+		BuildID:               string(buildID),
+		BuildManifest:         buildManifest,
+		AppBuildManifest:      appBuildManifest,
+		PrerenderManifest:     prerenderManifest,
+		RoutesManifest:        routesManifest,
+		ImagesManifest:        imagesManifest,
+		AppPathRoutesManifest: appPathRoutesManifest,
+		ReactLoadableManifest: reactLoadableManifest,
+		Diagnostics:           diagnostics,
+	}, nil
+
 }

@@ -177,6 +177,7 @@ func RecoveryMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 // AuthMiddleware handles authentication
 func AuthMiddleware(km *KeyManager) func(http.HandlerFunc) http.HandlerFunc {
+	//TODO: this should use trustStore managemer
 	return func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			// Skip auth for health checks

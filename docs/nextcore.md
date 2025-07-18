@@ -1,15 +1,5 @@
 
-This is where most people make the wrong architectural call — and it haunts their platform forever.
 
-You're at a **crossroads**, and this choice will decide whether `nextcore` becomes:
-
-* A brittle “magic script” that works sometimes…
-  or
-* A **flexible compiler** that adapts to real-world Next.js complexity and scales with your platform.
-
-Let’s cut straight through the fluff.
-
----
 
 ## 🔍 First: How Many Variables Should `nextcore` Detect?
 

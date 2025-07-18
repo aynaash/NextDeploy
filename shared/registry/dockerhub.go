@@ -9,7 +9,7 @@ import (
 	"io"
 	"net/url"
 	"nextdeploy/shared/config"
-	"nextdeploy/cli/internal/git"
+	"nextdeploy/shared/git"
 	"nextdeploy/shared"
 	"os/exec"
 	"regexp"
