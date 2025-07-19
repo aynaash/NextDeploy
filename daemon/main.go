@@ -48,19 +48,6 @@ var (
 	}{}
 )
 
-func init() {
-	flag.StringVar(&config.host, "host", "0.0.0.0", "Host to bind to")
-	flag.StringVar(&config.port, "port", "8080", "Main service port")
-	flag.StringVar(&config.keyDir, "key-dir", "/var/lib/nextdeploy/keys", "Key directory")
-	flag.DurationVar(&config.rotateFreq, "rotate", 24*time.Hour, "Key rotation frequency")
-	flag.BoolVar(&config.debug, "debug", false, "Enable debug logging")
-	flag.StringVar(&config.logFormat, "log-format", "json", "Log format (text/json)")
-	flag.StringVar(&config.metricsPort, "metrics-port", "9090", "Metrics port")
-	flag.BoolVar(&config.daemonize, "daemon", false, "Run as daemon")
-	flag.StringVar(&config.pidFile, "pid-file", "/var/run/nextdeploy.pid", "PID file path")
-	flag.StringVar(&config.logFile, "log-file", "/var/log/nextdeploy.log", "Log file path")
-}
-
 var (
 	host        = "0.0.0.0"
 	port        = 8080

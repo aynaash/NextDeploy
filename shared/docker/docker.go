@@ -2,10 +2,13 @@
 package docker
 
 import (
+	"archive/tar"
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"nextdeploy/shared"
 	"nextdeploy/shared/config"
 	"nextdeploy/shared/nextcore"
@@ -16,7 +19,13 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/jsonmessage"
+	"github.com/moby/term"
 	"github.com/spf13/cobra"
+	"golang.org/x/tools/go/analysis/passes/defers"
 )
 
 const (
@@ -44,6 +53,7 @@ var (
 )
 
 type DockerManager struct {
+	cli     *client.Client
 	verbose bool
 	logger  Logger // Interface for logging
 }
@@ -65,13 +75,209 @@ type BuildOptions struct {
 	Fresh            bool   // Flag to indicate fresh build
 }
 
-// NewDockerManager creates a new DockerManager instance
-func NewDockerManager(verbose bool, dlog Logger) *DockerManager {
-
-	return &DockerManager{
-		verbose: verbose,
-		logger:  dlog,
+func NewDockerClient(logger *shared.Logger) (*DockerManager, error) {
+	cli, err := client.NewClientWithOpts(
+		client.FromEnv,
+		client.WithAPIVersionNegotiation(),
+	)
+	if err != nil {
+		dlog.Error("Failed to create Docker client: %v", err)
+		return nil, fmt.Errorf("failed to create Docker client: %w", err)
 	}
+	return &DockerManager{
+		cli:     cli,
+		verbose: true, // Set to true for verbose logging
+	}, nil
+}
+
+// NewDockerManager creates a new DockerManager instance
+
+func (dm *DockerManager) BuildImage(ctx context.Context, opts BuildOptions) error {
+	// generate and validate metadata first
+	if err := nextcore.GenerateMetadata(); err != nil {
+		return fmt.Errorf("metadata generation  failed:%w", err)
+	}
+	// validate
+	if err := nextcore.ValidateBuildState(); err != nil {
+		return fmt.Errorf("failed to validate build state: %w", err)
+	}
+	// create build context
+	buildContext, err := dm.createBuildContext()
+	if err != nil {
+		dlog.Error("Failed to create build context: %v", err)
+		return fmt.Errorf("failed to create build context: %w", err)
+	}
+	defer buildContext.Close()
+
+	// configure build options
+	buildOptions := types.ImageBuildOptions{
+		Tags:        []string{opts.ImageName},
+		Dockerfile:  "Dockerfile",
+		Remove:      true,
+		ForceRemove: true,
+		NoCache:     opts.NoCache,
+		PullParent:  opts.Pull,
+		Platform:    opts.Platform,
+		Target:      opts.Target,
+	}
+
+	// add build args from metadata
+	if envVars := dm.getBuildArgs(); err != nil {
+		dlog.Error("Failed to get build args: %v", err)
+		return fmt.Errorf("failed to get build args: %w", err)
+	} else {
+		buildOptions.BuildArgs = envVars
+	}
+	// Execute build
+	resp, err := dm.cli.ImageBuild(ctx, buildContext, buildOptions)
+	if err != nil {
+		dlog.Error("Failed to build Docker image: %v", err)
+		return fmt.Errorf("failed to build Docker image: %w", err)
+	}
+	defer resp.Body.Close()
+	// Display build output
+	fd, isTerminal := term.GetFdInfo(os.Stdout)
+	return jsonmessage.DisplayJSONMessagesStream(resp.Body, os.Stdout, fd, isTerminal, nil)
+}
+func (dm *DockerManager) createBuildContext() (io.ReadCloser, error) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	defer tw.Close()
+
+	// Add Dockerfile
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current directory: %w", err)
+	}
+	packageManger, err := nextcore.DetectPackageManager(cwd)
+	dockerfileContent, err := dm.generateDockerfileContent(packageManger.String())
+	if err != nil {
+		return nil, err
+	}
+	if err := addFileToTar(tw, "Dockerfile", []byte(dockerfileContent), 0644); err != nil {
+		return nil, err
+	}
+
+	// Add application files
+	if err := dm.addAppFiles(tw); err != nil {
+		return nil, err
+	}
+
+	// Add metadata and assets
+	if err := dm.addMetadataAndAssets(tw); err != nil {
+		return nil, err
+	}
+
+	return io.NopCloser(&buf), nil
+}
+
+func (dm DockerManager) addAppFiles(tw *tar.Writer) error {
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current working directory: %w", err)
+	}
+
+	// Detect package manager
+	packageManager, err := nextcore.DetectPackageManager(cwd)
+	if err != nil {
+		dlog.Error("Failed to detect package manager: %v", err)
+		return fmt.Errorf("failed to detect package manager: %w", err)
+	}
+
+	// Determine lock files based on package manager
+	var packageFiles []string
+	switch packageManager {
+	case "yarn":
+		packageFiles = []string{"package.json", "yarn.lock"}
+	case "pnpm":
+		packageFiles = []string{"package.json", "pnpm-lock.yaml"}
+	default: // npm
+		packageFiles = []string{"package.json", "package-lock.json"}
+	}
+
+	// Add package files
+	for _, file := range packageFiles {
+		if err := dm.addFileIfExists(tw, file); err != nil {
+			return fmt.Errorf("failed to add package file %s: %w", file, err)
+		}
+	}
+
+	// Add configuration files
+	configFiles := []string{"next.config.js", "next.config.mjs", ".env", ".env.local"}
+	for _, file := range configFiles {
+		if err := dm.addFileIfExists(tw, file); err != nil {
+			return fmt.Errorf("failed to add config file %s: %w", file, err)
+		}
+	}
+
+	// Add source directories
+	dirs := []string{"pages", "app", "components", "public", "src"}
+	for _, dir := range dirs {
+		if _, err := os.Stat(dir); err == nil {
+			if err := addDirectoryToTar(tw, dir, dir); err != nil {
+				return fmt.Errorf("failed to add directory %s: %w", dir, err)
+			}
+		}
+	}
+
+	return nil
+}
+func (dm *DockerManager) addMetadataAndAssets(tw *tar.Writer) error {
+	// Add metadata files
+	metadataFiles := []string{".nextdeploy/metadata.json", ".nextdeploy/build.lock"}
+	for _, file := range metadataFiles {
+		if content, err := os.ReadFile(file); err == nil {
+			if err := addFileToTar(tw, file, content, 0644); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Add static assets
+	if err := addDirectoryToTar(tw, ".nextdeploy/assets", ".nextdeploy/assets"); err != nil {
+		return fmt.Errorf("failed to add static assets: %w", err)
+	}
+
+	return nil
+}
+
+func (dc *DockerManager) getBuildArgs() map[string]*string {
+	args := make(map[string]*string)
+	//TODO: Implement right build args
+
+	return args
+}
+
+// Helper function to add a file to tar if it exists
+func (dm DockerManager) addFileIfExists(tw *tar.Writer, filename string) error {
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File doesn't exist - skip silently
+			return nil
+		}
+		return err
+	}
+
+	if err := addFileToTar(tw, filename, content, 0644); err != nil {
+		return fmt.Errorf("failed to add file %s to tar: %w", filename, err)
+	}
+	return nil
+}
+
+// Helper functions
+func addFileToTar(tw *tar.Writer, name string, content []byte, mode int64) error {
+	hdr := &tar.Header{
+		Name: name,
+		Mode: mode,
+		Size: int64(len(content)),
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+	_, err := tw.Write(content)
+	return err
 }
 
 // DockerfileExists checks if a Dockerfile exists in the specified directory
@@ -314,14 +520,26 @@ func (dm *DockerManager) CheckDockerInstalled() error {
 // BuildImage builds a Docker image with options
 func (dm *DockerManager) BuildImage(ctx context.Context, dir string, opts BuildOptions) error {
 	//FIX: here we need to use nextcore metadata to build the using docker client not commands
+	err := nextcore.GenerateMetadata()
+	if err != nil {
+		dlog.Error("Failed to generate metadata: %v", err)
+		return err
+	}
+	// validate metadata
+	err = nextcore.ValidateBuildState()
+	if err != nil {
+		dlog.Error("Failed to validate build state: %v", err)
+		return fmt.Errorf("failed to validate build state: %w", err)
+	}
 	// print out the options for debugging
 	dlog.Debug("Build options: %+v", opts)
-	err := dm.ValidateImageName(opts.ImageName)
+	err = dm.ValidateImageName(opts.ImageName)
 	if err != nil {
 		dlog.Info("The docker image looks like this :%s", opts.ImageName)
 		dlog.Error("Invalid Docker image name: %s", opts.ImageName)
 		return fmt.Errorf("%w: %s", ErrInvalidImageName, err)
 	}
+	// Remove this docker file check and use metadata to build the image
 	exists, err := dm.DockerfileExists(dir)
 	if err != nil {
 		dlog.Error("Failed to check Dockerfile existence: %v", err)
