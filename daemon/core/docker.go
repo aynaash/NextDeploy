@@ -2,7 +2,7 @@ package core
 
 import (
 	"context"
-	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 )
 
@@ -31,8 +31,8 @@ func init() {
 	}
 }
 
-func ListRunningContainers() ([]types.Container, error) {
-	containers, err := dockerCli.ContainerList(context.Background(), types.ContainerListOptions{})
+func ListRunningContainers() ([]container.Summary, error) {
+	containers, err := dockerCli.ContainerList(context.Background(), container.ListOptions{})
 	if err != nil {
 		return nil, err
 	}

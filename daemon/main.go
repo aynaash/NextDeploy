@@ -1,7 +1,5 @@
 package main
 
-// Command nextdeploy-daemon
-//
 // NextDeploy Daemon is a system-level service responsible for managing and
 // orchestrating deployed Next.js applications on remote virtual servers (VPS).
 //
@@ -70,6 +68,8 @@ func startServer(server *http.Server, name string, logger *slog.Logger, errChan 
 }
 
 func main() {
+	//TODO: add temporal workflow context to keep track of long-running operations all their
+	//      --contextual data
 	flag.Parse()
 
 	logger, logFile := core.SetupLogger(config.daemonize, config.debug, config.logFormat, config.logFile)
@@ -99,9 +99,6 @@ func main() {
 	}
 
 	defer keyManager.StopRotation()
-
-	// Setup routes
-
 	//FIX: fix this logic for bettertrust store management
 	auditLog, err := core.NewAuditLog(filepath.Join("audit.log"))
 	if err != nil {
@@ -111,7 +108,8 @@ func main() {
 
 	auditLog.AddEntry(shared.AuditLogEntry{
 		Timestamp: time.Now(),
-		Action:    "start",
+		Action:    "daemon_start",
+		Message:   "NextDeploy daemon started",
 	})
 
 	defer keyManager.StopRotation()
@@ -127,6 +125,22 @@ func main() {
 	// Setup health status
 	core.SetGlobalStatus("healthy")
 	core.SetComponentStatus("key_manager", "healthy")
+	// setup websocket server
+	agentID := os.Getenv("NEXTDEPLOY_AGENT_ID")
+	wsServer := core.NewWSServer(
+		keyManager.GetWSAuthKey(),
+		agentID,
+	)
+
+	http.HandleFunc("ws", func(w http.ResponseWriter, r *http.Request) {
+		auditLog.AddEntry(shared.AuditLogEntry{
+			Timestamp: time.Now(),
+			Action:    "websocket_connection",
+			Message:   "New WebSocket connection established",
+			Client:    r.RemoteAddr,
+		})
+		wsServer.HandleConnection(w, r)
+	})
 
 	// Wait for shutdown
 	shutdownChan := make(chan os.Signal, 1)
@@ -139,14 +153,30 @@ func main() {
 			switch sig {
 			case syscall.SIGHUP:
 				logger.Info("reloading configuration")
-				// Implement config reload here
+				// TODO: Implement config reload
+				auditLog.AddEntry(shared.AuditLogEntry{
+					Timestamp: time.Now(),
+					Action:    "config_reload",
+					Message:   "Received SIGHUP",
+				})
 			default:
+				auditLog.AddEntry(shared.AuditLogEntry{
+					Timestamp: time.Now(),
+					Action:    "shutdown",
+					Message:   "Received termination signal",
+				})
 				core.SetGlobalStatus("shutting_down")
 				core.GracefulShutdown(ctx, mainServer, metricsServer, logger, config.daemonize, config.pidFile)
 				return
 			}
+
 		case err := <-errChan:
 			logger.Error("server error", "error", err)
+			auditLog.AddEntry(shared.AuditLogEntry{
+				Timestamp: time.Now(),
+				Action:    "server_error",
+				Message:   err.Error(),
+			})
 			core.SetGlobalStatus("unhealthy")
 			core.GracefulShutdown(ctx, mainServer, metricsServer, logger, config.daemonize, config.pidFile)
 			return

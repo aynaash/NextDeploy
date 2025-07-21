@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
+	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -12,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"os"
 	"runtime"
 	"syscall"
@@ -28,6 +30,11 @@ const (
 	FingerprintLength = 16
 )
 
+type ECCSignature struct {
+	R *big.Int
+	S *big.Int
+}
+
 var (
 	SharedLogger = PackageLogger("shared", "🔗 SHARED")
 )
@@ -37,11 +44,65 @@ type KeyPair struct {
 	ECDHPublic  *ecdh.PublicKey
 	SignPrivate ed25519.PrivateKey
 	SignPublic  ed25519.PublicKey
+	ECDSAKey    *ecdsa.PrivateKey // Optional ECDSA key for compatibility
 	KeyID       string
 }
 
 // Generate key pair create a new ecdh (x25519) key pair and a new ed25519 signing key pair.
+func SignMessage(msg AgentMessage, privateKey *ecdsa.PrivateKey) (AgentMessage, error) {
+	// Create copy without signature
+	msgToSign := msg
+	msgToSign.Signature = ""
 
+	jsonData, err := json.Marshal(msgToSign)
+	if err != nil {
+		return AgentMessage{}, err
+	}
+
+	hash := sha256.Sum256(jsonData)
+	r, s, err := ecdsa.Sign(rand.Reader, privateKey, hash[:])
+	if err != nil {
+		return AgentMessage{}, err
+	}
+
+	signature, err := asn1.Marshal(ECCSignature{R: r, S: s})
+	if err != nil {
+		return AgentMessage{}, err
+	}
+
+	msg.Signature = string(signature)
+	return msg, nil
+}
+
+func VerifyMessageSignature(msg AgentMessage) bool {
+	if msg.Signature == "" {
+		return false
+	}
+
+	// Get public key from agent store (would need implementation)
+	publicKey := getAgentPublicKey(msg.AgentID)
+	if publicKey == nil {
+		return false
+	}
+
+	// Create copy without signature
+	msgToVerify := msg
+	msgToVerify.Signature = ""
+
+	jsonData, err := json.Marshal(msgToVerify)
+	if err != nil {
+		return false
+	}
+
+	hash := sha256.Sum256(jsonData)
+
+	var sig ECCSignature
+	if _, err := asn1.Unmarshal([]byte(msg.Signature), &sig); err != nil {
+		return false
+	}
+
+	return ecdsa.Verify(publicKey, hash[:], sig.R, sig.S)
+}
 func SecureKeyMemory(key []byte) {
 	// Use platform-specific secure memory functions
 	if len(key) == 0 {

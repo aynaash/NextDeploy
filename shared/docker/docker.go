@@ -19,13 +19,11 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
 	"github.com/moby/term"
 	"github.com/spf13/cobra"
-	"golang.org/x/tools/go/analysis/passes/defers"
 )
 
 const (
@@ -110,7 +108,7 @@ func (dm *DockerManager) BuildImage(ctx context.Context, opts BuildOptions) erro
 	defer buildContext.Close()
 
 	// configure build options
-	buildOptions := types.ImageBuildOptions{
+	buildOptions := build.ImageBuildOptions{
 		Tags:        []string{opts.ImageName},
 		Dockerfile:  "Dockerfile",
 		Remove:      true,
@@ -122,7 +120,7 @@ func (dm *DockerManager) BuildImage(ctx context.Context, opts BuildOptions) erro
 	}
 
 	// add build args from metadata
-	if envVars := dm.getBuildArgs(); err != nil {
+	if envVars := dm.getBuildArgs(); envVars != nil {
 		dlog.Error("Failed to get build args: %v", err)
 		return fmt.Errorf("failed to get build args: %w", err)
 	} else {
@@ -222,6 +220,41 @@ func (dm DockerManager) addAppFiles(tw *tar.Writer) error {
 	}
 
 	return nil
+}
+
+func addDirectoryToTar(tw *tar.Writer, srcDir, tarDir string) error {
+	// Walk through the directory and add files to tar
+	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return fmt.Errorf("error walking path %s: %w", path, err)
+		}
+		if info.IsDir() {
+			return nil // Skip directories
+		}
+
+		// Read file content
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("failed to read file %s: %w", path, err)
+		}
+
+		// Create tar header
+		header := &tar.Header{
+			Name: filepath.Join(tarDir, strings.TrimPrefix(path, srcDir+"/")),
+			Mode: int64(info.Mode()),
+			Size: int64(len(content)),
+		}
+
+		if err := tw.WriteHeader(header); err != nil {
+			return fmt.Errorf("failed to write header for %s: %w", path, err)
+		}
+
+		if _, err := tw.Write(content); err != nil {
+			return fmt.Errorf("failed to write content for %s: %w", path, err)
+		}
+
+		return nil
+	})
 }
 func (dm *DockerManager) addMetadataAndAssets(tw *tar.Writer) error {
 	// Add metadata files
@@ -518,71 +551,6 @@ func (dm *DockerManager) CheckDockerInstalled() error {
 }
 
 // BuildImage builds a Docker image with options
-func (dm *DockerManager) BuildImage(ctx context.Context, dir string, opts BuildOptions) error {
-	//FIX: here we need to use nextcore metadata to build the using docker client not commands
-	err := nextcore.GenerateMetadata()
-	if err != nil {
-		dlog.Error("Failed to generate metadata: %v", err)
-		return err
-	}
-	// validate metadata
-	err = nextcore.ValidateBuildState()
-	if err != nil {
-		dlog.Error("Failed to validate build state: %v", err)
-		return fmt.Errorf("failed to validate build state: %w", err)
-	}
-	// print out the options for debugging
-	dlog.Debug("Build options: %+v", opts)
-	err = dm.ValidateImageName(opts.ImageName)
-	if err != nil {
-		dlog.Info("The docker image looks like this :%s", opts.ImageName)
-		dlog.Error("Invalid Docker image name: %s", opts.ImageName)
-		return fmt.Errorf("%w: %s", ErrInvalidImageName, err)
-	}
-	// Remove this docker file check and use metadata to build the image
-	exists, err := dm.DockerfileExists(dir)
-	if err != nil {
-		dlog.Error("Failed to check Dockerfile existence: %v", err)
-		return fmt.Errorf("failed to check Dockerfile existence: %w", err)
-	}
-	if !exists {
-		dlog.Error("Dockerfile not found in directory: %s", dir)
-		return ErrDockerfileNotFound
-	}
-
-	args := []string{"build"}
-	if opts.NoCache {
-		args = append(args, "--no-cache")
-	}
-	if opts.Pull {
-		args = append(args, "--pull")
-	}
-	if opts.Target != "" {
-		args = append(args, "--target", opts.Target)
-	}
-	if opts.Platform != "" {
-		args = append(args, "--platform", opts.Platform)
-	}
-	for _, buildArg := range opts.BuildArgs {
-		args = append(args, "--build-arg", buildArg)
-	}
-
-	args = append(args, "-t", opts.ImageName, ".")
-
-	dlog.Info("Building Docker image with args: %v", args)
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Dir = dir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	err = cmd.Run()
-	if err != nil {
-		dlog.Error("Failed to build Docker image: %v", err)
-		return fmt.Errorf("%w: %s", ErrBuildFailed, err)
-	}
-	return nil
-}
-
 // PushImage pushes a Docker image to registry
 func (dm *DockerManager) PushImage(ctx context.Context, imageName string, ProvisionECRUser bool, Fresh bool) error {
 	err := dm.ValidateImageName(imageName)

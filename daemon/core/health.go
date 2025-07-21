@@ -6,8 +6,72 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"nextdeploy/shared"
 )
 
+type HealthMonitor struct {
+	wsClient      *shared.WSClient
+	metrics       SystemMetrics
+	lastHeartbeat time.Time
+}
+
+type SystemMetrics struct {
+	CPUUsage    float64 `json:"cpu_usage"`
+	MemoryUsage float64 `json:"memory_usage"`
+	DiskUsage   float64 `json:"disk_usage"`
+	Containers  int     `json:"containers"`
+}
+
+func NewHealthMonitor(wsClient *shared.WSClient) *HealthMonitor {
+	return &HealthMonitor{
+		wsClient: wsClient,
+	}
+}
+
+func (hm *HealthMonitor) Start() {
+	// Start periodic health reporting
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		hm.CollectMetrics()
+		hm.SendHeartbeat()
+	}
+}
+
+func (hm *HealthMonitor) CollectMetrics() {
+	// Implement actual metric collection
+	hm.metrics = SystemMetrics{
+		CPUUsage:    getCPUUsage(),
+		MemoryUsage: getMemoryUsage(),
+		DiskUsage:   getDiskUsage(),
+		Containers:  getContainerCount(),
+	}
+}
+
+func (hm *HealthMonitor) SendHeartbeat() {
+	msg := shared.AgentMessage{
+		Source:    shared.AgentDaemon,
+		Target:    shared.AgentDashboard,
+		Type:      shared.TypeStatus,
+		Payload:   hm.metrics,
+		Timestamp: time.Now(),
+		AgentID:   hm.wsClient.AgentID,
+	}
+
+	if err := hm.wsClient.SendMessage(msg); err != nil {
+		// Handle connection error
+	} else {
+		hm.lastHeartbeat = time.Now()
+	}
+}
+
+// Helper functions to get system metrics
+func getCPUUsage() float64    { return 0.0 }
+func getMemoryUsage() float64 { return 0.0 }
+func getDiskUsage() float64   { return 0.0 }
+func getContainerCount() int  { return 0 }
 func ProbeContainerHealth(containerID string) (string, error) {
 	inspect, err := dockerCli.ContainerInspect(context.Background(), containerID)
 	if err != nil {

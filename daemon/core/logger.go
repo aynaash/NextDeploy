@@ -5,7 +5,85 @@ import (
 	"log/slog"
 	"os"
 )
+```go
+package core
 
+import (
+	"context"
+	"io"
+	"time"
+
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/client"
+	"nextdeploy/shared"
+)
+
+type LogStreamer struct {
+	dockerClient *client.Client
+	wsClient     *shared.WSClient
+	streams      map[string]context.CancelFunc
+}
+
+func NewLogStreamer(dockerClient *client.Client, wsClient *shared.WSClient) *LogStreamer {
+	return &LogStreamer{
+		dockerClient: dockerClient,
+		wsClient:     wsClient,
+		streams:      make(map[string]context.CancelFunc),
+	}
+}
+
+func (ls *LogStreamer) StreamContainerLogs(containerID string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ls.streams[containerID] = cancel
+
+	go func() {
+		options := types.ContainerLogsOptions{
+			ShowStdout: true,
+			ShowStderr: true,
+			Follow:     true,
+			Timestamps: true,
+		}
+
+		reader, err := ls.dockerClient.ContainerLogs(ctx, containerID, options)
+		if err != nil {
+			return
+		}
+		defer reader.Close()
+
+		buf := make([]byte, 1024)
+		for {
+			n, err := reader.Read(buf)
+			if err != nil {
+				if err != io.EOF {
+					break
+				}
+				continue
+			}
+
+			msg := shared.AgentMessage{
+				Source:    shared.AgentDaemon,
+				Target:    shared.AgentDashboard,
+				Type:      shared.TypeLog,
+				Payload:   string(buf[:n]),
+				Timestamp: time.Now(),
+				AgentID:   ls.wsClient.AgentID,
+				Context:   map[string]string{"container_id": containerID},
+			}
+
+			if err := ls.wsClient.SendMessage(msg); err != nil {
+				break
+			}
+		}
+	}()
+}
+
+func (ls *LogStreamer) StopStreaming(containerID string) {
+	if cancel, exists := ls.streams[containerID]; exists {
+		cancel()
+		delete(ls.streams, containerID)
+	}
+}
+`
 func SetupLogger(daemonize bool, debug bool, logFormat string, logFile string) (*slog.Logger, *os.File) {
 	var logOutput *os.File
 	var err error

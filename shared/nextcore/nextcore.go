@@ -30,6 +30,7 @@ var (
 	NextCoreLogger = shared.PackageLogger("nextcore", "📦 NEXTCORE")
 )
 
+// TODO: add temporal workflow context for metadta ingeestion and usage pipelines
 func GenerateMetadata() error {
 	// This function will generate metadata for the Next.js application
 	// and return a NextCorePayload with the necessary fields filled.

@@ -121,7 +121,10 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 	}
 
 	// Initialize components
-	dm := docker.NewDockerManager(true, nil)
+	dm, err := docker.NewDockerClient(buildlogger)
+	if err != nil {
+		return fmt.Errorf("failed to create Docker client: %w", err)
+	}
 	// Determine environment (dev/prod)
 	env := os.Getenv("NODE_ENV")
 	if env == "" {
@@ -161,7 +164,7 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 
 	// Execute build
 	ctx := context.Background()
-	if err := dm.BuildImage(ctx, ".", opts); err != nil {
+	if err := dm.BuildImage(ctx, opts); err != nil {
 		buildlogger.Error("Build failed: %v", err)
 		return fmt.Errorf("build failed: %w", err)
 	}
@@ -181,7 +184,10 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 }
 
 func checkBuildConditionsMet(cmd *cobra.Command, args []string) error {
-	dm := docker.NewDockerManager(true, nil)
+	dm, err := docker.NewDockerClient(buildlogger)
+	if err != nil {
+		return fmt.Errorf("failed to create Docker client: %w", err)
+	}
 
 	// Validate Docker installation
 	if err := dm.CheckDockerInstalled(); err != nil {
