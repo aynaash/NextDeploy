@@ -470,3 +470,64 @@ func (l *Logger) Progress(level LogLevel, current, total int, label string) {
 		l.logger.Println()
 	}
 }
+
+// package main
+//
+// import (
+// 	"os"
+// 	"time"
+// 	"yourmodulepath/shared"
+// )
+//
+// func main() {
+// 	// Create and configure logger
+// 	logger := shared.DefaultLogger()
+// 	logger.SetLevel(shared.LevelDebug)
+// 	logger.RegisterPackage("main", "🏁 MAIN")
+//
+// 	// Basic logging
+// 	logger.Info("Application starting")
+//
+// 	// Package-specific logging
+// 	dbLogger := shared.PackageLogger("database", "📦 DB")
+// 	apiLogger := shared.PackageLogger("api", "🌐 API")
+//
+// 	dbLogger.Info("Connecting to database...")
+// 	apiLogger.Info("Starting HTTP server...")
+//
+// 	// Timed operation
+// 	logger.Timed("Data processing", func() {
+// 		time.Sleep(1 * time.Second)
+// 		indented := logger.Indent()
+// 		indented.Info("Processing chunk 1")
+// 		time.Sleep(500 * time.Millisecond)
+// 		indented.Info("Processing chunk 2")
+// 	})
+//
+// 	// JSON logging
+// 	config := map[string]interface{}{
+// 		"env":     "production",
+// 		"version": "1.2.3",
+// 		"ports":   []int{8080, 8081},
+// 	}
+// 	logger.JSON(shared.LevelDebug, config)
+//
+// 	// Table logging
+// 	headers := []string{"ID", "Name", "Status"}
+// 	rows := [][]string{
+// 		{"1", "Service A", "OK"},
+// 		{"2", "Service B", "WARNING"},
+// 		{"3", "Service C", "ERROR"},
+// 	}
+// 	logger.Table(shared.LevelInfo, headers, rows)
+//
+// 	// Progress bar
+// 	logger.Info("Processing items:")
+// 	total := 25
+// 	for i := 0; i <= total; i++ {
+// 		logger.Progress(shared.LevelInfo, i, total, "Items")
+// 		time.Sleep(100 * time.Millisecond)
+// 	}
+//
+// 	logger.Success("All operations completed successfully!")
+// }

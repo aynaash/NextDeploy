@@ -8,7 +8,9 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/asn1"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -172,7 +174,14 @@ func GenerateKeyPair() (*KeyPair, error) {
 }
 func RunCryptoHealthChecks() error {
 	// TODO:Test ECDH key exchange
+	return nil
+}
 
+func getAgentPublicKey(agentID string) *ecdsa.PublicKey {
+	// Placeholder function to retrieve the public key of an agent by its ID.
+	// In a real implementation, this would query a database or a key store.
+	// For now, we return nil to indicate that the public key is not found.
+	SharedLogger.Warn("getAgentPublicKey is not implemented, returning nil")
 	return nil
 }
 

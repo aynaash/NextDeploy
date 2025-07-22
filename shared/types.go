@@ -148,7 +148,7 @@ type Identity struct {
 }
 
 type Envelope struct {
-	Payload   string `json:"payload"`   // JSON string of EncryptedEnv
+	Payload   []byte `json:"payload"`   // JSON string of EncryptedEnv
 	Signature string `json:"signature"` // Base64 encoded signature of the payload
 }
 

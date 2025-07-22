@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"net/http"
 	"nextdeploy/shared"
-	"nextdeploy/shared/logger"
 	"sync"
 	"time"
 
@@ -19,7 +18,7 @@ import (
 )
 
 var (
-	corelogs = logger.PackageLogger("CORE", "CORE")
+	corelogs = shared.PackageLogger("CORE", "CORE")
 )
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
