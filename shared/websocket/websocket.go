@@ -3,6 +3,7 @@ package websocket
 import (
 	"crypto/ecdsa"
 	"errors"
+	"fmt"
 	"net/http"
 	"nextdeploy/shared"
 	"time"
@@ -33,14 +34,16 @@ func (c *WSClient) ReceiveMessage() (shared.AgentMessage, error) {
 		return shared.AgentMessage{}, errors.New("websocket client is not connected")
 	}
 
-	_, message, err := c.conn.ReadMessage()
+	messsageType, message, err := c.conn.ReadMessage()
+	fmt.Printf("Received message type: %v", message)
+	fmt.Printf("Message type: %d\n", messsageType)
 	if err != nil {
-		websockerlogger.Error("Failed to read message from WebSocket", "error", err)
+		websockerlogger.Error("Failed to read message from WebSocket error:", err)
 		return shared.AgentMessage{}, err
 	}
-
-	websockerlogger.Info("Received message from WebSocket server", "message", string(message))
-	return message, nil
+	// FIX: Deserialize the message into AgentMessage and use returned message from ReadMessage
+	var agentMessage shared.AgentMessage
+	return agentMessage, nil
 }
 func (c *WSClient) Connect(url string, headers http.Header) error {
 	dialer := websocket.DefaultDialer

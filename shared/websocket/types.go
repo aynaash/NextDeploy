@@ -4,7 +4,6 @@ import (
 	"crypto/ecdh"
 	"crypto/ecdsa"
 	"github.com/gorilla/websocket"
-
 	"sync"
 	"time"
 )

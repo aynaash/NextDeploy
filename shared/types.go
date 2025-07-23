@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"crypto/ecdh"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -38,6 +39,7 @@ type AgentMessage struct {
 	Timestamp int64           `json:"timestamp"`
 	AgentID   string          `json:"agent_id"`
 	Signature string          `json:"signature,omitempty"` // ECC signature of the message
+	Context  map[string]string `json:"context,omitempty"` // Additional context for the message
 }
 
 // CommandPayload represents a command sent to an agent
@@ -161,10 +163,10 @@ type PublicKeyResponse struct {
 
 // TrustedKey represents a trusted daemon public key stored by the CLI
 type TrustedKey struct {
-	KeyID       string `json:"key_id"`
-	PublicKey   string `json:"public_key"`
-	SignPublic  string `json:"sign_public"`
-	Fingerprint string `json:"fingerprint"`
+	KeyID       string          `json:"key_id"`
+	PublicKey   *ecdh.PublicKey `json:"public_key"`
+	SignPublic  string          `json:"sign_public"`
+	Fingerprint string          `json:"fingerprint"`
 }
 
 // TrustStore is a collection of trusted keys

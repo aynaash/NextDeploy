@@ -3,15 +3,17 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
 	"nextdeploy/shared"
+	"nextdeploy/shared/websocket"
 )
 
 type HealthMonitor struct {
-	wsClient      *shared.WSClient
+	wsClient      *websocket.WSClient
 	metrics       SystemMetrics
 	lastHeartbeat time.Time
 }
@@ -21,9 +23,10 @@ type SystemMetrics struct {
 	MemoryUsage float64 `json:"memory_usage"`
 	DiskUsage   float64 `json:"disk_usage"`
 	Containers  int     `json:"containers"`
+	Uptime      string  `json:"uptime"` // System uptime
 }
 
-func NewHealthMonitor(wsClient *shared.WSClient) *HealthMonitor {
+func NewHealthMonitor(wsClient *websocket.WSClient) *HealthMonitor {
 	return &HealthMonitor{
 		wsClient: wsClient,
 	}
@@ -51,13 +54,20 @@ func (hm *HealthMonitor) CollectMetrics() {
 }
 
 func (hm *HealthMonitor) SendHeartbeat() {
+	fmt.Printf("At the heart beat time: %s\n", time.Now().Format(time.RFC3339))
+	if time.Since(hm.lastHeartbeat) < 30*time.Second {
+		// Skip sending heartbeat if last one was sent recently
+		return
+	}
+	// printout the heatbeat data
+	fmt.Printf("Sending heartbeat with metrics: %+v\n", hm.metrics)
 	msg := shared.AgentMessage{
-		Source:    shared.AgentDaemon,
-		Target:    shared.AgentDashboard,
-		Type:      shared.TypeStatus,
-		Payload:   hm.metrics,
-		Timestamp: time.Now(),
-		AgentID:   hm.wsClient.AgentID,
+		Source: shared.AgentDaemon,
+		Target: shared.AgentDashboard,
+		Type:   shared.TypeStatus,
+		//Payload:   hm.metrics,
+		Timestamp: time.Now().Unix(),
+		///AgentID:   hm.wsClient.agentID,
 	}
 
 	if err := hm.wsClient.SendMessage(msg); err != nil {

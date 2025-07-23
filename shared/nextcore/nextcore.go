@@ -30,11 +30,10 @@ var (
 	NextCoreLogger = shared.PackageLogger("nextcore", "📦 NEXTCORE")
 )
 
-// TODO: add temporal workflow context for metadta ingeestion and usage pipelines
+// TODO: add temporal workflow context for metadata ingeestion and usage pipelines
 func GenerateMetadata() error {
 	// This function will generate metadata for the Next.js application
 	// and return a NextCorePayload with the necessary fields filled.
-	// For now, we will just return an empty payload.
 	NextCoreLogger.Info("Generating metadata for Next.js application...")
 	//Get the app name
 	cfg, err := config.Load()
@@ -55,6 +54,10 @@ func GenerateMetadata() error {
 	// get the build meta data
 	NextCoreLogger.Info("Collecting build metadata...")
 	buildMeta, err := CollectBuildMetadata()
+	if err != nil {
+		NextCoreLogger.Error("Failed to collect build metadata: %v", err)
+		return err
+	}
 	NextCoreLogger.Debug("The build metadata looks like this:%v", buildMeta)
 	// add config data to the metadata also
 	config, err := config.Load()
@@ -99,15 +102,23 @@ func GenerateMetadata() error {
 	middlewareConfig, err := ParseMiddleware(cwd)
 
 	if err != nil {
+		NextCoreLogger.Error("Failed to parse middleware configuration: %v", err)
 		return err
 	}
 
 	StaticAssets, err := ParseStaticAssets(cwd)
 	if err != nil {
+		NextCoreLogger.Error("Failed to parse static assets: %v", err)
 		return err
 	}
 
 	gitCommt, err := git.GetCommitHash()
+	if err != nil {
+		NextCoreLogger.Error("Failed to get git commit hash: %v", err)
+		return err
+	} else {
+		NextCoreLogger.Debug("Git commit hash: %s", gitCommt)
+	}
 	gitDiry := git.IsDirty()
 
 	PayloadPath, err := filepath.Abs(filepath.Join(cwd, MetadataFileName))
@@ -115,11 +126,11 @@ func GenerateMetadata() error {
 	AssetsOutputDir, err := filepath.Abs(filepath.Join(cwd, AssetsOutputDir))
 	// 4. Copy static assets
 	if err := copyStaticAssets(); err != nil {
+		NextCoreLogger.Error("Failed to copy static assets: %v", err)
 		return fmt.Errorf("failed to copy static assets: %w", err)
 	}
 
 	// 4. Track git state
-
 	metadata := NextCorePayload{
 		AppName:           AppName,
 		NextVersion:       NextJsVersion,
@@ -143,6 +154,7 @@ func GenerateMetadata() error {
 	}
 
 	if err := createBuildLock(&metadata); err != nil {
+		NextCoreLogger.Error("Failed to create build lock: %v", err)
 		return fmt.Errorf("failed to create build lock: %w", err)
 	}
 
@@ -155,11 +167,13 @@ func copyStaticAssets() error {
 
 	// Create destination directory
 	if err := os.MkdirAll(dstDir, 0755); err != nil {
+		NextCoreLogger.Error("Failed to create destination directory: %v", err)
 		return err
 	}
 
 	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			NextCoreLogger.Error("Error walking path %s: %v", path, err)
 			return err
 		}
 
@@ -171,6 +185,7 @@ func copyStaticAssets() error {
 		// Create relative path
 		relPath, err := filepath.Rel(srcDir, path)
 		if err != nil {
+			NextCoreLogger.Error("Failed to get relative path for %s: %v", path, err)
 			return err
 		}
 
@@ -179,6 +194,7 @@ func copyStaticAssets() error {
 
 		// Create destination directory structure
 		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+			NextCoreLogger.Error("Failed to create directory for %s: %v", dstPath, err)
 			return err
 		}
 
@@ -191,12 +207,14 @@ func copyStaticAssets() error {
 func copyFile(src, dst string) error {
 	source, err := os.Open(src)
 	if err != nil {
+		NextCoreLogger.Error("Failed to open source file %s: %v", src, err)
 		return err
 	}
 	defer source.Close()
 
 	destination, err := os.Create(dst)
 	if err != nil {
+		NextCoreLogger.Error("Failed to create destination file %s: %v", dst, err)
 		return err
 	}
 	defer destination.Close()
@@ -209,6 +227,7 @@ func copyFile(src, dst string) error {
 func createBuildLock(metadata *NextCorePayload) error {
 	commitHash, err := git.GetCommitHash()
 	if err != nil {
+		NextCoreLogger.Error("Failed to get git commit hash: %v", err)
 		return fmt.Errorf("failed to get git commit hash: %w", err)
 	}
 
@@ -223,6 +242,7 @@ func createBuildLock(metadata *NextCorePayload) error {
 
 	data, err := json.MarshalIndent(buildLock, "", "  ")
 	if err != nil {
+		NextCoreLogger.Error("Failed to marshal build lock: %v", err)
 		return err
 	}
 
@@ -248,20 +268,24 @@ func ValidateBuildState() error {
 	lockPath := filepath.Join(".nextdeploy", "build.lock")
 	data, err := os.ReadFile(lockPath)
 	if err != nil {
+		NextCoreLogger.Error("Failed to read build lock file: %v", err)
 		return fmt.Errorf("failed to read build lock: %w", err)
 	}
 
 	var lock BuildLock
 	if err := json.Unmarshal(data, &lock); err != nil {
+		NextCoreLogger.Error("Failed to parse build lock file: %v", err)
 		return fmt.Errorf("failed to parse build lock: %w", err)
 	}
 
 	currentCommit, err := git.GetCommitHash()
 	if err != nil {
+		NextCoreLogger.Error("Failed to get current git commit: %v", err)
 		return fmt.Errorf("failed to get current git commit: %w", err)
 	}
 
 	if currentCommit != lock.GitCommit {
+		NextCoreLogger.Error("Git commit mismatch: expected %s, got %s", lock.GitCommit, currentCommit)
 		return fmt.Errorf("git commit mismatch: expected %s, got %s", lock.GitCommit, currentCommit)
 	}
 
@@ -318,8 +342,10 @@ func ParseStaticAssets(projectDir string) (*StaticAssets, error) {
 	// 1. Scan public directory
 	publicDir := filepath.Join(projectDir, "public")
 	if _, err := os.Stat(publicDir); err == nil {
+		NextCoreLogger.Debug("Scanning public directory: %s", publicDir)
 		publicAssets, err := scanDirectory(publicDir, projectDir, "/")
 		if err != nil {
+			NextCoreLogger.Error("Failed to scan public directory: %v", err)
 			return nil, fmt.Errorf("failed to scan public directory: %w", err)
 		}
 		assets.PublicDir = publicAssets
@@ -328,8 +354,10 @@ func ParseStaticAssets(projectDir string) (*StaticAssets, error) {
 	// 2. Scan static directory (legacy)
 	staticDir := filepath.Join(projectDir, "static")
 	if _, err := os.Stat(staticDir); err == nil {
+		NextCoreLogger.Debug("Scanning static directory: %s", staticDir)
 		staticAssets, err := scanDirectory(staticDir, projectDir, "/static")
 		if err != nil {
+			NextCoreLogger.Error("Failed to scan static directory: %v", err)
 			return nil, fmt.Errorf("failed to scan static directory: %w", err)
 		}
 		assets.StaticFolder = staticAssets
@@ -338,6 +366,7 @@ func ParseStaticAssets(projectDir string) (*StaticAssets, error) {
 	// 3. Scan .next/static directory
 	nextStaticDir := filepath.Join(projectDir, ".next", "static")
 	if _, err := os.Stat(nextStaticDir); err == nil {
+		NextCoreLogger.Debug("Scanning .next/static directory: %s", nextStaticDir)
 		nextStaticAssets, err := scanDirectory(nextStaticDir, projectDir, "/_next/static")
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan .next/static directory: %w", err)
@@ -348,6 +377,7 @@ func ParseStaticAssets(projectDir string) (*StaticAssets, error) {
 	// 4. Scan for other common static assets in root
 	rootAssets, err := scanRootAssets(projectDir)
 	if err != nil {
+		NextCoreLogger.Error("Failed to scan root assets: %v", err)
 		return nil, fmt.Errorf("failed to scan root assets: %w", err)
 	}
 	assets.OtherAssets = rootAssets
@@ -361,12 +391,14 @@ func scanDirectory(dirPath, projectDir, publicPathPrefix string) ([]StaticAsset,
 
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			NextCoreLogger.Error("Error accessing path %s: %v", path, err)
 			return err
 		}
 
 		if !info.IsDir() {
 			relPath, err := filepath.Rel(dirPath, path)
 			if err != nil {
+				NextCoreLogger.Error("Failed to get relative path for %s: %v", path, err)
 				return err
 			}
 
@@ -416,6 +448,7 @@ func scanRootAssets(projectDir string) ([]StaticAsset, error) {
 		if _, err := os.Stat(path); err == nil {
 			info, err := os.Stat(path)
 			if err != nil {
+				NextCoreLogger.Debug("Failed to get file info for %s: %v", path, err)
 				continue
 			}
 
@@ -469,6 +502,7 @@ func ParseMiddleware(projectDir string) (*MiddlewareConfig, error) {
 	// Read middleware file content
 	content, err := os.ReadFile(middlewareFile)
 	if err != nil {
+		NextCoreLogger.Error("Failed to read middleware file: %v", err)
 		return nil, fmt.Errorf("failed to read middleware file: %w", err)
 	}
 
@@ -638,6 +672,7 @@ func ParseNextConfig(projectDir string) (*NextConfig, error) {
 	var configFile string
 	for _, path := range configPaths {
 		if _, err := os.Stat(path); err == nil {
+			NextCoreLogger.Error("Found Next.js config file: %s", path)
 			configFile = path
 			break
 		}
@@ -649,18 +684,21 @@ func ParseNextConfig(projectDir string) (*NextConfig, error) {
 
 	content, err := os.ReadFile(configFile)
 	if err != nil {
+		NextCoreLogger.Error("Failed to read config file: %v", err)
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
 	// Extract the configuration object from the file
 	configObj, err := extractConfigObject(string(content), filepath.Ext(configFile))
 	if err != nil {
+		NextCoreLogger.Error("Failed to extract config object: %v", err)
 		return nil, fmt.Errorf("failed to extract config: %w", err)
 	}
 
 	// Parse the configuration into our struct
 	nextConfig, err := parseConfigObject(configObj)
 	if err != nil {
+		NextCoreLogger.Error("Failed to parse config object: %v", err)
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
 
@@ -690,18 +728,21 @@ func extractConfigObject(content string, ext string) (map[string]interface{}, er
 	// Run the JavaScript code
 	value, err := vm.Run(wrapped)
 	if err != nil {
+		NextCoreLogger.Error("Failed to execute config file: %v", err)
 		return nil, fmt.Errorf("failed to execute config: %w", err)
 	}
 
 	// Get the stringified JSON result
 	jsonStr, err := value.ToString()
 	if err != nil {
+		NextCoreLogger.Error("Failed to stringify config: %v", err)
 		return nil, fmt.Errorf("failed to stringify config: %w", err)
 	}
 
 	// Unmarshal the JSON into a map
 	var config map[string]interface{}
 	if err := json.Unmarshal([]byte(jsonStr), &config); err != nil {
+		NextCoreLogger.Error("Failed to parse config JSON: %v", err)
 		return nil, fmt.Errorf("failed to parse config JSON: %w", err)
 	}
 
@@ -871,6 +912,7 @@ func detectImageAssets(buildMeta *NextBuildMetadata, projectDir string) (*ImageA
 	publicDir := filepath.Join(projectDir, PublicDir)
 	assets.PublicImages, err = findPublicImages(publicDir, projectDir)
 	if err != nil {
+		NextCoreLogger.Error("Failed to find public images: %v", err)
 		return nil, err
 	}
 

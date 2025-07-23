@@ -32,7 +32,7 @@ func (cq *CommandQueue) Add(command shared.AgentMessage) error {
 	cq.mu.Lock()
 	defer cq.mu.Unlock()
 
-	command.Timestamp = time.Now()
+	command.Timestamp = time.Now().Unix()
 	cq.queue = append(cq.queue, command)
 
 	return cq.save()

@@ -413,7 +413,9 @@ func DaemonConnection() {
 	}
 
 	// Encrypt and send the environment
-	if err := EncryptAndSendEnv(env, daemonKey, *daemonAddr); err != nil {
+	bytes, err := EncryptAndSendEnv(env, daemonKey, *daemonAddr)
+	fmt.Printf("The bytes are :%v\n", bytes)
+	if err != nil {
 		log.Fatalf("Failed to send environment: %v", err)
 	}
 

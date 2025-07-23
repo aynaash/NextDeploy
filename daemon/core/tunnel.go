@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"strconv"
@@ -103,4 +104,6 @@ func copyConn(dst, src net.Conn) {
 
 func readKeyFile(path string) []byte {
 	// Implement key file reading
+
+	return nil // Placeholder, replace with actual file reading logic
 }
