@@ -10,7 +10,6 @@ import (
 	"nextdeploy/shared/git"
 	"regexp"
 
-	"github.com/robertkrimen/otto"
 	"time"
 
 	"os"
@@ -232,12 +231,16 @@ func createBuildLock(metadata *NextCorePayload) error {
 	}
 
 	dirty := git.IsDirty()
+	// Write metadata to json file
+	fileName := ".nextdeploy/metadata.json"
+	marshalledData, err := json.MarshalIndent(metadata, "", "  ")
+	os.WriteFile(fileName, marshalledData, 0644)
 
 	buildLock := BuildLock{
 		GitCommit:   commitHash,
 		GitDirty:    dirty,
 		GeneratedAt: metadata.GeneratedAt,
-		Metadata:    "metadata.json",
+		Metadata:    fileName,
 	}
 
 	data, err := json.MarshalIndent(buildLock, "", "  ")
@@ -667,6 +670,8 @@ func ParseNextConfig(projectDir string) (*NextConfig, error) {
 	configPaths := []string{
 		filepath.Join(projectDir, "next.config.ts"),
 		filepath.Join(projectDir, "next.config.js"),
+		filepath.Join(projectDir, "next.config.mjs"),
+		filepath.Join(projectDir, "next.config.cjs"),
 	}
 
 	var configFile string
@@ -704,6 +709,81 @@ func ParseNextConfig(projectDir string) (*NextConfig, error) {
 
 	return nextConfig, nil
 }
+func extractNextConfig(jsContent string) (map[string]interface{}, error) {
+	// Step 1: Extract the nextConfig object from JS code
+	configObj, err := extractJSObject(jsContent, "nextConfig")
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 2: Convert to JSON (handling JS-specific syntax)
+	jsonStr := jsToJSON(configObj)
+
+	// Step 3: Parse into Go map
+	config := make(map[string]interface{})
+	err = json.Unmarshal([]byte(jsonStr), &config)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 4: Handle special cases (like functions)
+	handleSpecialCases(config, jsContent)
+
+	return config, nil
+}
+func extractJSObject(jsContent, objectName string) (string, error) {
+	// Simple regex approach - for production use a proper JS parser
+	pattern := regexp.MustCompile(`const\s+` + objectName + `\s*=\s*({[\s\S]*?})\s*;`)
+	matches := pattern.FindStringSubmatch(jsContent)
+	if len(matches) < 2 {
+		return "", fmt.Errorf("could not find %s object", objectName)
+	}
+	return matches[1], nil
+}
+
+func jsToJSON(js string) string {
+	// Convert JavaScript object to JSON format
+	// This is a simplified version - you'd need more robust handling
+
+	// Remove trailing commas
+	re := regexp.MustCompile(`,\s*([}\]])`)
+	js = re.ReplaceAllString(js, "$1")
+
+	// Convert single quotes to double quotes
+	js = strings.ReplaceAll(js, `'`, `"`)
+
+	// Remove JS comments
+	js = regexp.MustCompile(`/\*.*?\*/`).ReplaceAllString(js, "")
+	js = regexp.MustCompile(`//.*`).ReplaceAllString(js, "")
+
+	return js
+}
+func handleSpecialCases(config map[string]interface{}, jsContent string) {
+	// Handle webpack function
+	if webpackConfig, exists := config["webpack"]; exists {
+		if webpackStr, ok := webpackConfig.(string); ok {
+			// Extract function body
+			if strings.Contains(webpackStr, "function") || strings.Contains(webpackStr, "=>") {
+				config["webpack"] = map[string]interface{}{
+					"__type__": "function",
+					"body":     extractFunctionBody(webpackStr),
+				}
+			}
+		}
+	}
+
+	// Add any other special case handling here
+}
+func extractFunctionBody(funcStr string) string {
+	// Extract the body of a function
+	// This is simplified - would need better parsing for production
+	start := strings.Index(funcStr, "{")
+	end := strings.LastIndex(funcStr, "}")
+	if start == -1 || end == -1 {
+		return funcStr
+	}
+	return strings.TrimSpace(funcStr[start+1 : end])
+}
 
 // extractConfigObject extracts the configuration object from the config file
 func extractConfigObject(content string, ext string) (map[string]interface{}, error) {
@@ -712,40 +792,15 @@ func extractConfigObject(content string, ext string) (map[string]interface{}, er
 		// In a real implementation, you might want to use a TypeScript transpiler here
 		// For simplicity, we'll just try to extract the config object similarly to JS
 		content = transpileTypeScriptConfig(content)
+	} else {
+		// For JS files, we can directly parse the content
+		content = strings.TrimSpace(content)
 	}
-
+	// TODO: write logic to extrac config data in key value pattern
+	NextCoreLogger.Debug("Extracting config object from content: %s", content)
+	config := make(map[string]interface{})
+	// Use Otto to evaluate the JS content and extract the config object
 	// Create a new JavaScript VM
-	vm := otto.New()
-
-	// Prepare the content by wrapping it to capture the exported config
-	wrapped := fmt.Sprintf(`
-		var module = { exports: {} };
-		var process = { env: {} };
-		%s
-		JSON.stringify(module.exports);
-	`, content)
-
-	// Run the JavaScript code
-	value, err := vm.Run(wrapped)
-	if err != nil {
-		NextCoreLogger.Error("Failed to execute config file: %v", err)
-		return nil, fmt.Errorf("failed to execute config: %w", err)
-	}
-
-	// Get the stringified JSON result
-	jsonStr, err := value.ToString()
-	if err != nil {
-		NextCoreLogger.Error("Failed to stringify config: %v", err)
-		return nil, fmt.Errorf("failed to stringify config: %w", err)
-	}
-
-	// Unmarshal the JSON into a map
-	var config map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &config); err != nil {
-		NextCoreLogger.Error("Failed to parse config JSON: %v", err)
-		return nil, fmt.Errorf("failed to parse config JSON: %w", err)
-	}
-
 	return config, nil
 }
 

@@ -173,6 +173,8 @@ func main() {
 		cleanCmd()
 	case "status": // New status command
 		daemonStatusCmd()
+	case "purge":
+		purgeCmd()
 	default:
 		printUsage()
 		os.Exit(1)
@@ -468,6 +470,63 @@ func cleanCmd() {
 			log.Printf("✅ Removed %s", file)
 		}
 	}
+}
+
+// ---------------------- PURGE COMMAND ----------------------
+func purgeCmd() {
+	log.Println("💣 PURGING all NextDeploy artifacts...")
+
+	paths := []string{
+		"/usr/local/bin/nextdeploy",
+		"/usr/local/bin/nextdeployd",
+		"/usr/local/bin/ndctl",
+		filepath.Join(homeDir, ".nextdeploy"),
+		"/etc/systemd/system/nextdeploy.service",
+	}
+
+	sudo := ""
+	if os.Geteuid() != 0 {
+		sudo = "sudo "
+		log.Println("🔒 Using sudo for privileged operations")
+	}
+
+	for _, path := range paths {
+		cmdStr := fmt.Sprintf("%srm -rf %s", sudo, path)
+		if err := exec.Command("sh", "-c", cmdStr).Run(); err != nil {
+			log.Printf("⚠️ Failed to remove %s: %v", path, err)
+		} else {
+			log.Printf("✅ Removed %s", path)
+		}
+	}
+
+	log.Println("🔄 Reloading systemd daemon...")
+	if err := exec.Command("sh", "-c", sudo+"systemctl daemon-reload").Run(); err != nil {
+		log.Printf("⚠️ Failed to reload systemd: %v", err)
+	}
+
+	log.Println("🛑 Disabling nextdeploy service...")
+	exec.Command("sh", "-c", sudo+"systemctl disable nextdeploy.service").Run()
+	exec.Command("sh", "-c", sudo+"systemctl stop nextdeploy.service").Run()
+
+	// Clean up shell PATH additions
+	shellFiles := []string{".bashrc", ".zshrc"}
+	for _, f := range shellFiles {
+		shellPath := filepath.Join(homeDir, f)
+		if _, err := os.Stat(shellPath); err == nil {
+			data, _ := os.ReadFile(shellPath)
+			lines := strings.Split(string(data), "\n")
+			var cleaned []string
+			for _, line := range lines {
+				if !strings.Contains(line, "nextdeploy") {
+					cleaned = append(cleaned, line)
+				}
+			}
+			_ = os.WriteFile(shellPath, []byte(strings.Join(cleaned, "\n")), 0644)
+			log.Printf("✅ Cleaned PATH references in %s", shellPath)
+		}
+	}
+
+	log.Println("💀 NextDeploy fully purged from system.")
 }
 
 // ---------------------- HELPER FUNCTIONS ----------------------
