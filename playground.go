@@ -5,171 +5,180 @@
 package main
 
 import (
-	"context"
-	"flag"
-	"log/slog"
-	"net/http"
-	"nextdeploy/daemon/core"
-	"nextdeploy/shared"
-	"os"
-	"os/signal"
-	"path/filepath"
-	"syscall"
-	"time"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/robertkrimen/otto"
 )
 
-var (
-	version   = "1.0.0"
-	buildDate = ""
+func main() {
+	// Example TypeScript config
+	tsConfig := `
+		interface AppConfig {
+			port: number;
+			env: string;
+		}
 
-	config = struct {
-		host        string
-		port        string
-		keyDir      string
-		rotateFreq  time.Duration
-		debug       bool
-		logFormat   string
-		metricsPort string
-		daemonize   bool
-		pidFile     string
-		logFile     string
-	}{}
-)
+		export default {
+			port: 3000,
+			env: "development",
+			db: {
+				host: "localhost",
+				port: 27017
+			}
+		} as AppConfig;
+	`
 
-func startServer(server *http.Server, name string, logger *slog.Logger, errChan chan<- error) {
-	logger.Info("starting server", "name", name, "address", server.Addr)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Error("server error", "name", name, "error", err)
-		errChan <- err
+	// Example JavaScript config
+	jsConfig := `
+		module.exports = {
+			apiKey: 'abc123',
+			enabled: true,
+			maxConnections: 10
+		};
+	`
+
+	// Invalid config with simple key-value pairs
+	invalidConfig := `
+		This is not valid JavaScript
+		apiKey: '12345'
+		secret: 'shhh'
+		timeout: 5000
+		debug: true
+	`
+
+	fmt.Println("Extracting from TypeScript:")
+	tsResult, err := extractConfig(tsConfig, ".ts")
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+	} else {
+		printConfig(tsResult)
+	}
+
+	fmt.Println("\nExtracting from JavaScript:")
+	jsResult, err := extractConfig(jsConfig, ".js")
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+	} else {
+		printConfig(jsResult)
+	}
+
+	fmt.Println("\nExtracting from Invalid Config:")
+	invalidResult, err := extractConfig(invalidConfig, ".js")
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+	} else {
+		printConfig(invalidResult)
 	}
 }
 
-func main() {
-	flag.Parse()
+func extractConfig(content string, ext string) (map[string]interface{}, error) {
+	config := make(map[string]interface{})
 
-	// Initialize logging
-	logger, logFile := core.SetupLogger(config.daemonize, config.debug, config.logFormat, config.logFile)
-	defer logFile.Close()
-
-	if config.daemonize {
-		core.Daemonize(logger, config.pidFile)
+	// Handle TypeScript files
+	if ext == ".ts" {
+		content = transpileTypeScriptConfig(content)
+	} else {
+		content = strings.TrimSpace(content)
 	}
 
-	logger.Info("starting NextDeploy daemon",
-		"version", version,
-		"pid", os.Getpid(),
-		"config", config)
-
-	// Initialize components
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Setup secure key manager with automatic rotation
-	keyManager, err := core.NewSecureKeyManager(config.keyDir, config.rotateFreq)
-	if err != nil {
-		logger.Error("failed to initialize key manager", "error", err)
-		os.Exit(1)
-	}
-	defer func() {
-		keyManager.StopRotation()
-		if currentKey := keyManager.GetCurrentKey(); currentKey != nil {
-			shared.ZeroBytes(currentKey.ECDHPrivate.Bytes())
-			shared.ZeroBytes(currentKey.SignPrivate)
-		}
-	}()
-
-	// Run cryptographic health checks
-	if err := shared.RunCryptoHealthChecks(); err != nil {
-		logger.Error("crypto health checks failed", "error", err)
-		os.Exit(1)
+	// Try JavaScript evaluation first
+	if err := extractWithOtto(content, config); err == nil && len(config) > 0 {
+		return config, nil
 	}
 
-	// Start key rotation
-	go keyManager.StartRotation()
+	// Fallback to regex parsing
+	extractWithRegex(content, config)
 
-	// Setup audit logging
-	auditLog, err := core.NewAuditLog(filepath.Join(config.keyDir, "audit.log"))
-	if err != nil {
-		logger.Error("failed to initialize audit log", "error", err)
-		os.Exit(1)
+	return config, nil
+}
+
+func extractWithOtto(content string, config map[string]interface{}) error {
+	vm := otto.New()
+	if _, err := vm.Run(content); err != nil {
+		return err
 	}
-	auditLog.AddEntry(shared.AuditLogEntry{
-		Timestamp: time.Now(),
-		Action:    "daemon_start",
-		Message:   "NextDeploy daemon initialized",
-	})
 
-	// Setup HTTP servers
-	mainServer, metricsServer := core.SetupServers(logger, keyManager, config.port, config.host, config.metricsPort)
+	// Try different export patterns
+	exportPatterns := []string{
+		"module.exports",
+		"exports",
+		"(typeof exports === 'object' && typeof module === 'object') ? module.exports : exports.default || exports",
+		"(function() { try { return config || settings || cfg || configuration; } catch(e) { return undefined; } })()",
+	}
 
-	// Initialize WebSocket server with dedicated auth key
-	agentID := os.Getenv("NEXTDEPLOY_AGENT_ID")
-	wsServer := core.NewWSServer(
-		keyManager.GetWSAuthKey(),
-		agentID,
-		keyManager, // Pass key manager for key exchange
-		logger,
-		auditLog,
-	)
-
-	// Register WebSocket endpoint
-	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		auditLog.AddEntry(shared.AuditLogEntry{
-			Timestamp: time.Now(),
-			Action:    "ws_connection_attempt",
-			Client:    r.RemoteAddr,
-		})
-		wsServer.HandleConnection(w, r)
-	})
-
-	// Start servers
-	errChan := make(chan error, 2)
-	go startServer(mainServer, "main", logger, errChan)
-	go startServer(metricsServer, "metrics", logger, errChan)
-
-	// Set health status
-	core.SetGlobalStatus("healthy")
-	core.SetComponentStatus("key_manager", "healthy")
-	core.SetComponentStatus("websocket", "healthy")
-
-	// Setup graceful shutdown
-	shutdownChan := make(chan os.Signal, 1)
-	signal.Notify(shutdownChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-
-	for {
-		select {
-		case sig := <-shutdownChan:
-			logger.Info("received signal", "signal", sig)
-			switch sig {
-			case syscall.SIGHUP:
-				logger.Info("reloading configuration")
-				// TODO: Implement config reload
-				auditLog.AddEntry(shared.AuditLogEntry{
-					Timestamp: time.Now(),
-					Action:    "config_reload",
-					Message:   "Received SIGHUP",
-				})
-			default:
-				auditLog.AddEntry(shared.AuditLogEntry{
-					Timestamp: time.Now(),
-					Action:    "shutdown",
-					Message:   "Received termination signal",
-				})
-				core.SetGlobalStatus("shutting_down")
-				core.GracefulShutdown(ctx, mainServer, metricsServer, logger, config.daemonize, config.pidFile)
-				return
+	for _, pattern := range exportPatterns {
+		if value, err := vm.Run(pattern); err == nil && !value.IsUndefined() {
+			if exported, err := value.Export(); err == nil {
+				if exportedMap, ok := exported.(map[string]interface{}); ok {
+					for k, v := range exportedMap {
+						config[k] = v
+					}
+					return nil
+				}
 			}
-
-		case err := <-errChan:
-			logger.Error("server error", "error", err)
-			auditLog.AddEntry(shared.AuditLogEntry{
-				Timestamp: time.Now(),
-				Action:    "server_error",
-				Message:   err.Error(),
-			})
-			core.SetGlobalStatus("unhealthy")
-			core.GracefulShutdown(ctx, mainServer, metricsServer, logger, config.daemonize, config.pidFile)
-			return
 		}
+	}
+
+	return fmt.Errorf("no export object found")
+}
+
+func transpileTypeScriptConfig(content string) string {
+	// Remove TypeScript type annotations
+	re := regexp.MustCompile(`:\s*\w+\s*([,;}])`)
+	content = re.ReplaceAllString(content, "$1")
+
+	// Remove interface/type declarations
+	re = regexp.MustCompile(`(?m)^\s*(export\s+)?(interface|type)\s+\w+\s*({[^}]*}|=.*)?\s*$`)
+	content = re.ReplaceAllString(content, "")
+
+	// Convert export default to module.exports
+	re = regexp.MustCompile(`export\s+default`)
+	content = re.ReplaceAllString(content, "module.exports =")
+
+	return strings.TrimSpace(content)
+}
+
+func extractWithRegex(content string, config map[string]interface{}) {
+	// Match key: value pairs
+	re := regexp.MustCompile(`(?m)^\s*(?:export\s+|const\s+|let\s+|var\s+)?(\w+)\s*[:=]\s*([^;\n]+);?$`)
+	matches := re.FindAllStringSubmatch(content, -1)
+
+	for _, match := range matches {
+		if len(match) >= 3 {
+			key := strings.TrimSpace(match[1])
+			value := strings.TrimSpace(match[2])
+
+			// Remove surrounding quotes
+			value = strings.Trim(value, `'"`)
+
+			// Type detection
+			switch {
+			case value == "true":
+				config[key] = true
+			case value == "false":
+				config[key] = false
+			case strings.HasPrefix(value, `'`) || strings.HasPrefix(value, `"`):
+				config[key] = strings.Trim(value, `'"`)
+			default:
+				if num, err := strconv.ParseFloat(value, 64); err == nil {
+					if strings.Contains(value, ".") {
+						config[key] = num
+					} else {
+						config[key] = int(num)
+					}
+				} else {
+					config[key] = value
+				}
+			}
+		}
+	}
+}
+
+func printConfig(config map[string]interface{}) {
+	for k, v := range config {
+		fmt.Printf("  %s: %v (%T)\n", k, v, v)
 	}
 }

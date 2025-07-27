@@ -2,11 +2,15 @@ package nextcore
 
 import (
 	"encoding/json"
+	"strconv"
 	"errors"
 	"fmt"
+	"github.com/robertkrimen/otto"
 	"io"
+	"maps"
 	"nextdeploy/shared"
 	"nextdeploy/shared/config"
+
 	"nextdeploy/shared/git"
 	"regexp"
 
@@ -286,7 +290,7 @@ func ValidateBuildState() error {
 		NextCoreLogger.Error("Failed to get current git commit: %v", err)
 		return fmt.Errorf("failed to get current git commit: %w", err)
 	}
-
+	//TODO: use this data to avoid unnecessary builds
 	if currentCommit != lock.GitCommit {
 		NextCoreLogger.Error("Git commit mismatch: expected %s, got %s", lock.GitCommit, currentCommit)
 		return fmt.Errorf("git commit mismatch: expected %s, got %s", lock.GitCommit, currentCommit)
@@ -788,33 +792,137 @@ func extractFunctionBody(funcStr string) string {
 // extractConfigObject extracts the configuration object from the config file
 func extractConfigObject(content string, ext string) (map[string]interface{}, error) {
 	// For TypeScript files, we need to transpile first
-	if ext == ".ts" {
-		// In a real implementation, you might want to use a TypeScript transpiler here
-		// For simplicity, we'll just try to extract the config object similarly to JS
-		content = transpileTypeScriptConfig(content)
-	} else {
-		// For JS files, we can directly parse the content
-		content = strings.TrimSpace(content)
-	}
 	// TODO: write logic to extrac config data in key value pattern
 	NextCoreLogger.Debug("Extracting config object from content: %s", content)
 	config := make(map[string]interface{})
 	// Use Otto to evaluate the JS content and extract the config object
+	if ext == "ts" {
+		config, err := extractConfig(content, ext)
+		if err != nil {
+			NextCoreLogger.Error("Failed to extract config from TypeScript: %v", err)
+			return nil, fmt.Errorf("failed to extract config: %w", err)
+		}
+		NextCoreLogger.Debug("Extracted config from TypeScript: %v", config)
+	}
+	// If it's a JavaScript file, we can directly evaluate it
+	if ext == "js" || ext == "mjs" || ext == "cjs" {
+		config, err := extractConfig(content, ext)
+		if err != nil {
+			NextCoreLogger.Error("Failed to extract config from JavaScript: %v", err)
+			return nil, fmt.Errorf("failed to extract config: %w", err)
+		}
+		NextCoreLogger.Debug("Extracted config from JavaScript: %v", config)
+	}
+
 	// Create a new JavaScript VM
 	return config, nil
+}
+func extractConfig(content string, ext string) (map[string]interface{}, error) {
+	config := make(map[string]interface{})
+
+	// handle ts files
+	if ext == ".ts" {
+		content = transpileTypeScriptConfig(content)
+	} else {
+		content = strings.TrimSpace(content)
+	}
+
+	// try js evaluation firstt
+	if err := extractWithOtto(content, &config); err != nil {
+		NextCoreLogger.Error("Failed to extract config with Otto: %v", err)
+		return config, fmt.Errorf("failed to extract config: %w", err)
+	}
+	return config, nil
+}
+
+func extractWithOtto(content string, config *map[string]interface{}) error {
+	vm := otto.New()
+	if _, err := vm.Run(content); err != nil {
+		NextCoreLogger.Error("Failed to run JS content in Otto: %v", err)
+		return fmt.Errorf("failed to run JS content: %w", err)
+	}
+	exportPatterns := []string{
+		"module.exports",
+		"exports",
+		"(typeof exports === 'object' && typeof module === 'object') ? module.exports : exports.default || exports",
+		"(function() { try { return config || settings || cfg || configuration; } catch(e) { return undefined; } })()",
+	}
+	for _, pattern := range exportPatterns {
+		if value, err := vm.Run(pattern); err == nil && !value.IsUndefined() {
+			if exported, err := value.Export(); err == nil {
+				if exportedMap, ok := exported.(map[string]interface{}); ok {
+					for k, v := range exportedMap {
+						maps.Copy(*config, map[string]interface{}{
+							k: v,
+						},
+						)
+						return nil
+					}
+				}
+			}
+		}
+
+		return fmt.Errorf("no valid export found in JS content")
+	}
+	return fmt.Errorf("failed to extract config object from JS content")
 }
 
 // transpileTypeScriptConfig does a simple TS-to-JS conversion for config files
 func transpileTypeScriptConfig(content string) string {
-	// Remove TypeScript type annotations (simplistic approach)
-	re := regexp.MustCompile(`:\s*[^{};]+([,}])`)
+	// Remove TypeScript type annotations
+	re := regexp.MustCompile(`:\s*\w+\s*([,;}])`)
 	content = re.ReplaceAllString(content, "$1")
 
-	// Remove import/export types
-	content = strings.ReplaceAll(content, "import type ", "import ")
-	content = strings.ReplaceAll(content, "export type ", "export ")
+	// Remove interface/type declarations
+	re = regexp.MustCompile(`(?m)^\s*(export\s+)?(interface|type)\s+\w+\s*({[^}]*}|=.*)?\s*$`)
+	content = re.ReplaceAllString(content, "")
 
-	return content
+	// Convert export default to module.exports
+	re = regexp.MustCompile(`export\s+default`)
+	content = re.ReplaceAllString(content, "module.exports =")
+
+	return strings.TrimSpace(content)
+}
+func extractWithRegex(content string, config map[string]interface{}) {
+	// Match key: value pairs
+	re := regexp.MustCompile(`(?m)^\s*(?:export\s+|const\s+|let\s+|var\s+)?(\w+)\s*[:=]\s*([^;\n]+);?$`)
+	matches := re.FindAllStringSubmatch(content, -1)
+
+	for _, match := range matches {
+		if len(match) >= 3 {
+			key := strings.TrimSpace(match[1])
+			value := strings.TrimSpace(match[2])
+
+			// Remove surrounding quotes
+			value = strings.Trim(value, `'"`)
+
+			// Type detection
+			switch {
+			case value == "true":
+				config[key] = true
+			case value == "false":
+				config[key] = false
+			case strings.HasPrefix(value, `'`) || strings.HasPrefix(value, `"`):
+				config[key] = strings.Trim(value, `'"`)
+			default:
+				if num, err := strconv.ParseFloat(value, 64); err == nil {
+					if strings.Contains(value, ".") {
+						config[key] = num
+					} else {
+						config[key] = int(num)
+					}
+				} else {
+					config[key] = value
+				}
+			}
+		}
+	}
+}
+
+func printConfig(config map[string]interface{}) {
+	for k, v := range config {
+		fmt.Printf("  %s: %v (%T)\n", k, v, v)
+	}
 }
 
 // parseConfigObject converts the raw config map to our structured NextConfig
