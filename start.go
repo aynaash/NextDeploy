@@ -1,37 +1,38 @@
-/*
-NextDeploy Master Control Script
-
-This script provides unified control for:
-1. Building components (daemon and CLI)
-2. Running the daemon with proper configuration
-3. Development environment setup
-4. Production deployment
-
-USAGE:
-
-	Build: go run start.go build [flags]
-	Run:   go run start.go run [flags]
-	Dev:   go run start.go dev
-	Clean: go run start.go clean
-
-BUILD FLAGS:
-
-	-target  string  Build target: 'daemon', 'cli', or 'all' (default "all")
-	-output  string  Output directory (default "./bin")
-	-version string  Override version number
-
-RUN FLAGS:
-
-	-config string   Config file path
-	-port   string   Server port (default "8080")
-	-host   string   Server host (default "0.0.0.0")
-	-debug           Enable debug mode
-
-ENVIRONMENT VARIABLES:
-
-	NEXTDEPLOY_VERSION  Set build version
-	BUILD_STATIC        Force static linking ("true" or "false")
-*/
+// /*
+// NextDeploy Master Control Script
+//
+// This script provides unified control for:
+// 1. Building components (daemon and CLI)
+// 2. Running the daemon with proper configuration
+// 3. Development environment setup
+// 4. Production deployment
+//
+// USAGE:
+//
+//	Build: go run start.go build [flags]
+//	Run:   go run start.go run [flags]
+//	Dev:   go run start.go dev
+//	Clean: go run start.go clean
+//
+// BUILD FLAGS:
+//
+//	-target  string  Build target: 'daemon', 'cli', or 'all' (default "all")
+//	-output  string  Output directory (default "./bin")
+//	-version string  Override version number
+//
+// RUN FLAGS:
+//
+//	-config string   Config file path
+//	-port   string   Server port (default "8080")
+//	-host   string   Server host (default "0.0.0.0")
+//	-debug           Enable debug mode
+//
+// ENVIRONMENT VARIABLES:
+//
+//	NEXTDEPLOY_VERSION  Set build version
+//	BUILD_STATIC        Force static linking ("true" or "false")
+//
+// */
 package main
 
 import (

@@ -108,37 +108,147 @@ type MiddlewareCondition struct {
 	Value string `json:"value,omitempty"` // Condition value
 }
 
-// NextConfig represents the structure of Next.js configuration
+// NextConfig represents the complete Next.js configuration
 type NextConfig struct {
-	BasePath            string                 `json:"basePath,omitempty"`
-	Output              string                 `json:"output,omitempty"` // "standalone", "export", etc.
-	Images              ImageConfig            `json:"images,omitempty"`
-	ReactStrictMode     bool                   `json:"reactStrictMode,omitempty"`
-	PoweredByHeader     bool                   `json:"poweredByHeader,omitempty"`
-	TrailingSlash       bool                   `json:"trailingSlash,omitempty"`
-	Compiler            map[string]interface{} `json:"compiler,omitempty"`
-	Experimental        map[string]interface{} `json:"experimental,omitempty"`
-	Webpack             interface{}            `json:"webpack,omitempty"`
-	Headers             []interface{}          `json:"headers,omitempty"`
-	Redirects           []interface{}          `json:"redirects,omitempty"`
-	Rewrites            []interface{}          `json:"rewrites,omitempty"`
+	// Standard Configuration
+	BasePath        string                 `json:"basePath,omitempty"`
+	Output          string                 `json:"output,omitempty"` // "standalone", "export", etc.
+	Images          *ImageConfig           `json:"images,omitempty"`
+	ReactStrictMode bool                   `json:"reactStrictMode,omitempty"`
+	PoweredByHeader bool                   `json:"poweredByHeader,omitempty"`
+	TrailingSlash   bool                   `json:"trailingSlash,omitempty"`
+	PageExtensions  []string               `json:"pageExtensions,omitempty"`
+	AssetPrefix     string                 `json:"assetPrefix,omitempty"`
+	DistDir         string                 `json:"distDir,omitempty"`
+	CleanDistDir    bool                   `json:"cleanDistDir,omitempty"`
+	GenerateBuildId interface{}            `json:"generateBuildId,omitempty"` // func or string
+	OnDemandEntries map[string]interface{} `json:"onDemandEntries,omitempty"`
+	CompileOptions  map[string]interface{} `json:"compileOptions,omitempty"`
+
+	// Routing
+	Headers                    []interface{} `json:"headers,omitempty"`
+	Redirects                  []interface{} `json:"redirects,omitempty"`
+	Rewrites                   []interface{} `json:"rewrites,omitempty"`
+	SkipMiddlewareUrlNormalize bool          `json:"skipMiddlewareUrlNormalize,omitempty"`
+	SkipTrailingSlashRedirect  bool          `json:"skipTrailingSlashRedirect,omitempty"`
+
+	// Runtime
 	Env                 map[string]string      `json:"env,omitempty"`
 	PublicRuntimeConfig map[string]interface{} `json:"publicRuntimeConfig,omitempty"`
 	ServerRuntimeConfig map[string]interface{} `json:"serverRuntimeConfig,omitempty"`
+
+	// Compiler
+	Compiler *CompilerConfig `json:"compiler,omitempty"`
+
+	// Webpack
+	Webpack  interface{} `json:"webpack,omitempty"`
+	Webpack5 bool        `json:"webpack5,omitempty"`
+
+	// Experimental Features
+	Experimental *ExperimentalConfig `json:"experimental,omitempty"`
+
+	// Edge
+	EdgeRegions []string `json:"edgeRegions,omitempty"`
+	EdgeRuntime string   `json:"edgeRuntime,omitempty"` // "experimental-edge"
+
+	// i18n
+	I18n *I18nConfig `json:"i18n,omitempty"`
+
+	// Analytics
+	AnalyticsId string `json:"analyticsId,omitempty"`
+
+	// MDX
+	MdxRs bool `json:"mdxRs,omitempty"`
 }
 
-// ImageConfig represents the images configuration from Next.js
+type CompilerConfig struct {
+	Emotion               interface{} `json:"emotion,omitempty"`
+	ReactRemoveProperties interface{} `json:"reactRemoveProperties,omitempty"`
+	RemoveConsole         interface{} `json:"removeConsole,omitempty"`
+	StyledComponents      interface{} `json:"styledComponents,omitempty"`
+	Relay                 interface{} `json:"relay,omitempty"`
+}
+
+type ExperimentalConfig struct {
+	// App Router
+	AppDir                       bool   `json:"appDir,omitempty"`
+	CaseSensitiveRoutes          bool   `json:"caseSensitiveRoutes,omitempty"`
+	UseDeploymentId              bool   `json:"useDeploymentId,omitempty"`
+	UseDeploymentIdServerActions bool   `json:"useDeploymentIdServerActions,omitempty"`
+	DeploymentId                 string `json:"deploymentId,omitempty"`
+
+	// Server Components
+	ServerComponents           bool `json:"serverComponents,omitempty"`
+	ServerActions              bool `json:"serverActions,omitempty"`
+	ServerActionsBodySizeLimit int  `json:"serverActionsBodySizeLimit,omitempty"`
+
+	// Optimizations
+	OptimizeCss                   bool    `json:"optimizeCss,omitempty"`
+	OptimisticClientCache         bool    `json:"optimisticClientCache,omitempty"`
+	ClientRouterFilter            bool    `json:"clientRouterFilter,omitempty"`
+	ClientRouterFilterRedirects   bool    `json:"clientRouterFilterRedirects,omitempty"`
+	ClientRouterFilterAllowedRate float64 `json:"clientRouterFilterAllowedRate,omitempty"`
+
+	// Build System
+	ExternalDir                       string        `json:"externalDir,omitempty"`
+	ExternalMiddlewareRewritesResolve bool          `json:"externalMiddlewareRewritesResolve,omitempty"`
+	FallbackNodePolyfills             bool          `json:"fallbackNodePolyfills,omitempty"`
+	ForceSwcTransforms                bool          `json:"forceSwcTransforms,omitempty"`
+	FullySpecified                    bool          `json:"fullySpecified,omitempty"`
+	SwcFileReading                    bool          `json:"swcFileReading,omitempty"`
+	SwcMinify                         bool          `json:"swcMinify,omitempty"`
+	SwcPlugins                        []interface{} `json:"swcPlugins,omitempty"`
+	SwcTraceProfiling                 bool          `json:"swcTraceProfiling,omitempty"`
+
+	// Turbopack
+	Turbo      map[string]interface{} `json:"turbo,omitempty"`
+	Turbotrace map[string]interface{} `json:"turbotrace,omitempty"`
+
+	// Other
+	ScrollRestoration       bool     `json:"scrollRestoration,omitempty"`
+	NewNextLinkBehavior     bool     `json:"newNextLinkBehavior,omitempty"`
+	ManualClientBasePath    bool     `json:"manualClientBasePath,omitempty"`
+	LegacyBrowsers          bool     `json:"legacyBrowsers,omitempty"`
+	DisableOptimizedLoading bool     `json:"disableOptimizedLoading,omitempty"`
+	GzipSize                bool     `json:"gzipSize,omitempty"`
+	SharedPool              bool     `json:"sharedPool,omitempty"`
+	WebVitalsAttribution    []string `json:"webVitalsAttribution,omitempty"`
+	InstrumentationHook     string   `json:"instrumentationHook,omitempty"`
+}
+
 type ImageConfig struct {
-	Domains         []string `json:"domains,omitempty"`
-	Formats         []string `json:"formats,omitempty"`
-	DeviceSizes     []int    `json:"deviceSizes,omitempty"`
-	ImageSizes      []int    `json:"imageSizes,omitempty"`
-	Loader          string   `json:"loader,omitempty"`
-	Path            string   `json:"path,omitempty"`
-	MinimumCacheTTL int      `json:"minimumCacheTTL,omitempty"`
-	Unoptimized     bool     `json:"unoptimized,omitempty"`
+	Domains               []string             `json:"domains,omitempty"`
+	Formats               []string             `json:"formats,omitempty"`
+	DeviceSizes           []int                `json:"deviceSizes,omitempty"`
+	ImageSizes            []int                `json:"imageSizes,omitempty"`
+	Path                  string               `json:"path,omitempty"`
+	Loader                string               `json:"loader,omitempty"`
+	LoaderFile            string               `json:"loaderFile,omitempty"`
+	MinimumCacheTTL       int                  `json:"minimumCacheTTL,omitempty"`
+	Unoptimized           bool                 `json:"unoptimized,omitempty"`
+	ContentSecurityPolicy string               `json:"contentSecurityPolicy,omitempty"`
+	RemotePatterns        []ImageRemotePattern `json:"remotePatterns,omitempty"`
 }
 
+type ImageRemotePattern struct {
+	Protocol string `json:"protocol,omitempty"`
+	Hostname string `json:"hostname,omitempty"`
+	Port     string `json:"port,omitempty"`
+	Pathname string `json:"pathname,omitempty"`
+}
+
+type I18nConfig struct {
+	Locales         []string `json:"locales"`
+	DefaultLocale   string   `json:"defaultLocale"`
+	Domains         []Domain `json:"domains,omitempty"`
+	LocaleDetection bool     `json:"localeDetection,omitempty"`
+}
+
+type Domain struct {
+	Domain        string   `json:"domain"`
+	Locales       []string `json:"locales,omitempty"`
+	DefaultLocale string   `json:"defaultLocale,omitempty"`
+}
 type ImageAsset struct {
 	Path           string `json:"path"`             // Relative path to the image
 	AbsolutePath   string `json:"absolute_path"`    // Absolute filesystem path
