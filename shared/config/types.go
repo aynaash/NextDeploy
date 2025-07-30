@@ -2,8 +2,9 @@ package config
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
+
+	"gopkg.in/yaml.v3"
 )
 
 // NextDeployConfig represents the complete deployment configuration
@@ -86,7 +87,6 @@ type DockerConfig struct {
 	AlwaysPull     bool        `yaml:"alwaysPull,omitempty"`
 	Strategy       string      `yaml:"strategy,omitempty"`
 	AutoPush       bool        `yaml:"autoPush,omitempty"`
-	BuildArgs      []string    `yaml:"buildArgs,omitempty"`
 	Platform       string      `yaml:"platform,omitempty"`
 	NoCache        bool        `yaml:"noCache,omitempty"`
 	BuildContext   string      `yaml:"buildContext,omitempty"`

@@ -17,7 +17,6 @@ type NextCorePayload struct {
 	Domain            string                   `json:"domain"`
 	Middleware        *MiddlewareConfig        `json:"middleware"`
 	StaticAssets      *StaticAssets            `json:"static_assets"`
-	NextConfig        *NextConfig              `json:"next_config,omitempty"`
 	GitCommit         string                   `json:"git_commit,omitempty"`
 	GitDirty          bool                     `json:"git_dirty,omitempty"`
 	GeneratedAt       string                   `json:"generated_at,omitempty"`
@@ -27,6 +26,7 @@ type NextCorePayload struct {
 	Config            *config.NextDeployConfig `json:"config,omitempty"`
 	ImageAssets       ImageAssets              `json:"image_assets"` // Detected image assets
 	RouteInfo         RouteInfo                `json:"route_info"`   // Information about routes
+	Output            string                   `json:"output"`       // "standalone", "export", etc.
 	NextBuild         NextBuild                `json:"next_build"`   // Full Next.js build structure
 
 }

@@ -27,7 +27,7 @@ var (
 )
 
 // TODO: add temporal workflow context for metadata ingeestion and usage pipelines
-func GenerateMetadata() error {
+func GenerateMetadata() (metadata NextCorePayload, err error) {
 	// This function will generate metadata for the Next.js application
 	// and return a NextCorePayload with the necessary fields filled.
 	NextCoreLogger.Info("Generating metadata for Next.js application...")
@@ -35,7 +35,7 @@ func GenerateMetadata() error {
 	cfg, err := config.Load()
 	if err != nil {
 		NextCoreLogger.Error("Failed to load configuration: %v", err)
-		return err
+		return NextCorePayload{}, err
 	}
 
 	AppName := cfg.App.Name
@@ -44,7 +44,7 @@ func GenerateMetadata() error {
 	NextJsVersion, err := GetNextJsVersion("package.json")
 	if err != nil {
 		NextCoreLogger.Error("Failed to get Next.js version: %v", err)
-		return err
+		return NextCorePayload{}, err
 	}
 	NextCoreLogger.Info("Next.js version: %s", NextJsVersion)
 	// get the build meta data
@@ -52,19 +52,18 @@ func GenerateMetadata() error {
 	buildMeta, err := CollectBuildMetadata()
 	if err != nil {
 		NextCoreLogger.Error("Failed to collect build metadata: %v", err)
-		return err
+		return NextCorePayload{}, err
 	}
-	NextCoreLogger.Debug("The build metadata looks like this:%v", buildMeta)
 	// add config data to the metadata also
 	config, err := config.Load()
 	if err != nil {
 		NextCoreLogger.Error("Failed to load configuration: %v", err)
-		return err
+		return NextCorePayload{}, err
 	}
 	// static_routes := []string{}
 	routeInfo, err := getRoutesFromManifests(buildMeta)
 	if err != nil {
-		return err
+		return NextCorePayload{}, err
 	}
 	cwd, err := os.Getwd()
 	packageManager, err := DetectPackageManager(cwd)
@@ -73,47 +72,38 @@ func GenerateMetadata() error {
 	startCommand, err := startCommand(packageManager.String())
 	if err != nil {
 		NextCoreLogger.Error("Failed to get start command: %v", err)
-		return err
+		return NextCorePayload{}, err
 	}
 	imagesAssets, err := detectImageAssets(buildMeta, cwd)
 	var HasImageAssets bool
 	if err != nil {
 		NextCoreLogger.Error("Failed to detect image assets: %v", err)
-		return err
+		return NextCorePayload{}, err
 	}
 	if imagesAssets == nil {
 		NextCoreLogger.Info("No image assets found in the Next.js build")
 	} else {
 		HasImageAssets = true
-		NextCoreLogger.Debug("Image assets detected: %v", imagesAssets)
 	}
-
-	nextconfig, err := ParseNextConfig(cwd)
-	if err != nil {
-		NextCoreLogger.Error("failed to get parse nextconfig ")
-		return err
-	}
-
-	// 3. Use the parsed configuration
 
 	domainName := config.App.Domain
 	middlewareConfig, err := ParseMiddleware(cwd)
 
 	if err != nil {
 		NextCoreLogger.Error("Failed to parse middleware configuration: %v", err)
-		return err
+		return NextCorePayload{}, err
 	}
 
 	StaticAssets, err := ParseStaticAssets(cwd)
 	if err != nil {
 		NextCoreLogger.Error("Failed to parse static assets: %v", err)
-		return err
+		return NextCorePayload{}, err
 	}
 
 	gitCommt, err := git.GetCommitHash()
 	if err != nil {
 		NextCoreLogger.Error("Failed to get git commit hash: %v", err)
-		return err
+		return NextCorePayload{}, err
 	} else {
 		NextCoreLogger.Debug("Git commit hash: %s", gitCommt)
 	}
@@ -125,11 +115,11 @@ func GenerateMetadata() error {
 	// 4. Copy static assets
 	if err := copyStaticAssets(); err != nil {
 		NextCoreLogger.Error("Failed to copy static assets: %v", err)
-		return fmt.Errorf("failed to copy static assets: %w", err)
+		return NextCorePayload{}, fmt.Errorf("failed to copy static assets: %w", err)
 	}
 
 	// 4. Track git state
-	metadata := NextCorePayload{
+	metadata = NextCorePayload{
 		AppName:           AppName,
 		NextVersion:       NextJsVersion,
 		NextBuildMetadata: *buildMeta,
@@ -137,7 +127,6 @@ func GenerateMetadata() error {
 		BuildCommand:      buildCommand.String(),
 		StartCommand:      startCommand,
 		HasImageAssets:    HasImageAssets,
-		NextConfig:        nextconfig,
 		CDNEnabled:        false,
 		Domain:            domainName,
 		RouteInfo:         *routeInfo,
@@ -153,10 +142,10 @@ func GenerateMetadata() error {
 
 	if err := createBuildLock(&metadata); err != nil {
 		NextCoreLogger.Error("Failed to create build lock: %v", err)
-		return fmt.Errorf("failed to create build lock: %w", err)
+		return NextCorePayload{}, fmt.Errorf("failed to create build lock: %w", err)
 	}
 
-	return nil
+	return metadata, nil
 }
 
 func copyStaticAssets() error {

@@ -53,8 +53,6 @@ Examples:
   nextdeploy build
 
   # Build for production (uses different defaults)
-  NEXTDEPLOY_ENV=production nextdeploy build
-
 `,
 	PreRunE: checkBuildConditionsMet,
 	RunE:    buildCmdFunction,
@@ -130,10 +128,15 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 	if env == "" {
 		env = "development"
 	}
-	var builArgs []string
-	for k, v := range cfg.Docker.BuildArgs {
-		builArgs = append(builArgs, fmt.Sprintf("--build-arg=%v=%s", k, v))
-		buildlogger.Debug("Build args look like this %v", builArgs)
+	var buildArgs map[string]string
+	buildArgs = make(map[string]string)
+	for k, v := range dm.GetBuildArgs() {
+		// log out the build args
+		buildlogger.Info("Build arg: %s=%s\n", k, v)
+		// Skip empty values
+		if v != "" {
+			buildArgs[k] = v
+		}
 	}
 	tag, _ := git.GetCommitHash()
 	//Validate the tag
@@ -150,7 +153,7 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 		Pull:             cfg.Docker.AlwaysPull || env == "production",
 		Target:           cfg.Docker.Target,
 		Platform:         cfg.Docker.Platform,
-		BuildArgs:        cfg.Docker.BuildArgs,
+		BuildArgs:        buildArgs,
 		ProvisionEcrUser: ProvisionEcrUser,
 		Fresh:            fresh,
 	}

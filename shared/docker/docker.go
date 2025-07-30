@@ -67,10 +67,38 @@ type BuildOptions struct {
 	NoCache          bool
 	Pull             bool
 	Target           string
-	BuildArgs        []string
-	Platform         string // Added platform support
-	ProvisionEcrUser bool   // Flag to provision ECR user
-	Fresh            bool   // Flag to indicate fresh build
+	Platform         string            // Added platform support
+	ProvisionEcrUser bool              // Flag to provision ECR user
+	Fresh            bool              // Flag to indicate fresh build
+	AddHost          []string          `json:"add-host"`        // Custom host-to-IP mappings
+	Allow            []string          `json:"allow"`           // Extra privileged entitlements
+	Annotations      []string          `json:"annotation"`      // Image annotations
+	Attestations     []string          `json:"attest"`          // Attestation parameters
+	BuildArgs        map[string]string `json:"build-arg"`       // Build-time variables
+	BuildContexts    map[string]string `json:"build-context"`   // Additional build contexts
+	Builder          string            `json:"builder"`         // Builder instance override
+	CacheFrom        []string          `json:"cache-from"`      // External cache sources
+	CacheTo          []string          `json:"cache-to"`        // Cache export destinations
+	CgroupParent     string            `json:"cgroup-parent"`   // Parent cgroup for RUN
+	Dockerfile       string            `json:"file"`            // Dockerfile name/path
+	IIDFile          string            `json:"iidfile"`         // Image ID output file
+	Labels           map[string]string `json:"label"`           // Image metadata
+	Load             bool              `json:"load"`            // Output to docker
+	MetadataFile     string            `json:"metadata-file"`   // Build metadata output
+	Network          string            `json:"network"`         // Networking mode
+	NoCacheFilter    []string          `json:"no-cache-filter"` // Stages to exclude from cache
+	Outputs          []string          `json:"output"`          // Output destinations
+	Platforms        []string          `json:"platform"`        // Target platforms
+	Progress         string            `json:"progress"`        // Progress output type
+	Provenance       string            `json:"provenance"`      // Provenance attestation
+	Push             bool              `json:"push"`            // Push to registry
+	Quiet            bool              `json:"quiet"`           // Suppress output
+	SBOM             string            `json:"sbom"`            // SBOM attestation
+	Secrets          []string          `json:"secret"`          // Build secrets
+	ShmSize          string            `json:"shm-size"`        // /dev/shm size
+	SSH              []string          `json:"ssh"`             // SSH agent/keys
+	Tags             []string          `json:"tag"`             // Image name/tags
+	Ulimits          []string          `json:"ulimit"`          // Ulimit options
 }
 
 func NewDockerClient(logger *shared.Logger) (*DockerManager, error) {
@@ -92,11 +120,14 @@ func NewDockerClient(logger *shared.Logger) (*DockerManager, error) {
 
 func (dm *DockerManager) BuildImage(ctx context.Context, opts BuildOptions) error {
 	// generate and validate metadata first
-	if err := nextcore.GenerateMetadata(); err != nil {
+	metadata, err := nextcore.GenerateMetadata()
+	if err != nil {
+		dlog.Error("Metadata generation failed: %v", err)
 		return fmt.Errorf("metadata generation  failed:%w", err)
 	}
 	// validate
 	if err := nextcore.ValidateBuildState(); err != nil {
+		dlog.Error("Failed to validate build state: %v", err)
 		return fmt.Errorf("failed to validate build state: %w", err)
 	}
 	// create build context
@@ -118,13 +149,10 @@ func (dm *DockerManager) BuildImage(ctx context.Context, opts BuildOptions) erro
 		Platform:    opts.Platform,
 		Target:      opts.Target,
 	}
-
 	// add build args from metadata
-	if envVars := dm.getBuildArgs(); envVars != nil {
+	if envVars := dm.GetBuildArgs(); envVars == nil {
 		dlog.Error("Failed to get build args: %v", err)
 		return fmt.Errorf("failed to get build args: %w", err)
-	} else {
-		buildOptions.BuildArgs = envVars
 	}
 	// Execute build
 	resp, err := dm.cli.ImageBuild(ctx, buildContext, buildOptions)
@@ -135,6 +163,18 @@ func (dm *DockerManager) BuildImage(ctx context.Context, opts BuildOptions) erro
 	defer resp.Body.Close()
 	// Display build output
 	fd, isTerminal := term.GetFdInfo(os.Stdout)
+	//TODO: we can build the container here using .nextdeploy/metadata.json
+	nextruntime, err := nextcore.NewNextRuntime(&metadata)
+	if err != nil {
+		dlog.Error("error creating next runtime:%s", err)
+		return err
+	}
+	ID, err := nextruntime.CreateContainer(ctx)
+	if err != nil {
+		dlog.Error("Failed to create container: %v", err)
+		return fmt.Errorf("failed to create container: %w", err)
+	}
+	dlog.Success("Docker image built successfully with ID: %s", ID)
 	return jsonmessage.DisplayJSONMessagesStream(resp.Body, os.Stdout, fd, isTerminal, nil)
 }
 func (dm *DockerManager) createBuildContext() (io.ReadCloser, error) {
@@ -145,24 +185,30 @@ func (dm *DockerManager) createBuildContext() (io.ReadCloser, error) {
 	// Add Dockerfile
 	cwd, err := os.Getwd()
 	if err != nil {
+		dlog.Error("Failed to get current directory: %v", err)
 		return nil, fmt.Errorf("failed to get current directory: %w", err)
 	}
 	packageManger, err := nextcore.DetectPackageManager(cwd)
 	dockerfileContent, err := dm.generateDockerfileContent(packageManger.String())
+	dlog.Debug("Generated Dockerfile content:\n%s", dockerfileContent)
 	if err != nil {
+		dlog.Error("Failed to generate Dockerfile content: %v", err)
 		return nil, err
 	}
 	if err := addFileToTar(tw, "Dockerfile", []byte(dockerfileContent), 0644); err != nil {
+		dlog.Error("Failed to add Dockerfile to tar: %v", err)
 		return nil, err
 	}
 
 	// Add application files
 	if err := dm.addAppFiles(tw); err != nil {
+		dlog.Error("Failed to add application files to tar: %v", err)
 		return nil, err
 	}
 
 	// Add metadata and assets
 	if err := dm.addMetadataAndAssets(tw); err != nil {
+		dlog.Error("Failed to add metadata and assets to tar: %v", err)
 		return nil, err
 	}
 
@@ -197,6 +243,7 @@ func (dm DockerManager) addAppFiles(tw *tar.Writer) error {
 	// Add package files
 	for _, file := range packageFiles {
 		if err := dm.addFileIfExists(tw, file); err != nil {
+			dlog.Error("Failed to add package file %s: %v", file, err)
 			return fmt.Errorf("failed to add package file %s: %w", file, err)
 		}
 	}
@@ -205,6 +252,7 @@ func (dm DockerManager) addAppFiles(tw *tar.Writer) error {
 	configFiles := []string{"next.config.js", "next.config.mjs", ".env", ".env.local"}
 	for _, file := range configFiles {
 		if err := dm.addFileIfExists(tw, file); err != nil {
+			dlog.Error("Failed to add config file %s: %v", file, err)
 			return fmt.Errorf("failed to add config file %s: %w", file, err)
 		}
 	}
@@ -214,6 +262,7 @@ func (dm DockerManager) addAppFiles(tw *tar.Writer) error {
 	for _, dir := range dirs {
 		if _, err := os.Stat(dir); err == nil {
 			if err := addDirectoryToTar(tw, dir, dir); err != nil {
+				dlog.Error("Failed to add directory %s: %v", dir, err)
 				return fmt.Errorf("failed to add directory %s: %w", dir, err)
 			}
 		}
@@ -226,6 +275,7 @@ func addDirectoryToTar(tw *tar.Writer, srcDir, tarDir string) error {
 	// Walk through the directory and add files to tar
 	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			dlog.Error("Error walking path %s: %v", path, err)
 			return fmt.Errorf("error walking path %s: %w", path, err)
 		}
 		if info.IsDir() {
@@ -235,6 +285,7 @@ func addDirectoryToTar(tw *tar.Writer, srcDir, tarDir string) error {
 		// Read file content
 		content, err := os.ReadFile(path)
 		if err != nil {
+			dlog.Error("Failed to read file %s: %v", path, err)
 			return fmt.Errorf("failed to read file %s: %w", path, err)
 		}
 
@@ -246,10 +297,12 @@ func addDirectoryToTar(tw *tar.Writer, srcDir, tarDir string) error {
 		}
 
 		if err := tw.WriteHeader(header); err != nil {
+			dlog.Error("Failed to write header for %s: %v", path, err)
 			return fmt.Errorf("failed to write header for %s: %w", path, err)
 		}
 
 		if _, err := tw.Write(content); err != nil {
+			dlog.Error("Error writing content for %s: %v", path, err)
 			return fmt.Errorf("failed to write content for %s: %w", path, err)
 		}
 
@@ -262,6 +315,7 @@ func (dm *DockerManager) addMetadataAndAssets(tw *tar.Writer) error {
 	for _, file := range metadataFiles {
 		if content, err := os.ReadFile(file); err == nil {
 			if err := addFileToTar(tw, file, content, 0644); err != nil {
+				dlog.Error("Failed to add metadata file %s: %v", file, err)
 				return err
 			}
 		}
@@ -269,31 +323,34 @@ func (dm *DockerManager) addMetadataAndAssets(tw *tar.Writer) error {
 
 	// Add static assets
 	if err := addDirectoryToTar(tw, ".nextdeploy/assets", ".nextdeploy/assets"); err != nil {
+		dlog.Error("Failed to add static assets: %v", err)
 		return fmt.Errorf("failed to add static assets: %w", err)
 	}
 
 	return nil
 }
 
-func (dc *DockerManager) getBuildArgs() map[string]*string {
-	args := make(map[string]*string)
-	//TODO: Implement right build args
-
-	return args
-}
-
-// Helper function to add a file to tar if it exists
+// TODO: build args are static we need load from somewhere that is user defined
+func (dc *DockerManager) GetBuildArgs() map[string]string {
+	return map[string]string{
+		"NODE_ENV":     "production",
+		"NODE_VERSION": "20-alpine",
+		"APP_ENV":      "production",
+	}
+} // Helper function to add a file to tar if it exists
 func (dm DockerManager) addFileIfExists(tw *tar.Writer, filename string) error {
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// File doesn't exist - skip silently
+			dlog.Debug("File %s does not exist, skipping", filename)
 			return nil
 		}
 		return err
 	}
 
 	if err := addFileToTar(tw, filename, content, 0644); err != nil {
+		dlog.Error("Failed to add file %s to tar: %v", filename, err)
 		return fmt.Errorf("failed to add file %s to tar: %w", filename, err)
 	}
 	return nil
@@ -307,9 +364,15 @@ func addFileToTar(tw *tar.Writer, name string, content []byte, mode int64) error
 		Size: int64(len(content)),
 	}
 	if err := tw.WriteHeader(hdr); err != nil {
+		dlog.Error("Failed to write header for %s: %v", name, err)
 		return err
 	}
 	_, err := tw.Write(content)
+	if err != nil {
+		dlog.Error("Failed to write content for %s: %v", name, err)
+		// Return a more descriptive error
+		return fmt.Errorf("failed to write content for %s: %w", name, err)
+	}
 	return err
 }
 
@@ -339,6 +402,7 @@ func (dm *DockerManager) DockerfileExists(dir string) (bool, error) {
 func (dm *DockerManager) GenerateDockerfile(dir, pkgManager string, overwrite bool) error {
 	exists, err := dm.DockerfileExists(dir)
 	if err != nil {
+		dlog.Error("Failed to check Dockerfile existence: %v", err)
 		return fmt.Errorf("failed to check Dockerfile existence: %w", err)
 	}
 	if exists && !overwrite {
@@ -346,6 +410,7 @@ func (dm *DockerManager) GenerateDockerfile(dir, pkgManager string, overwrite bo
 	}
 	content, err := dm.generateDockerfileContent(pkgManager)
 	if err != nil {
+		dlog.Error("Failed to generate Dockerfile content: %v", err)
 		return fmt.Errorf("failed to generate Dockerfile content: %w", err)
 	}
 
@@ -549,9 +614,6 @@ func (dm *DockerManager) CheckDockerInstalled() error {
 	}
 	return nil
 }
-
-// BuildImage builds a Docker image with options
-// PushImage pushes a Docker image to registry
 func (dm *DockerManager) PushImage(ctx context.Context, imageName string, ProvisionECRUser bool, Fresh bool) error {
 	err := dm.ValidateImageName(imageName)
 	if err != nil {
