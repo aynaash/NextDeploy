@@ -12,16 +12,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Semantic color functions
 var (
-	green   = color.New(color.FgGreen).SprintFunc()
-	yellow  = color.New(color.FgYellow).SprintFunc()
-	red     = color.New(color.FgRed).SprintFunc()
-	bold    = color.New(color.Bold).SprintFunc()
-	cyan    = color.New(color.BgCyan).SprintFunc()
-	magenta = color.New(color.BgHiMagenta).SprintFunc()
+	title     = color.New(color.FgHiBlue, color.Bold).SprintFunc()
+	success   = color.New(color.FgHiGreen).SprintFunc()
+	warning   = color.New(color.FgHiYellow, color.Bold).SprintFunc()
+	errorMsg  = color.New(color.FgHiRed, color.Bold).SprintFunc()
+	command   = color.New(color.FgCyan).SprintFunc()
+	highlight = color.New(color.Bold).SprintFunc()
 )
 
-// rootCmd represents the base command when called without any subcommands
+// rootCmd is the main command
 var rootCmd = &cobra.Command{
 	Use:   "nextdeploy",
 	Short: "CLI for automating Next.js deployments on any VPS with a custom daemon.",
@@ -31,57 +32,54 @@ var rootCmd = &cobra.Command{
 Deploy your Next.js app to *any* VPS — with Docker, SSL, logs, and zero downtime.
 
 %s
-%s  Build Docker images with ease
-%s  Push and deploy to remote servers in seconds
-%s  Configure automatic SSL + monitoring
-%s  Ship production-ready builds with full control
+%s Build Docker images with ease
+%s Push and deploy to remote servers in seconds
+%s Configure automatic SSL + monitoring
+%s Ship production-ready builds with full control
 
-%s
-Run '%s' to see available commands.
+%s %s
 `,
-		bold("🚀 NextDeploy"), yellow("v1.0.0"),
-		magenta("Simple. Fast. Infrastructure-Agnostic."),
-		bold("Features:"),
-		green("✓"),
-		green("✓"),
-		green("✓"),
-		green("✓"),
-		yellow("👋 Tip:"),
-		cyan("nextdeploy --help"),
+		title("🚀 NextDeploy"), warning("v1.0.0"),
+		highlight("Simple. Fast. Infrastructure-Agnostic."),
+		highlight("Features:"),
+		success("✓"),
+		success("✓"),
+		success("✓"),
+		success("✓"),
+		warning("Tip:"), command("nextdeploy --help"),
 	),
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("\n%s %s\n\n",
-			green("✨ Welcome to"), bold("NextDeploy CLI"),
+			success("✨ Welcome to"), highlight("NextDeploy CLI"),
 		)
 
 		if len(args) == 0 {
-			fmt.Println(bold("Quick Start:"))
-			fmt.Printf("  %s - Initialize a new project\n", cyan("nextdeploy init"))
-			fmt.Printf("  %s - Build the image for the app\n", cyan("nextdeploy build"))
-			fmt.Printf("  %s - Deploy your app on the vps\n\n", cyan("nextdeploy ship"))
+			fmt.Println(highlight("Quick Start:"))
+			fmt.Printf("  %s - Initialize a new project\n", command("nextdeploy init"))
+			fmt.Printf("  %s - Build the image for the app\n", command("nextdeploy build"))
+			fmt.Printf("  %s - Deploy your app on the VPS\n\n", command("nextdeploy ship"))
 
 			fmt.Printf("%s %s\n\n",
-				yellow("Docs →"), cyan("https://nextdeploy.one/docs"),
+				warning("Docs →"), command("https://nextdeploy.one/docs"),
 			)
 		}
 	},
 }
 
-// Execute runs the root command
 func Execute() {
 	fmt.Println()
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Printf("\n%s %s\n\n",
-			red("❌ Error:"), err,
+			errorMsg("❌ Error:"), err,
 		)
 		os.Exit(1)
 	}
 
 	fmt.Println(strings.Repeat("─", 60))
 	fmt.Printf("%s %s\n",
-		cyan("Need help?"),
-		yellow("Visit https://nextdeploy.one/docs"),
+		command("Need help?"),
+		warning("Visit https://nextdeploy.one/docs"),
 	)
 	fmt.Println(strings.Repeat("─", 60))
 	fmt.Println()
@@ -90,9 +88,10 @@ func Execute() {
 func init() {
 	rootCmd.SetHelpTemplate(fmt.Sprintf(`%s
 %s
+
 {{if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}`,
-		cyan("✨ NextDeploy CLI Toolkit"),
-		yellow("Usage: {{.UseLine}}"),
+		title("✨ NextDeploy CLI Toolkit"),
+		warning("Usage: {{.UseLine}}"),
 	))
 
 	rootCmd.SetUsageTemplate(`{{.UseLine}}

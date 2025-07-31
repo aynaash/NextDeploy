@@ -38,7 +38,7 @@ func (c *WSClient) ReceiveMessage() (shared.AgentMessage, error) {
 	fmt.Printf("Received message type: %v", message)
 	fmt.Printf("Message type: %d\n", messsageType)
 	if err != nil {
-		websockerlogger.Error("Failed to read message from WebSocket error:", err)
+		websockerlogger.Error("Failed to read message from WebSocket error:%s", err)
 		return shared.AgentMessage{}, err
 	}
 	// FIX: Deserialize the message into AgentMessage and use returned message from ReadMessage
@@ -49,7 +49,7 @@ func (c *WSClient) Connect(url string, headers http.Header) error {
 	dialer := websocket.DefaultDialer
 	conn, _, err := dialer.Dial(url, headers)
 	if err != nil {
-		websockerlogger.Error("Failed to connect to WebSocket server", "error", err)
+		websockerlogger.Error("Failed to connect to WebSocket server:%s", err)
 		return err
 	}
 
@@ -87,7 +87,7 @@ func (c *WSClient) Close() error {
 
 	err := c.conn.Close()
 	if err != nil {
-		websockerlogger.Error("Failed to close WebSocket connection", "error", err)
+		websockerlogger.Error("Failed to close WebSocket connection error:%s", err)
 		return err
 	}
 
@@ -108,11 +108,11 @@ func (c *WSClient) readPump() {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				websockerlogger.Error("WebSocket read error", "error", err)
+				websockerlogger.Error("WebSocket read error:%s", err)
 			}
 			return
 		}
-		websockerlogger.Info("Received message from WebSocket server", "message", string(message))
+		websockerlogger.Info("Received message from WebSocket server message:%s", string(message))
 	}
 
 }
@@ -129,7 +129,7 @@ func (c *WSClient) writePump() {
 		case <-ticker.C:
 			c.mu.Lock()
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				websockerlogger.Error("Failed to send ping", "error", err)
+				websockerlogger.Error("Failed to send ping error:%s", err)
 				c.mu.Unlock()
 				return
 			}

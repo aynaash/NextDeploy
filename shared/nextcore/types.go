@@ -24,10 +24,14 @@ type NextCorePayload struct {
 	MetadataFilePath  string                   `json:"metadata_file_path,omitempty"`
 	AssetsOutputDir   string                   `json:"assets_output_dir,omitempty"`
 	Config            *config.NextDeployConfig `json:"config,omitempty"`
-	ImageAssets       ImageAssets              `json:"image_assets"` // Detected image assets
-	RouteInfo         RouteInfo                `json:"route_info"`   // Information about routes
-	Output            string                   `json:"output"`       // "standalone", "export", etc.
-	NextBuild         NextBuild                `json:"next_build"`   // Full Next.js build structure
+	ImageAssets       ImageAssets              `json:"image_assets"`    // Detected image assets
+	RouteInfo         RouteInfo                `json:"route_info"`      // Information about routes
+	Output            string                   `json:"output"`          // "standalone", "export", etc.
+	NextBuild         NextBuild                `json:"next_build"`      // Full Next.js build structure
+	WorkingDir        string                   `json:"working_dir"`     // Working directory for the build
+	RootDir           string                   `json:"root_dir"`        // Root directory of the Next.js project
+	PackageManager    string                   `json:"package_manager"` // "npm", "yarn", "pnpm", etc.https://shadcn-nextjs-dashboard.vercel.app/dashboard
+	Entrypoint        string                   `json:"entrypoint"`      // Entrypoint for the application
 
 }
 

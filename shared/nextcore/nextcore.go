@@ -138,6 +138,8 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		MetadataFilePath:  PayloadPath,
 		BuildLockFile:     buildLockPath,
 		AssetsOutputDir:   AssetsOutputDir,
+		PackageManager:    packageManager.String(),
+		RootDir:           cwd,
 	}
 
 	if err := createBuildLock(&metadata); err != nil {

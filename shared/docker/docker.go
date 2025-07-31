@@ -118,6 +118,55 @@ func NewDockerClient(logger *shared.Logger) (*DockerManager, error) {
 
 // NewDockerManager creates a new DockerManager instance
 
+//	func (d *DockerManager) BuildImageFromMetadata(ctx context.Context, meta nextcore.NextCorePayload) (string, error) {
+//		tarBuf := new(bytes.Buffer)
+//		tw := tar.NewWriter(tarBuf)
+//
+//		// Tarball relevant files for Next.js app build context
+//		_ = filepath.Walk(meta.WorkingDir, func(path string, info os.FileInfo, err error) error {
+//			if err != nil || info.IsDir() {
+//				return nil
+//			}
+//
+//			relPath, _ := filepath.Rel(meta.WorkingDir, path)
+//			if relPath == "" {
+//				return nil
+//			}
+//
+//			file, err := os.Open(path)
+//			if err != nil {
+//				return nil
+//			}
+//			defer file.Close()
+//
+//			hdr, err := tar.FileInfoHeader(info, "")
+//			if err != nil {
+//				return nil
+//			}
+//			hdr.Name = relPath
+//			_ = tw.WriteHeader(hdr)
+//			_, _ = io.Copy(tw, file)
+//			return nil
+//		})
+//
+//		_ = tw.Close()
+//
+//		tag := meta.Name + ":latest"
+//		options := types.ImageBuildOptions{
+//			Tags:       []string{tag},
+//			Dockerfile: "Dockerfile", // We can fake this or inject internally
+//			Remove:     true,
+//		}
+//
+//		res, err := d.Raw.ImageBuild(ctx, bytes.NewReader(tarBuf.Bytes()), options)
+//		if err != nil {
+//			return "", err
+//		}
+//		defer res.Body.Close()
+//
+//		// Optional: stream logs or decode JSON from response.Body
+//		return tag, nil
+//	}
 func (dm *DockerManager) BuildImage(ctx context.Context, opts BuildOptions) error {
 	// generate and validate metadata first
 	metadata, err := nextcore.GenerateMetadata()
@@ -131,7 +180,7 @@ func (dm *DockerManager) BuildImage(ctx context.Context, opts BuildOptions) erro
 		return fmt.Errorf("failed to validate build state: %w", err)
 	}
 	// create build context
-	buildContext, err := dm.createBuildContext()
+	buildContext, err := dm.createBuildContext(&metadata)
 	if err != nil {
 		dlog.Error("Failed to create build context: %v", err)
 		return fmt.Errorf("failed to create build context: %w", err)
@@ -148,6 +197,10 @@ func (dm *DockerManager) BuildImage(ctx context.Context, opts BuildOptions) erro
 		PullParent:  opts.Pull,
 		Platform:    opts.Platform,
 		Target:      opts.Target,
+		Labels: map[string]string{
+			"nextjs.version":   metadata.NextVersion,
+			"nextjs.buildMode": metadata.Output,
+		},
 	}
 	// add build args from metadata
 	if envVars := dm.GetBuildArgs(); envVars == nil {
@@ -174,10 +227,11 @@ func (dm *DockerManager) BuildImage(ctx context.Context, opts BuildOptions) erro
 		dlog.Error("Failed to create container: %v", err)
 		return fmt.Errorf("failed to create container: %w", err)
 	}
+
 	dlog.Success("Docker image built successfully with ID: %s", ID)
 	return jsonmessage.DisplayJSONMessagesStream(resp.Body, os.Stdout, fd, isTerminal, nil)
 }
-func (dm *DockerManager) createBuildContext() (io.ReadCloser, error) {
+func (dm *DockerManager) createBuildContext(metadata *nextcore.NextCorePayload) (io.ReadCloser, error) {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	defer tw.Close()
@@ -212,9 +266,57 @@ func (dm *DockerManager) createBuildContext() (io.ReadCloser, error) {
 		return nil, err
 	}
 
+	//nr, err := nextcore.NewNextRuntime(metadata)
+
+	// generate and add caddy file
+	//caddyfilecontent := nr.generateCaddyfile()
+	//dlog.Debug("caddy config is :%s", caddyfilecontent)
+	//if err := addFileToTar(tw, "Caddyfile", ".nextdeploy/caddy/Caddyfile", []byte(caddyfilecontent), 0644); err != nil {
+	//	dlog.Error("Failed to add Caddyfile to tar: %v", err)
+	//	return nil, fmt.Errorf("failed to add Caddyfile to tar: %w", err)
+	//}
+
 	return io.NopCloser(&buf), nil
 }
 
+func (dm *DockerManager) GenerateDockerCompose(metadata *nextcore.NextCorePayload) error {
+	composeTemplate := `version: '3.8'
+
+services:
+  nextjs:
+    image: %s
+    container_name: nextjs
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    volumes:
+      - ./.nextdeploy/assets:/app/public
+    networks:
+      - nextcore-network
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./.nextdeploy/caddy/Caddyfile:/etc/caddy/Caddyfile
+      - ./.nextdeploy/caddy/data:/data
+      - ./.nextdeploy/caddy/config:/config
+    networks:
+      - nextcore-network
+
+networks:
+  nextcore-network:
+    driver: bridge
+    name: nextcore-network`
+
+	content := fmt.Sprintf(composeTemplate, metadata.Config.App.Name)
+	return os.WriteFile("docker-compose.yml", []byte(content), 0644)
+}
 func (dm DockerManager) addAppFiles(tw *tar.Writer) error {
 	// Get current working directory
 	cwd, err := os.Getwd()
