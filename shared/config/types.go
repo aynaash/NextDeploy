@@ -26,6 +26,14 @@ type NextDeployConfig struct {
 	SSLConfig     *SSLConfig           `yaml:"ssl_config,omitempty"`
 	CloudProvider *CloudProviderStruct `yaml:"cloud_provider,omitempty"`
 }
+
+type WebServer struct {
+	Type          string `yaml:"type"`
+	ConfigPath    string `yaml:"config_path,omitempty"`
+	SSL_Enabled   bool   `yaml:"ssl_enabled,omitempty"`
+	SSL_Cert_Path string `yaml:"ssl_cert_path,omitempty"`
+	SSL_Key_Path  string `yaml:"ssl_key_path,omitempty"`
+}
 type SSLConfig struct {
 	Domain      string `yaml:"domain"`
 	Email       string `yaml:"email"`
@@ -48,14 +56,15 @@ type CloudProviderStruct struct {
 	SecretKey string `yaml:"secret_key,omitempty"`
 }
 type ServerConfig struct {
-	Name          string `yaml:"name"`
-	Host          string `yaml:"host"`
-	Port          int    `yaml:"port"`
-	Username      string `yaml:"username"`
-	Password      string `yaml:"password"`
-	KeyPath       string `yaml:"key_path"`
-	SSHKey        string `yaml:"ssh_key,omitempty"`
-	KeyPassphrase string `yaml:"key_passphrase,omitempty"`
+	WebServer     *WebServer `yaml:"web_server,omitempty"`
+	Name          string     `yaml:"name"`
+	Host          string     `yaml:"host"`
+	Port          int        `yaml:"port"`
+	Username      string     `yaml:"username"`
+	Password      string     `yaml:"password"`
+	KeyPath       string     `yaml:"key_path"`
+	SSHKey        string     `yaml:"ssh_key,omitempty"`
+	KeyPassphrase string     `yaml:"key_passphrase,omitempty"`
 }
 
 // AppConfig contains application-specific settings

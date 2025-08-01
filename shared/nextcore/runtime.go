@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
@@ -35,6 +36,105 @@ func NewNextRuntime(payload *NextCorePayload) (*nextruntime, error) {
 	}, nil
 }
 
+// ensureNetwork creates or verifies the nextcore-network exists
+func (nr *nextruntime) ensureNetwork(ctx context.Context) error {
+	// Check if network already exists
+	_, err := nr.dockerclient.NetworkInspect(ctx, "nextcore-network", types.NetworkInspectOptions{})
+	if err == nil {
+		return nil // Network exists
+	}
+
+	if !client.IsErrNotFound(err) {
+		return fmt.Errorf("network inspection failed: %w", err)
+	}
+
+	// Network doesn't exist - create it
+	createOpts := types.NetworkCreate{
+		Driver: "bridge",
+		IPAM: &network.IPAM{
+			Driver: "default",
+			Config: []network.IPAMConfig{
+				{
+					Subnet:  "172.18.0.0/16",
+					Gateway: "172.18.0.1",
+				},
+			},
+		},
+		Options: map[string]string{
+			"com.docker.network.bridge.name":                 "nextcore-network",
+			"com.docker.network.bridge.enable_icc":           "true",
+			"com.docker.network.bridge.enable_ip_masquerade": "true",
+		},
+		Labels: map[string]string{
+			"com.nextcore.managed": "true",
+		},
+	}
+
+	_, err = nr.dockerclient.NetworkCreate(ctx, "nextcore-network", createOpts)
+	if err != nil {
+		return fmt.Errorf("failed to create network: %w", err)
+	}
+
+	NextCoreLogger.Info("Created Docker network: nextcore-network")
+	return nil
+}
+func (nr *nextruntime) reloadCaddy() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := nr.dockerclient.ContainerKill(ctx, "caddy", "SIGHUP"); err != nil {
+		// Attempt to restart if container exists but isn't running
+		if strings.Contains(err.Error(), "is not running") {
+			return nr.dockerclient.ContainerRestart(ctx, "caddy", container.StopOptions{})
+		}
+		return err
+	}
+	return nil
+}
+func (nr *nextruntime) ensureNetwork(ctx context.Context) error {
+	// Check if network exists first
+	_, err := nr.dockerclient.NetworkInspect(ctx, "nextcore-network", types.NetworkInspectOptions{})
+	if err == nil {
+		return nil // Network exists
+	}
+
+	// Only proceed if the error is "not found"
+	if !client.IsErrNotFound(err) {
+		return fmt.Errorf("network inspection failed: %w", err)
+	}
+
+	// Network creation configuration
+	createOpts := types.NetworkCreate{
+		Driver: "bridge",
+		IPAM: &network.IPAM{
+			Driver: "default",
+			Config: []network.IPAMConfig{
+				{
+					Subnet:  "172.18.0.0/16",
+					Gateway: "172.18.0.1",
+				},
+			},
+		},
+		Options: map[string]string{
+			"com.docker.network.bridge.enable_icc":           "true",
+			"com.docker.network.bridge.enable_ip_masquerade": "true",
+		},
+		Labels: map[string]string{
+			"com.nextcore.managed": "true",
+		},
+	}
+
+	// Create the network
+	_, err = nr.dockerclient.NetworkCreate(ctx, "nextcore-network", createOpts)
+	if err != nil {
+		return fmt.Errorf("failed to create network: %w", err)
+	}
+
+	NextCoreLogger.Info("Created Docker network: nextcore-network")
+	return nil
+}
+
+// Call this in CreateContainer() before ContainerCreate()
 func (nr *nextruntime) createNetworkingConfig() *network.NetworkingConfig {
 	// Create a default network confi with caddy in mind
 	config := &network.NetworkingConfig{
@@ -49,20 +149,22 @@ func (nr *nextruntime) createNetworkingConfig() *network.NetworkingConfig {
 	}
 
 	// if we have middleware configured caddy , add specific network settings
-	if nr.payload.Middleware != nil && nr.payload.Middleware.Runtime == "caddy" {
-		// add link to caddy container if it exists
-		config.EndpointsConfig["nextcore-network"].Links = []string{
-			"caddy:nextcore-caddy",
-		}
-
-		// configure for optimal caddy proxying
-		config.EndpointsConfig["nextcore-network"].DriverOpts = map[string]string{
-			"com.docker.network.bridge.enable_icc":           "true",
-			"com.docker.network.bridge.enable_ip_masquerade": "true",
-			"com.docker.network.bridge.host_binding_ipv4":    "0.0.0.0",
-			"com.docker.network.driver.mu":                   "1500",
-		}
+	//	if nr.payload.Config.Servers.WebServer != nil && nr.payload.Config.Servers.WebServer == "caddy" {
+	// add link to caddy container if it exists
+	config.EndpointsConfig["nextcore-network"].Links = []string{
+		"caddy:nextcore-caddy",
 	}
+
+	// configure for optimal caddy proxying
+	config.EndpointsConfig["nextcore-network"].DriverOpts = map[string]string{
+		"com.docker.network.bridge.enable_icc":           "true",
+		"com.docker.network.bridge.enable_ip_masquerade": "true",
+		"com.docker.network.bridge.host_binding_ipv4":    "0.0.0.0",
+		"com.docker.network.driver.mu":                   "1500",
+	}
+
+	NextCoreLogger.Debug("configured networking for caddy proxying: %v", config.EndpointsConfig["nextcore-network"])
+
 	return config
 }
 func (nr *nextruntime) CreateContainer(ctx context.Context) (string, error) {
@@ -72,7 +174,7 @@ func (nr *nextruntime) CreateContainer(ctx context.Context) (string, error) {
 	hostConfig := nr.createHostConfig()
 	NextCoreLogger.Debug("the host config is:%v", hostConfig)
 	neworkingConfig := nr.createNetworkingConfig()
-	NextCoreLogger.Debug("the networking config is:%v", neworkingConfig)
+	NextCoreLogger.Debug("the networking config looks like this:%v", &neworkingConfig)
 	// create the container
 	resp, err := nr.dockerclient.ContainerCreate(
 		ctx,
@@ -253,8 +355,7 @@ func (nr *nextruntime) getMounts() []mount.Mount {
 
 func (nr *nextruntime) ConfigureReverseProxy() error {
 	// Generate caddy file content based on nextjs metadata
-	caddyfileConfig := nr.generateCaddyfile()
-
+	caddyfileConfig := nr.GenerateCaddyfile()
 	// write caddy file to appropriate location
 	caddyfilePath := filepath.Join(".nextdeploy", "caddy", "Caddyfile")
 	if err := os.MkdirAll(filepath.Dir(caddyfilePath), 0755); err != nil {
@@ -278,7 +379,7 @@ func (nr *nextruntime) ConfigureReverseProxy() error {
 
 }
 
-func (nr *nextruntime) generateCaddyfile() string {
+func (nr *nextruntime) GenerateCaddyfile() string {
 	var sb strings.Builder
 
 	// write global configs
@@ -317,17 +418,6 @@ func (nr *nextruntime) generateCaddyfile() string {
 func convertRegexToCaddyMatcher(regex string) string {
 	// Simple conversion - for more complex cases you might need a better approach
 	return strings.TrimPrefix(strings.TrimSuffix(regex, "$"), "^")
-}
-func (nr *nextruntime) reloadCaddy() error {
-	ctx := context.Background()
-
-	// Send SIGHUP to Caddy container to reload config
-	err := nr.dockerclient.ContainerKill(ctx, "caddy", "SIGHUP")
-	if err != nil {
-		return fmt.Errorf("failed to reload Caddy: %w", err)
-	}
-
-	return nil
 }
 
 func (nr *nextruntime) generateAPIHandlers() string {

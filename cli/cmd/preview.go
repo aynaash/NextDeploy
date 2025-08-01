@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"archive/tar"
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -47,14 +48,18 @@ var previewCmd = &cobra.Command{
 			panic(err)
 		}
 
+		// Use consistent image naming with git commit hash
+		imageName := fmt.Sprintf("%s:%s", strings.ToLower(payload.Config.App.Name), payload.GitCommit)
+		if payload.GitCommit == "" {
+			imageName = fmt.Sprintf("%s:latest", strings.ToLower(payload.Config.App.Name))
+		}
+
 		// Step 1: Create tar stream
 		tarBuf, err := createTarContext(&payload)
 		if err != nil {
 			PreviewLogger.Error("Error creating tar context: %v", err)
 			panic(err)
 		}
-
-		imageName := fmt.Sprintf("%s:latest", payload.Config.App.Name)
 
 		// Step 2: Build image
 		buildOptions := build.ImageBuildOptions{
@@ -70,8 +75,26 @@ var previewCmd = &cobra.Command{
 		}
 		defer buildResp.Body.Close()
 
-		// Output the build logs
-		io.Copy(os.Stdout, buildResp.Body)
+		// Stream build output and check for errors
+		scanner := bufio.NewScanner(buildResp.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+			fmt.Println(line)
+
+			// Check for build errors in the output
+			if strings.Contains(line, "ERROR") || strings.Contains(line, "error") {
+				PreviewLogger.Error("Build error detected: %s", line)
+				os.Exit(1)
+			}
+		}
+
+		// Verify image was built successfully
+		_, _, err = cli.ImageInspectWithRaw(ctx, imageName)
+		if err != nil {
+			PreviewLogger.Error("Failed to verify built image: %v", err)
+			os.Exit(1)
+		}
+
 		// Create runtime
 		runtime, err := nextcore.NewNextRuntime(&payload)
 		if err != nil {
@@ -111,36 +134,40 @@ func createTarContext(meta *nextcore.NextCorePayload) (io.Reader, error) {
 		defer pw.Close()
 		defer tw.Close()
 
-		// Add Dockerfile
-		dockerfile := fmt.Sprintf(`
-FROM node:%s-alpine
-WORKDIR /app
-COPY . .
-RUN %s
-RUN %s
-ENV PORT=%d
-CMD ["node", "server.js"]
-`, meta.PackageManager+" install", meta.BuildCommand, meta.Config.Database.Port)
+		// Read Dockerfile from current directory
+		dockerfileContent, err := os.ReadFile("Dockerfile")
+		if err != nil {
+			PreviewLogger.Error("Error reading Dockerfile: %v", err)
+			pw.CloseWithError(err)
+			return
+		}
+		PreviewLogger.Debug("Dockerfile content read successfully: %s", string(dockerfileContent))
 
-		err := writeToTar(tw, "Dockerfile", []byte(dockerfile))
+		// Write Dockerfile to tar
+		err = writeToTar(tw, "Dockerfile", dockerfileContent)
 		if err != nil {
 			PreviewLogger.Error("Error writing Dockerfile to tar: %v", err)
 			pw.CloseWithError(err)
 			return
 		}
 
-		// Copy app source
+		// Copy app source, excluding unnecessary files
 		PreviewLogger.Debug("Writing app files to tar from root directory: %s", meta.RootDir)
 		err = filepath.Walk(meta.RootDir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				PreviewLogger.Error("Error walking path %s: %v", path, err)
 				return err
 			}
-			if info.IsDir() {
+
+			// Skip directories and unwanted files
+			if info.IsDir() ||
+				strings.Contains(path, "node_modules") ||
+				strings.Contains(path, ".next") ||
+				strings.Contains(path, ".git") {
 				return nil
 			}
 
-			relPath := strings.TrimPrefix(path, meta.RootDir+"/")
+			relPath := strings.TrimPrefix(path, meta.RootDir+string(filepath.Separator))
 			fileData, err := os.ReadFile(path)
 			if err != nil {
 				PreviewLogger.Error("Error reading file %s: %v", path, err)
