@@ -50,6 +50,7 @@ var previewCmd = &cobra.Command{
 
 		// Use consistent image naming with git commit hash
 		imageName := fmt.Sprintf("%s:%s", strings.ToLower(payload.Config.App.Name), payload.GitCommit)
+		PreviewLogger.Debug("Using image name: %s", imageName)
 		if payload.GitCommit == "" {
 			imageName = fmt.Sprintf("%s:latest", strings.ToLower(payload.Config.App.Name))
 		}
@@ -87,14 +88,6 @@ var previewCmd = &cobra.Command{
 				os.Exit(1)
 			}
 		}
-
-		// Verify image was built successfully
-		_, _, err = cli.ImageInspectWithRaw(ctx, imageName)
-		if err != nil {
-			PreviewLogger.Error("Failed to verify built image: %v", err)
-			os.Exit(1)
-		}
-
 		// Create runtime
 		runtime, err := nextcore.NewNextRuntime(&payload)
 		if err != nil {

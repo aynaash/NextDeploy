@@ -243,7 +243,7 @@ func (dm *DockerManager) createBuildContext(metadata *nextcore.NextCorePayload) 
 		return nil, fmt.Errorf("failed to get current directory: %w", err)
 	}
 	packageManger, err := nextcore.DetectPackageManager(cwd)
-	dockerfileContent, err := dm.generateDockerfileContent(packageManger.String())
+	dockerfileContent, err := dm.GenerateDockerfileContent(packageManger.String())
 	dlog.Debug("Generated Dockerfile content:\n%s", dockerfileContent)
 	if err != nil {
 		dlog.Error("Failed to generate Dockerfile content: %v", err)
@@ -510,7 +510,7 @@ func (dm *DockerManager) GenerateDockerfile(dir, pkgManager string, overwrite bo
 	if exists && !overwrite {
 		return ErrDockerfileExists
 	}
-	content, err := dm.generateDockerfileContent(pkgManager)
+	content, err := dm.GenerateDockerfileContent(pkgManager)
 	if err != nil {
 		dlog.Error("Failed to generate Dockerfile content: %v", err)
 		return fmt.Errorf("failed to generate Dockerfile content: %w", err)
@@ -536,10 +536,10 @@ func (dm *DockerManager) WriteDockerfile(dir, content string) error {
 }
 
 // generateDockerfileContent creates Dockerfile content based on package manager
-func (dm *DockerManager) generateDockerfileContent(pkgManager string) (string, error) {
+func (dm *DockerManager) GenerateDockerfileContent(pkgManager string) (string, error) {
 	// Predefined templates for different package managers
 	templates := map[string]string{
-		"npm": `# ---------- STAGE 1: Build ----------
+		"yarn": `# ---------- STAGE 1: Build ----------
 FROM node:18-alpine AS base
 WORKDIR /app
 

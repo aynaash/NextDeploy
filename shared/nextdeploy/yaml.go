@@ -1,41 +1,5 @@
 package nextdeploy
 
-// TODO(yussuf): Split the Config struct into domain-based files:
-//   - app.go for AppConfig
-//   - docker.go for DockerConfig
-//   - deployment.go for DeploymentConfig
-//   - monitoring.go, ssl.go, webhooks.go, etc.
-//   Improves code locality and long-term maintainability.
-
-// TODO(yussuf): Refactor Validate method signature:
-//   Change from: func (c *Config) Validate(Config *Config)
-//   To:          func (c *Config) Validate() error
-//   Using both receiver and parameter is redundant and confusing.
-
-// TODO(yussuf): DRY up repetitive slice operations (e.g., Add/Remove methods):
-//   - Create helpers: appendUnique([]string, string) ([]string, error)
-//                     removeElement([]string, string) ([]string, error)
-//   - Replace Add/RemoveVolume, Port, Webhook methods with reusable logic.
-
-// TODO(yussuf): Rename ConfigOkay() to something clearer:
-//   - Better: LoadAndValidate() or ValidateFromDisk()
-//   - Avoid vague terms like "Okay"—be precise about behavior and return values.
-
-// TODO(yussuf): Refactor New() to delegate default setup per section:
-//   - Create DefaultAppConfig(), DefaultDockerConfig(), etc.
-//   - Keeps New() lean and modular.
-
-// TODO(yussuf): Implement environment variable overrides:
-//   - Add func (c *Config) OverrideWithEnv()
-//   - Allow NEXTDEPLOY_* env vars to override YAML without editing it.
-//   - Great for CI/CD pipelines and advanced users.
-
-// TODO(yussuf): Add GoDoc comments for all exported functions and types:
-//   - e.g., // AddContainerVolume adds a volume mount to the container configuration.
-//   - Improves code readability and discoverability for other contributors.
-
-// TODO(yussuf): Consider JSON Schema or YAML schema validation for full structure validation in CI.
-//   Optional, but helps validate user-provided config outside Go code.
 import (
 	"errors"
 	"fmt"

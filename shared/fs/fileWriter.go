@@ -1,6 +1,5 @@
 package fs
 
-// NOTE: we need to all our os agnostic oi operations here
 import (
 	"fmt"
 	"os"

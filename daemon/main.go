@@ -8,7 +8,7 @@ package main
 //
 // DO NOT expose it directly to the public internet without proper authentication.
 //
-// Author: Yussuf Hersi <dev@hersi.dev> || yussufhersi219@gmail.com
+// Author: Yussuf Hersi  caynaashow@gmail.com
 // License: MIT
 // Source: https://github.com/aynaash/nextdeploy
 //
@@ -68,8 +68,6 @@ func startServer(server *http.Server, name string, logger *slog.Logger, errChan 
 }
 
 func main() {
-	//TODO: add temporal workflow context to keep track of long-running operations all their
-	//      --contextual data
 	flag.Parse()
 
 	logger, logFile := core.SetupLogger(config.daemonize, config.debug, config.logFormat, config.logFile)
@@ -97,7 +95,6 @@ func main() {
 	if err := shared.RunCryptoHealthChecks(); err != nil {
 		log.Fatalf("Crypto health checks failed: %v", err)
 	}
-
 	defer keyManager.StopRotation()
 	//FIX: fix this logic for bettertrust store management
 	auditLog, err := core.NewAuditLog(filepath.Join("audit.log"))

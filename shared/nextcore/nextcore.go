@@ -277,6 +277,8 @@ func ValidateBuildState() error {
 		return fmt.Errorf("failed to get current git commit: %w", err)
 	}
 	//TODO: use this data to avoid unnecessary builds
+	dlog.Info("Current git commit: %s", currentCommit)
+	dlog.Info("Expected git commit: %s", lock.GitCommit)
 	if currentCommit != lock.GitCommit {
 		NextCoreLogger.Error("Git commit mismatch: expected %s, got %s", lock.GitCommit, currentCommit)
 		return fmt.Errorf("git commit mismatch: expected %s, got %s", lock.GitCommit, currentCommit)

@@ -196,9 +196,8 @@ func checkBuildConditionsMet(cmd *cobra.Command, args []string) error {
 	if err := dm.CheckDockerInstalled(); err != nil {
 		return fmt.Errorf("docker is not installed or not functioning: %w", err)
 	}
-
 	// Check for Dockerfile
-	// FIX: we should generate the metdata need and use that to build the image
+	// FIX::: we should generate the metdata need and use that to build the image
 	if exists, err := dm.DockerfileExists("."); err != nil {
 		return fmt.Errorf("failed to check for Dockerfile: %w", err)
 	} else if !exists {

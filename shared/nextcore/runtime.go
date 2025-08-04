@@ -1,14 +1,17 @@
 package nextcore
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
@@ -16,12 +19,19 @@ import (
 	"github.com/docker/go-connections/nat"
 )
 
+/*
+*  The nextruntime struct creates the logic for defining
+*  data intensive runtime for next js app in docker environment
+*  It has nice integration with caddy as proxy
+ */
 type nextruntime struct {
 	dockerclient *client.Client
 	payload      *NextCorePayload
 }
 
 func NewNextRuntime(payload *NextCorePayload) (*nextruntime, error) {
+	startTime := time.Now()
+	NextCoreLogger.Info("Creating nextruntime instance for app: %s", payload.AppName)
 	cli, err := client.NewClientWithOpts(
 		client.FromEnv,
 		client.WithAPIVersionNegotiation(),
@@ -29,128 +39,162 @@ func NewNextRuntime(payload *NextCorePayload) (*nextruntime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
 	}
-
-	return &nextruntime{
+	nr := &nextruntime{
 		dockerclient: cli,
 		payload:      payload,
-	}, nil
+	}
+
+	NextCoreLogger.Info("nextruntime instance created successfully for app: %s in %s", payload.AppName, time.Since(startTime))
+	return nr, nil
 }
 
-// ensureNetwork creates or verifies the nextcore-network exists
-func (nr *nextruntime) ensureNetwork(ctx context.Context) error {
-	// Check if network already exists
-	_, err := nr.dockerclient.NetworkInspect(ctx, "nextcore-network", types.NetworkInspectOptions{})
-	if err == nil {
-		return nil // Network exists
+func (nr *nextruntime) InitializeInfrastructure(ctx context.Context) error {
+	NextCoreLogger.Debug("Initializing docker infra")
+	if err := nr.ensureNetwork(ctx); err != nil {
+		NextCoreLogger.Error("Failed to ensure network: %s", err)
+		return fmt.Errorf("failed to ensure network: %w", err)
 	}
-
-	if !client.IsErrNotFound(err) {
-		return fmt.Errorf("network inspection failed: %w", err)
+	if err := nr.ensureCaddy(); err != nil {
+		NextCoreLogger.Error("Failed to ensure Caddy: %s", err)
+		return fmt.Errorf("failed to ensure Caddy: %w", err)
 	}
-
-	// Network doesn't exist - create it
-	createOpts := types.NetworkCreate{
-		Driver: "bridge",
-		IPAM: &network.IPAM{
-			Driver: "default",
-			Config: []network.IPAMConfig{
-				{
-					Subnet:  "172.18.0.0/16",
-					Gateway: "172.18.0.1",
-				},
-			},
-		},
-		Options: map[string]string{
-			"com.docker.network.bridge.name":                 "nextcore-network",
-			"com.docker.network.bridge.enable_icc":           "true",
-			"com.docker.network.bridge.enable_ip_masquerade": "true",
-		},
-		Labels: map[string]string{
-			"com.nextcore.managed": "true",
-		},
-	}
-
-	_, err = nr.dockerclient.NetworkCreate(ctx, "nextcore-network", createOpts)
-	if err != nil {
-		return fmt.Errorf("failed to create network: %w", err)
-	}
-
-	NextCoreLogger.Info("Created Docker network: nextcore-network")
+	NextCoreLogger.Debug("Docker infrastructure initialized successfully")
 	return nil
+}
+func (nr *nextruntime) validateCaddyfile(config string) error {
+	cmd := exec.Command("caddy", "validate", "--config", "-")
+	cmd.Stdin = strings.NewReader(config)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("Caddyfile validation failed: %s\n%s", err, string(output))
+	}
+	return nil
+}
+func (nr *nextruntime) ensureNetwork(ctx context.Context) error {
+	NetworkInspect, err := nr.dockerclient.NetworkInspect(ctx, "nextcore-network", network.InspectOptions{})
+	NextCoreLogger.Debug("network inspect result:%v", NetworkInspect)
+	if err == nil {
+		// Network exists, return nil
+		NextCoreLogger.Info("nextcore-network already exists")
+		return nil
+	}
+	// only process if no error
+	createOpts := network.CreateOptions{
+		Driver:     "bridge",
+		Attachable: true,
+	}
+
+	resp, err := nr.dockerclient.NetworkCreate(ctx, "nextcore-network", createOpts)
+	if err != nil {
+		NextCoreLogger.Error("failed to create nextcore-network: %s", err)
+		return fmt.Errorf("failed to create nextcore-network: %w", err)
+	}
+
+	NextCoreLogger.Info("nextcore-network created successfully with ID: %s", resp.ID)
+	return nil
+}
+
+func (nr *nextruntime) ensureCaddy() error {
+	NextCoreLogger.Debug("Ensuring caddy container is running")
+	// check if caddy installed first
+	_, err := exec.LookPath("caddy")
+	if err == nil {
+		NextCoreLogger.Info("Caddy is installed on the system")
+		return nr.ensureCaddyRunning()
+	}
+	return nr.ensureCaddyRunning()
+
+}
+
+func (nr *nextruntime) ensureCaddyRunning() error {
+	// Check if admin API is already responsive
+	if conn, err := net.DialTimeout("tcp", "localhost:2019", 500*time.Millisecond); err == nil {
+		conn.Close()
+		NextCoreLogger.Debug("Caddy admin API already running")
+		return nil
+	}
+
+	// Format Caddyfile first
+	fmtCmd := exec.Command("caddy", "fmt", "--overwrite", "/etc/caddy/Caddyfile")
+	if output, err := fmtCmd.CombinedOutput(); err != nil {
+		NextCoreLogger.Warn("Caddyfile formatting failed (non-critical): %s", string(output))
+	}
+
+	// Start Caddy with full output capture
+	cmd := exec.Command("caddy", "run",
+		"--config", "/etc/caddy/Caddyfile",
+		"--adapter", "caddyfile",
+		"--watch",
+		"--resume")
+
+	// Create pipe for real-time output
+	stdoutPipe, _ := cmd.StdoutPipe()
+	stderrPipe, _ := cmd.StderrPipe()
+
+	if err := cmd.Start(); err != nil {
+		NextCoreLogger.Error("Caddy failed to start: %v", err)
+		return fmt.Errorf("Caddy failed to start: %w", err)
+	}
+
+	// Stream output in goroutines
+	go func() {
+		scanner := bufio.NewScanner(stdoutPipe)
+		for scanner.Scan() {
+			NextCoreLogger.Debug("Caddy stdout: %s", scanner.Text())
+		}
+	}()
+
+	go func() {
+		scanner := bufio.NewScanner(stderrPipe)
+		for scanner.Scan() {
+			NextCoreLogger.Debug("Caddy stderr: %s", scanner.Text())
+		}
+	}()
+
+	// Wait for Caddy to be ready with longer timeout
+	timeout := time.After(15 * time.Second)
+	tick := time.Tick(500 * time.Millisecond)
+
+	for {
+		select {
+		case <-timeout:
+			if cmd.Process != nil {
+				cmd.Process.Kill()
+			}
+			return fmt.Errorf("Caddy failed to start within 15 seconds")
+		case <-tick:
+			if conn, err := net.Dial("tcp", "localhost:2019"); err == nil {
+				conn.Close()
+				NextCoreLogger.Info("Caddy started successfully")
+				return nil
+			}
+		}
+	}
 }
 func (nr *nextruntime) reloadCaddy() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := nr.dockerclient.ContainerKill(ctx, "caddy", "SIGHUP"); err != nil {
-		// Attempt to restart if container exists but isn't running
-		if strings.Contains(err.Error(), "is not running") {
-			return nr.dockerclient.ContainerRestart(ctx, "caddy", container.StopOptions{})
-		}
-		return err
-	}
-	return nil
-}
-func (nr *nextruntime) ensureNetwork(ctx context.Context) error {
-	// Check if network exists first
-	_, err := nr.dockerclient.NetworkInspect(ctx, "nextcore-network", types.NetworkInspectOptions{})
-	if err == nil {
-		return nil // Network exists
+	// Try admin API first
+	if err := exec.Command("caddy", "reload", "--config", "/etc/caddy/Caddyfile").Run(); err == nil {
+		return nil
 	}
 
-	// Only proceed if the error is "not found"
-	if !client.IsErrNotFound(err) {
-		return fmt.Errorf("network inspection failed: %w", err)
-	}
-
-	// Network creation configuration
-	createOpts := types.NetworkCreate{
-		Driver: "bridge",
-		IPAM: &network.IPAM{
-			Driver: "default",
-			Config: []network.IPAMConfig{
-				{
-					Subnet:  "172.18.0.0/16",
-					Gateway: "172.18.0.1",
-				},
-			},
-		},
-		Options: map[string]string{
-			"com.docker.network.bridge.enable_icc":           "true",
-			"com.docker.network.bridge.enable_ip_masquerade": "true",
-		},
-		Labels: map[string]string{
-			"com.nextcore.managed": "true",
-		},
-	}
-
-	// Create the network
-	_, err = nr.dockerclient.NetworkCreate(ctx, "nextcore-network", createOpts)
-	if err != nil {
-		return fmt.Errorf("failed to create network: %w", err)
-	}
-
-	NextCoreLogger.Info("Created Docker network: nextcore-network")
-	return nil
+	// Fallback to full restart
+	NextCoreLogger.Warn("Admin reload failed, restarting Caddy...")
+	exec.Command("pkill", "caddy").Run()
+	return nr.ensureCaddyRunning()
 }
 
 // Call this in CreateContainer() before ContainerCreate()
 func (nr *nextruntime) createNetworkingConfig() *network.NetworkingConfig {
 	// Create a default network confi with caddy in mind
+	serviceName := nr.payload.Config.App.Name
 	config := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{
 			"nextcore-network": {
-				Aliases: []string{nr.getContainerName()},
-				IPAMConfig: &network.EndpointIPAMConfig{
-					IPv4Address: fmt.Sprintf("172.18.0.%d", nr.payload.Config.App.Port%254+1), // Simple IP allocation
-				},
+				Aliases: []string{
+					nr.getContainerName(),
+					serviceName},
 			},
 		},
 	}
-
-	// if we have middleware configured caddy , add specific network settings
-	//	if nr.payload.Config.Servers.WebServer != nil && nr.payload.Config.Servers.WebServer == "caddy" {
-	// add link to caddy container if it exists
 	config.EndpointsConfig["nextcore-network"].Links = []string{
 		"caddy:nextcore-caddy",
 	}
@@ -169,12 +213,16 @@ func (nr *nextruntime) createNetworkingConfig() *network.NetworkingConfig {
 }
 func (nr *nextruntime) CreateContainer(ctx context.Context) (string, error) {
 	// configure container based on metadata
+	if err := nr.ensureNetwork(ctx); err != nil {
+		NextCoreLogger.Error("failed to ensure network: %s", err)
+		return "", fmt.Errorf("failed to ensure network: %w", err)
+	}
 	containerConfig := nr.createContainerConfig()
-	NextCoreLogger.Debug("the container config is:%v", containerConfig)
+	NextCoreLogger.Debug("the container config is:%+v", containerConfig)
 	hostConfig := nr.createHostConfig()
-	NextCoreLogger.Debug("the host config is:%v", hostConfig)
+	NextCoreLogger.Debug("the host config is:%+v", hostConfig)
 	neworkingConfig := nr.createNetworkingConfig()
-	NextCoreLogger.Debug("the networking config looks like this:%v", &neworkingConfig)
+	NextCoreLogger.Debug("the networking config looks like this:%+v", neworkingConfig)
 	// create the container
 	resp, err := nr.dockerclient.ContainerCreate(
 		ctx,
@@ -201,13 +249,20 @@ func (nr *nextruntime) CreateContainer(ctx context.Context) (string, error) {
 
 	return resp.ID, nil
 }
-
+func (nr *nextruntime) Cleanup(ctx context.Context) error {
+	// Only remove network if we created it
+	if err := nr.dockerclient.NetworkRemove(ctx, "nextcore-network"); err != nil {
+		NextCoreLogger.Error("failed to remove network :%s", err)
+		return fmt.Errorf("failed to remove network: %w", err)
+	}
+	NextCoreLogger.Info("Removed Docker network: nextcore-network")
+	return nil
+}
 func (nr *nextruntime) createContainerConfig() *container.Config {
 	config := &container.Config{
 		Image:        nr.getImageName(),
 		ExposedPorts: nr.getExposedPorts(),
 		Env:          nr.getEnvironmentVariables(),
-		Cmd:          nr.getStartCommand(),
 		Labels:       nr.getLabels(),
 	}
 
@@ -263,7 +318,7 @@ func (nr *nextruntime) getExposedPorts() map[nat.Port]struct{} {
 	ports["3000/tcp"] = struct{}{}
 
 	// Add additional ports if specified in config
-	// TODO: This type check is bad find a better way to do it
+	// TODO: This port check is bad find a better way to do it
 	if nr.payload.Config != nil && nr.payload.Config.App.Port != 0 {
 		ports[nat.Port(string(nr.getPort())+"/tcp")] = struct{}{}
 	}
@@ -277,16 +332,15 @@ func (nr *nextruntime) getEnvironmentVariables() []string {
 	return envVars
 }
 
-// BUG:getPort returns the port to be used for the Next.js application.
 func (nr *nextruntime) getPort() string {
-	// if nr.payload.Config != nil && nr.payload.Config.App.Port != 0 {
-	// 	return nr.payload.Config.App.Port
-	// }
+	if nr.payload.Config != nil && nr.payload.Config.App.Port != 0 {
+		return strconv.Itoa(nr.payload.Config.App.Port)
+	}
 	return "3000" // Default value
 }
 
-// FIX: we need this to be more eloborate
-func (nr *nextruntime) getStartCommand() []string {
+// we need this to be more eloborate
+func (nr *nextruntime) GetStartCommand() []string {
 	if nr.payload.StartCommand != "" {
 		switch nr.payload.Output {
 		case "standalone":
@@ -356,8 +410,15 @@ func (nr *nextruntime) getMounts() []mount.Mount {
 func (nr *nextruntime) ConfigureReverseProxy() error {
 	// Generate caddy file content based on nextjs metadata
 	caddyfileConfig := nr.GenerateCaddyfile()
+	NextCoreLogger.Debug("The caddy configuration is:\n%s", caddyfileConfig)
+	// validate before writing
+	err := nr.validateCaddyfile(caddyfileConfig)
+	if err != nil {
+		NextCoreLogger.Error("Caddyfile validation failed: %s", err)
+		return fmt.Errorf("Caddyfile validation failed: %w", err)
+	}
 	// write caddy file to appropriate location
-	caddyfilePath := filepath.Join(".nextdeploy", "caddy", "Caddyfile")
+	caddyfilePath := filepath.Join("/etc/caddy", "Caddyfile")
 	if err := os.MkdirAll(filepath.Dir(caddyfilePath), 0755); err != nil {
 		NextCoreLogger.Error("failed to crate caddy directory:%s", err)
 		return fmt.Errorf("failed to create caddy directory:%w", err)
@@ -380,13 +441,16 @@ func (nr *nextruntime) ConfigureReverseProxy() error {
 }
 
 func (nr *nextruntime) GenerateCaddyfile() string {
+	if nr == nil || nr.payload == nil || nr.payload.Domain == "" {
+		NextCoreLogger.Error("nextruntime or payload is nil or domain is empty")
+		return ""
+	}
 	var sb strings.Builder
-
-	// write global configs
 	sb.WriteString("{\n")
 	// we will have to handle https at proxy level
 	sb.WriteString("  auto_https off\n")
 	sb.WriteString("  admin off\n")
+	sb.WriteString("  admin 0.0.0.0:2019\n")
 	sb.WriteString("}\n\n")
 
 	// main server block
@@ -402,11 +466,11 @@ func (nr *nextruntime) GenerateCaddyfile() string {
 	// handle middlware routes
 	sb.WriteString(nr.generateMiddlewareHandlers())
 	// Default reverse proxy to Next.js app
-	sb.WriteString(fmt.Sprintf("  reverse_proxy http://%s:%d {\n", nr.getContainerName(), nr.getPort()))
+	sb.WriteString(fmt.Sprintf("  reverse_proxy http://%s:%s {\n", nr.payload.Config.App.Name, nr.getPort()))
 	sb.WriteString("    header_up X-Forwarded-Proto {scheme}\n")
 	sb.WriteString("    header_up X-Real-IP {remote}\n")
 	sb.WriteString("    transport http {\n")
-	sb.WriteString("      keepalive 32\n")
+	sb.WriteString("      keepalive 32s\n")
 	sb.WriteString("      keepalive_interval 30s\n")
 	sb.WriteString("    }\n")
 	sb.WriteString("  }\n")
@@ -430,7 +494,7 @@ func (nr *nextruntime) generateAPIHandlers() string {
 
 	for _, route := range nr.payload.RouteInfo.APIRoutes {
 		sb.WriteString(fmt.Sprintf("  handle %s {\n", route))
-		sb.WriteString(fmt.Sprintf("    reverse_proxy http://%s:%d%s {\n",
+		sb.WriteString(fmt.Sprintf("    reverse_proxy http://%s:%s%s {\n",
 			nr.getContainerName(), nr.getPort(), route))
 		sb.WriteString("      header_up X-Forwarded-Proto {scheme}\n")
 		sb.WriteString("      header_up X-Real-IP {remote}\n")
@@ -464,8 +528,7 @@ func (nr *nextruntime) generateMiddlewareHandlers() string {
 		}
 
 		sb.WriteString(fmt.Sprintf("  handle @%s {\n", matcher.Type))
-		sb.WriteString(fmt.Sprintf("    reverse_proxy http://%s:%d {\n",
-			nr.getContainerName(), nr.getPort()))
+		sb.WriteString(fmt.Sprintf("    reverse_proxy http://localhost:%s {\n", nr.getPort()))
 		sb.WriteString("      header_up X-Forwarded-Proto {scheme}\n")
 		sb.WriteString("      header_up X-Real-IP {remote}\n")
 		sb.WriteString("    }\n")
@@ -499,7 +562,7 @@ func (nr *nextruntime) generateStaticPageHandlers() string {
 		sb.WriteString(" # ISR routes\n")
 		for route, revalidate := range nr.payload.RouteInfo.ISRRoutes {
 			sb.WriteString(fmt.Sprintf("  handle %s {\n", route))
-			sb.WriteString(fmt.Sprintf("    reverse_proxy http://%s:%d {\n", nr.getContainerName(), nr.getPort()))
+			sb.WriteString(fmt.Sprintf("    reverse_proxy http://%s:%s {\n", nr.getContainerName(), nr.getPort()))
 			sb.WriteString("      header_up X-Forwarded-Proto {scheme}\n")
 			sb.WriteString("      header_up X-Real-IP {remote}\n")
 			sb.WriteString(fmt.Sprintf("      header Cache-Control \"public, max-age=%s, stale-while-revalidate=60\"\n", revalidate))
@@ -549,8 +612,7 @@ func (nr *nextruntime) generateSSRHandlers() string {
 
 	for _, route := range nr.payload.RouteInfo.SSRRoutes {
 		sb.WriteString(fmt.Sprintf("  handle %s {\n", route))
-		sb.WriteString(fmt.Sprintf("    reverse_proxy http://%s:%d {\n",
-			nr.getContainerName(), nr.getPort()))
+		sb.WriteString(fmt.Sprintf("    reverse_proxy http://localhost:%s {\n", nr.getPort()))
 		sb.WriteString("      header_up X-Forwarded-Proto {scheme}\n")
 		sb.WriteString("      header_up X-Real-IP {remote}\n")
 		sb.WriteString("    }\n")
@@ -560,37 +622,6 @@ func (nr *nextruntime) generateSSRHandlers() string {
 	return sb.String()
 }
 
-//	func (nr *nextruntime) EnableMonitoring() error {
-//		// Add Prometheus endpoint if enabled in config
-//		if nr.payload.Config.Monitoring.Prometheus {
-//			nr.containerConfig.Env = append(nr.containerConfig.Env,
-//				"NEXT_PUBLIC_PROMETHEUS_ENABLED=true",
-//				"PROMETHEUS_PORT=9090",
-//			)
-//			nr.hostConfig.PortBindings["9090/tcp"] = []nat.PortBinding{
-//				{HostIP: "0.0.0.0", HostPort: "9090"},
-//			}
-//		}
-//		return nil
-//
-// //	}  ```go
-//
-//	   func (nr *NextRuntime) AddLifecycleHooks() {
-//	       if nr.payload.NextBuild.HasAppRouter {
-//	           nr.containerConfig.Labels["nextdeploy.lifecycle.preStop"] =
-//	               "/bin/sh -c 'npm run poststop'"
-//	       }
-//	   }
-//
-//		//	  func (nr *NextRuntime) ConfigureLogging() {
-//		       nr.hostConfig.LogConfig = &container.LogConfig{
-//		           Type: "json-file",
-//		           Config: map[string]string{
-//		               "max-size": "10m",
-//		               "max-file": "3",
-//		           },
-//		       }
-//		   }
 func (nr *nextruntime) GetRuntimeStats(ctx context.Context) (container.StatsResponseReader, error) {
 	containerName := nr.getContainerName()
 	return nr.dockerclient.ContainerStats(ctx, containerName, false)

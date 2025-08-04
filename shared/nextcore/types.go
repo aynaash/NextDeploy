@@ -26,7 +26,7 @@ type NextCorePayload struct {
 	Config            *config.NextDeployConfig `json:"config,omitempty"`
 	ImageAssets       ImageAssets              `json:"image_assets"`    // Detected image assets
 	RouteInfo         RouteInfo                `json:"route_info"`      // Information about routes
-	Output            string                   `json:"output"`          // "standalone", "export", etc.
+	Output            string                   `json:"standalone"`      // "standalone", "export", etc.
 	NextBuild         NextBuild                `json:"next_build"`      // Full Next.js build structure
 	WorkingDir        string                   `json:"working_dir"`     // Working directory for the build
 	RootDir           string                   `json:"root_dir"`        // Root directory of the Next.js project
