@@ -55,5 +55,4 @@ func GenerateShadowPort() int {
 func RegisterApp(app string, containerID string, port int) {
 	// Register app in internal registry
 	// This could be a database or a file
-	return
 }

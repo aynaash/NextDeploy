@@ -107,7 +107,8 @@ sudo cp bin/nextdeploy /usr/local/bin/
 export NEXTDEPLOY_DAEMON_URL="http://your-server:8080"
 
 # For persistent configuration, add to ~/.bashrc
-echo 'export NEXTDEPLOY_DAEMON_URL="http://your-server:8080"' >> ~/.bashrc
+eecho 'export NEXTDEPLOY_DAEMON_URL="http://your-server:8080"' >> ~/.bashrc
+cho 'export NEXTDEPLOY_DAEMON_URL="http://your-server:8080"' >> ~/.bashrc
 ```
 
 ### CLI Flags

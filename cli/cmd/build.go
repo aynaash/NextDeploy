@@ -126,7 +126,7 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 	// Determine environment (dev/prod)
 	env := os.Getenv("NODE_ENV")
 	if env == "" {
-		env = "development"
+		env = "production"
 	}
 	var buildArgs map[string]string
 	buildArgs = make(map[string]string)

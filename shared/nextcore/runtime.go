@@ -211,6 +211,7 @@ func (nr *nextruntime) createNetworkingConfig() *network.NetworkingConfig {
 
 	return config
 }
+
 func (nr *nextruntime) CreateContainer(ctx context.Context) (string, error) {
 	// configure container based on metadata
 	if err := nr.ensureNetwork(ctx); err != nil {
@@ -237,16 +238,6 @@ func (nr *nextruntime) CreateContainer(ctx context.Context) (string, error) {
 		NextCoreLogger.Error("Error creating container:%s", err)
 		return "", fmt.Errorf("failed to create container:%w", err)
 	}
-	// start the container
-	if err := nr.dockerclient.ContainerStart(
-		ctx,
-		resp.ID,
-		container.StartOptions{},
-	); err != nil {
-		NextCoreLogger.Error("Error starting container:%s", err)
-		return "", fmt.Errorf("failed to start container")
-	}
-
 	return resp.ID, nil
 }
 func (nr *nextruntime) Cleanup(ctx context.Context) error {

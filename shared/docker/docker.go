@@ -18,10 +18,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
-	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/jsonmessage"
 	"github.com/moby/term"
 	"github.com/spf13/cobra"
 )
@@ -116,57 +115,81 @@ func NewDockerClient(logger *shared.Logger) (*DockerManager, error) {
 	}, nil
 }
 
-// NewDockerManager creates a new DockerManager instance
+func (dm *DockerManager) CreateTarContext(meta *nextcore.NextCorePayload) (io.Reader, error) {
+	pr, pw := io.Pipe()
+	tw := tar.NewWriter(pw)
 
-//	func (d *DockerManager) BuildImageFromMetadata(ctx context.Context, meta nextcore.NextCorePayload) (string, error) {
-//		tarBuf := new(bytes.Buffer)
-//		tw := tar.NewWriter(tarBuf)
-//
-//		// Tarball relevant files for Next.js app build context
-//		_ = filepath.Walk(meta.WorkingDir, func(path string, info os.FileInfo, err error) error {
-//			if err != nil || info.IsDir() {
-//				return nil
-//			}
-//
-//			relPath, _ := filepath.Rel(meta.WorkingDir, path)
-//			if relPath == "" {
-//				return nil
-//			}
-//
-//			file, err := os.Open(path)
-//			if err != nil {
-//				return nil
-//			}
-//			defer file.Close()
-//
-//			hdr, err := tar.FileInfoHeader(info, "")
-//			if err != nil {
-//				return nil
-//			}
-//			hdr.Name = relPath
-//			_ = tw.WriteHeader(hdr)
-//			_, _ = io.Copy(tw, file)
-//			return nil
-//		})
-//
-//		_ = tw.Close()
-//
-//		tag := meta.Name + ":latest"
-//		options := types.ImageBuildOptions{
-//			Tags:       []string{tag},
-//			Dockerfile: "Dockerfile", // We can fake this or inject internally
-//			Remove:     true,
-//		}
-//
-//		res, err := d.Raw.ImageBuild(ctx, bytes.NewReader(tarBuf.Bytes()), options)
-//		if err != nil {
-//			return "", err
-//		}
-//		defer res.Body.Close()
-//
-//		// Optional: stream logs or decode JSON from response.Body
-//		return tag, nil
-//	}
+	go func() {
+		defer pw.Close()
+		defer tw.Close()
+
+		// Read Dockerfile from current directory
+		dockerfileContent, err := os.ReadFile("Dockerfile")
+		if err != nil {
+			dlog.Error("Error reading Dockerfile: %v", err)
+			pw.CloseWithError(err)
+			return
+		}
+		dlog.Debug("Dockerfile content read successfully: %s", string(dockerfileContent))
+
+		// Write Dockerfile to tar
+		err = writeToTar(tw, "Dockerfile", dockerfileContent)
+		if err != nil {
+			dlog.Error("Error writing Dockerfile to tar: %v", err)
+			pw.CloseWithError(err)
+			return
+		}
+
+		// Copy app source, excluding unnecessary files
+		dlog.Debug("Writing app files to tar from root directory: %s", meta.RootDir)
+		err = filepath.Walk(meta.RootDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				dlog.Error("Error walking path %s: %v", path, err)
+				return err
+			}
+
+			// Skip directories and unwanted files
+			if info.IsDir() ||
+				strings.Contains(path, "node_modules") ||
+				strings.Contains(path, ".next") ||
+				strings.Contains(path, ".git") {
+				return nil
+			}
+
+			relPath := strings.TrimPrefix(path, meta.RootDir+string(filepath.Separator))
+			fileData, err := os.ReadFile(path)
+			if err != nil {
+				dlog.Error("Error reading file %s: %v", path, err)
+				return err
+			}
+			return writeToTar(tw, relPath, fileData)
+		})
+
+		if err != nil {
+			dlog.Error("Error writing app files to tar: %v", err)
+			pw.CloseWithError(err)
+			return
+		}
+	}()
+
+	return pr, nil
+}
+
+func writeToTar(tw *tar.Writer, name string, data []byte) error {
+	hdr := &tar.Header{
+		Name:     name,
+		Mode:     0644,
+		Size:     int64(len(data)),
+		Typeflag: tar.TypeReg,
+		ModTime:  time.Now(),
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		dlog.Error("Error writing header for %s: %v", name, err)
+		return err
+	}
+	_, err := tw.Write(data)
+	return err
+}
 func (dm *DockerManager) BuildImage(ctx context.Context, opts BuildOptions) error {
 	// generate and validate metadata first
 	metadata, err := nextcore.GenerateMetadata()
@@ -179,43 +202,38 @@ func (dm *DockerManager) BuildImage(ctx context.Context, opts BuildOptions) erro
 		dlog.Error("Failed to validate build state: %v", err)
 		return fmt.Errorf("failed to validate build state: %w", err)
 	}
-	// create build context
 	buildContext, err := dm.createBuildContext(&metadata)
+
 	if err != nil {
 		dlog.Error("Failed to create build context: %v", err)
 		return fmt.Errorf("failed to create build context: %w", err)
 	}
 	defer buildContext.Close()
 
-	// configure build options
-	buildOptions := build.ImageBuildOptions{
-		Tags:        []string{opts.ImageName},
-		Dockerfile:  "Dockerfile",
-		Remove:      true,
-		ForceRemove: true,
-		NoCache:     opts.NoCache,
-		PullParent:  opts.Pull,
-		Platform:    opts.Platform,
-		Target:      opts.Target,
-		Labels: map[string]string{
-			"nextjs.version":   metadata.NextVersion,
-			"nextjs.buildMode": metadata.Output,
-		},
-	}
+	// // configure build options
+	// buildOptions := build.ImageBuildOptions{
+	// 	Tags:        []string{opts.ImageName},
+	// 	Dockerfile:  "Dockerfile",
+	// 	Remove:      true,
+	// 	ForceRemove: true,
+	// 	NoCache:     opts.NoCache,
+	// 	PullParent:  opts.Pull,
+	// 	Platform:    opts.Platform,
+	// 	Target:      opts.Target,
+	// 	Labels: map[string]string{
+	// 		"nextjs.version":   metadata.NextVersion,
+	// 		"nextjs.buildMode": metadata.Output,
+	// 	},
+	// }
 	// add build args from metadata
 	if envVars := dm.GetBuildArgs(); envVars == nil {
 		dlog.Error("Failed to get build args: %v", err)
 		return fmt.Errorf("failed to get build args: %w", err)
 	}
-	// Execute build
-	resp, err := dm.cli.ImageBuild(ctx, buildContext, buildOptions)
-	if err != nil {
-		dlog.Error("Failed to build Docker image: %v", err)
-		return fmt.Errorf("failed to build Docker image: %w", err)
-	}
-	defer resp.Body.Close()
+
 	// Display build output
 	fd, isTerminal := term.GetFdInfo(os.Stdout)
+	dlog.Debug("Is terminal: %v, file descriptor: %d", isTerminal, fd)
 	//TODO: we can build the container here using .nextdeploy/metadata.json
 	nextruntime, err := nextcore.NewNextRuntime(&metadata)
 	if err != nil {
@@ -229,7 +247,8 @@ func (dm *DockerManager) BuildImage(ctx context.Context, opts BuildOptions) erro
 	}
 
 	dlog.Success("Docker image built successfully with ID: %s", ID)
-	return jsonmessage.DisplayJSONMessagesStream(resp.Body, os.Stdout, fd, isTerminal, nil)
+	return nil
+
 }
 func (dm *DockerManager) createBuildContext(metadata *nextcore.NextCorePayload) (io.ReadCloser, error) {
 	var buf bytes.Buffer
@@ -237,13 +256,13 @@ func (dm *DockerManager) createBuildContext(metadata *nextcore.NextCorePayload) 
 	defer tw.Close()
 
 	// Add Dockerfile
-	cwd, err := os.Getwd()
-	if err != nil {
-		dlog.Error("Failed to get current directory: %v", err)
-		return nil, fmt.Errorf("failed to get current directory: %w", err)
-	}
-	packageManger, err := nextcore.DetectPackageManager(cwd)
-	dockerfileContent, err := dm.GenerateDockerfileContent(packageManger.String())
+	// cwd, err := os.Getwd()
+	// if err != nil {
+	// 	dlog.Error("Failed to get current directory: %v", err)
+	// 	return nil, fmt.Errorf("failed to get current directory: %w", err)
+	// }
+	//packageManger, err := nextcore.DetectPackageManager(cwd)
+	dockerfileContent, err := os.ReadFile("Dockerfile")
 	dlog.Debug("Generated Dockerfile content:\n%s", dockerfileContent)
 	if err != nil {
 		dlog.Error("Failed to generate Dockerfile content: %v", err)

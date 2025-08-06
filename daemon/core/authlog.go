@@ -15,6 +15,7 @@ type AuditLog struct {
 
 func NewAuditLog(path string) (*AuditLog, error) {
 	if err := os.MkdirAll(path, 0700); err != nil {
+		corelogs.Error("Failed to create audit log directory", "path", path, "error", err)
 		return nil, err
 	}
 
@@ -29,6 +30,7 @@ func (al *AuditLog) AddEntry(entry shared.AuditLogEntry) error {
 
 	file, err := os.OpenFile(al.path+"/audit.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
+		corelogs.Error("Failed to open audit log file path %s:%s", al.path, err)
 		return err
 	}
 
@@ -48,6 +50,7 @@ func (al *AuditLog) Query(since time.Time) ([]shared.AuditLogEntry, error) {
 	file, err := os.Open(al.path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			corelogs.Info("No audit log file found path:%s", al.path)
 			return []shared.AuditLogEntry{}, nil // No log file, return empty
 		}
 		return nil, err // Other errors
@@ -60,6 +63,7 @@ func (al *AuditLog) Query(since time.Time) ([]shared.AuditLogEntry, error) {
 	for decoder.More() {
 		var entry shared.AuditLogEntry
 		if err := decoder.Decode((&entry)); err != nil {
+			corelogs.Warn("Failed to decode audit log entry error:%s", err)
 			continue
 		}
 		if entry.Timestamp.After(since) {

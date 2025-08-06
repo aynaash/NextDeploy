@@ -16,7 +16,6 @@ package main
 import (
 	"context"
 	"flag"
-	"log"
 	"log/slog"
 	"net/http"
 	"nextdeploy/daemon/core"
@@ -29,8 +28,9 @@ import (
 )
 
 var (
-	version   = "1.0.0"
-	buildDate = ""
+	version      = "1.0.0"
+	buildDate    = ""
+	DaemonLogger = shared.PackageLogger("nextdeployd", "NextDeployDaemon")
 
 	config = struct {
 		host        string
@@ -60,13 +60,24 @@ var (
 )
 
 func startServer(server *http.Server, name string, logger *slog.Logger, errChan chan<- error) {
-	logger.Info("starting server", "name", name, "address", server.Addr)
+	DaemonLogger.Info("starting server name:%s address:%s", name, server.Addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Error("server error", "name", name, "error", err)
+		DaemonLogger.Error("server error name:%s error:%s", name, err)
 		errChan <- err
 	}
 }
-
+func init() {
+	flag.StringVar(&config.host, "host", "0.0.0.0", "Host to bind to")
+	flag.StringVar(&config.port, "port", "8080", "Port to listen on")
+	flag.StringVar(&config.keyDir, "key-dir", "/var/lib/nextdeploy/keys", "Directory for key storage")
+	flag.DurationVar(&config.rotateFreq, "rotate-freq", 24*time.Hour, "Key rotation frequency")
+	flag.BoolVar(&config.debug, "debug", false, "Enable debug mode")
+	flag.StringVar(&config.logFormat, "log-format", "json", "Log format (text/json)")
+	flag.StringVar(&config.metricsPort, "metrics-port", "9090", "Metrics server port")
+	flag.BoolVar(&config.daemonize, "daemonize", false, "Run as daemon")
+	flag.StringVar(&config.pidFile, "pidfile", "/var/run/nextdeploy.pid", "PID file location")
+	flag.StringVar(&config.logFile, "log-file", "/var/log/nextdeployd.log", "Log file location")
+}
 func main() {
 	flag.Parse()
 
@@ -77,10 +88,7 @@ func main() {
 		core.Daemonize(logger, config.pidFile)
 	}
 
-	logger.Info("starting NextDeploy daemon",
-		"version", version,
-		"pid", os.Getpid(),
-		"config", config)
+	DaemonLogger.Info("starting NextDeploy daemon version:%s  -- pid:%s --  config:%s", version, os.Getpid(), config)
 
 	// Initialize components
 	ctx, cancel := context.WithCancel(context.Background())
@@ -89,17 +97,18 @@ func main() {
 	// Setup key manager
 	keyManager, err := core.SetupKeyManager(logger, config.keyDir, config.rotateFreq)
 	if err != nil {
+		DaemonLogger.Error("failed to initialize key manager error:%s", err)
 		os.Exit(1)
 	}
 	// Run health checks
 	if err := shared.RunCryptoHealthChecks(); err != nil {
-		log.Fatalf("Crypto health checks failed: %v", err)
+		DaemonLogger.Fatal("crypto health checks failed error:%s", err)
 	}
 	defer keyManager.StopRotation()
 	//FIX: fix this logic for bettertrust store management
 	auditLog, err := core.NewAuditLog(filepath.Join("audit.log"))
 	if err != nil {
-		logger.Error("failed to initialize audit log", "error", err)
+		DaemonLogger.Error("failed to initialize audit log error:%s", err)
 		os.Exit(1)
 	}
 
@@ -149,7 +158,7 @@ func main() {
 			logger.Info("received signal", "signal", sig)
 			switch sig {
 			case syscall.SIGHUP:
-				logger.Info("reloading configuration")
+				DaemonLogger.Info("received SIGHUP, reloading configuration")
 				// TODO: Implement config reload
 				auditLog.AddEntry(shared.AuditLogEntry{
 					Timestamp: time.Now(),
