@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/docker/docker/api/types/build"
 	"io"
 	"nextdeploy/shared"
 	"nextdeploy/shared/config"
@@ -20,8 +21,9 @@ import (
 	"strings"
 	"time"
 
+	"encoding/json"
+
 	"github.com/docker/docker/client"
-	"github.com/moby/term"
 	"github.com/spf13/cobra"
 )
 
@@ -190,78 +192,266 @@ func writeToTar(tw *tar.Writer, name string, data []byte) error {
 	_, err := tw.Write(data)
 	return err
 }
-func (dm *DockerManager) BuildImage(ctx context.Context, opts BuildOptions) error {
-	// generate and validate metadata first
-	metadata, err := nextcore.GenerateMetadata()
+func (dm *DockerManager) BuildAndDeploy(ctx context.Context, opts BuildOptions) error {
+	meta, err := nextcore.GenerateMetadata()
 	if err != nil {
-		dlog.Error("Metadata generation failed: %v", err)
-		return fmt.Errorf("metadata generation  failed:%w", err)
+		dlog.Error("Error generating metadata: %v", err)
+		fmt.Printf("Error generating metadata: %v\n", err)
+		os.Exit(1)
 	}
-	// validate
-	if err := nextcore.ValidateBuildState(); err != nil {
-		dlog.Error("Failed to validate build state: %v", err)
-		return fmt.Errorf("failed to validate build state: %w", err)
+	dlog.Info("Generated metadata: %+v", meta)
+	file, err := os.ReadFile(".nextdeploy/metadata.json")
+	if err != nil {
+		dlog.Error("Error loading metadata: %v", err)
+		fmt.Printf("Error loading metadata: %v\n", err)
+		os.Exit(1)
 	}
-	buildContext, err := dm.createBuildContext(&metadata)
+	var payload nextcore.NextCorePayload
+	if err := json.Unmarshal(file, &payload); err != nil {
+		dlog.Error("Error parsing metadata: %v", err)
+		fmt.Printf("Error parsing metadata: %v\n", err)
+		os.Exit(1)
+	}
 
+	ctx = context.Background()
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		dlog.Error("Error creating Docker client: %v", err)
+		panic(err)
+	}
+
+	// Use consistent image naming with git commit hash
+	imageName := fmt.Sprintf("%s:%s", strings.ToLower(payload.Config.App.Name), payload.GitCommit)
+	dlog.Debug("Using image name: %s", imageName)
+	if payload.GitCommit == "" {
+		imageName = fmt.Sprintf("%s:latest", strings.ToLower(payload.Config.App.Name))
+	}
+
+	// Step 1: Create tar stream
+	tarBuf, err := createTarContext(&payload)
+	if err != nil {
+		dlog.Error("Error creating tar context: %v", err)
+		panic(err)
+	}
+
+	// Step 2: Build image
+	buildOptions := build.ImageBuildOptions{
+		Tags:       []string{imageName},
+		Remove:     true,
+		Dockerfile: "Dockerfile",
+	}
+
+	buildResp, err := cli.ImageBuild(ctx, tarBuf, buildOptions)
+	if err != nil {
+		dlog.Error("Error building image: %v", err)
+		panic(err)
+	}
+	defer buildResp.Body.Close()
+
+	// Stream build output and check for errors
+	scanner := bufio.NewScanner(buildResp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		fmt.Println(line)
+
+		// Check for build errors in the output
+		if strings.Contains(line, "ERROR") || strings.Contains(line, "error") {
+			dlog.Error("Build error detected: %s", line)
+			os.Exit(1)
+		}
+	}
+	// Create runtime
+	runtime, err := nextcore.NewNextRuntime(&payload)
+	if err != nil {
+		dlog.Error("Error creating runtime: %v", err)
+		fmt.Printf("Error creating runtime: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Create and start container
+	containerID, err := runtime.CreateContainer(context.Background())
+	dlog.Debug("Creating container with ID: %s", containerID)
+	if err != nil {
+		dlog.Error("Error creating container: %v", err)
+		fmt.Printf("Error starting container: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Container started successfully: %s\n", containerID)
+
+	return nil
+}
+
+func createTarContext(meta *nextcore.NextCorePayload) (io.Reader, error) {
+	pr, pw := io.Pipe()
+	tw := tar.NewWriter(pw)
+
+	go func() {
+		defer pw.Close()
+		defer tw.Close()
+
+		// Read Dockerfile from current directory
+		dockerfileContent, err := os.ReadFile("Dockerfile")
+		if err != nil {
+			dlog.Error("Error reading Dockerfile: %v", err)
+			pw.CloseWithError(err)
+			return
+		}
+		dlog.Debug("Dockerfile content read successfully: %s", string(dockerfileContent))
+
+		// Write Dockerfile to tar
+		err = writeToTar(tw, "Dockerfile", dockerfileContent)
+		if err != nil {
+			dlog.Error("Error writing Dockerfile to tar: %v", err)
+			pw.CloseWithError(err)
+			return
+		}
+
+		// Copy app source, excluding unnecessary files
+		dlog.Debug("Writing app files to tar from root directory: %s", meta.RootDir)
+		err = filepath.Walk(meta.RootDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				dlog.Error("Error walking path %s: %v", path, err)
+				return err
+			}
+
+			// Skip directories and unwanted files
+			if info.IsDir() ||
+				strings.Contains(path, "node_modules") ||
+				strings.Contains(path, ".next") ||
+				strings.Contains(path, ".git") {
+				return nil
+			}
+
+			relPath := strings.TrimPrefix(path, meta.RootDir+string(filepath.Separator))
+			fileData, err := os.ReadFile(path)
+			if err != nil {
+				dlog.Error("Error reading file %s: %v", path, err)
+				return err
+			}
+			return writeToTar(tw, relPath, fileData)
+		})
+
+		if err != nil {
+			dlog.Error("Error writing app files to tar: %v", err)
+			pw.CloseWithError(err)
+			return
+		}
+	}()
+
+	return pr, nil
+}
+
+// Helper method to build Docker image
+func (dm *DockerManager) buildDockerImage(ctx context.Context, metadata *nextcore.NextCorePayload, opts BuildOptions) (string, error) {
+	// Determine image name with git commit hash
+	imageName := fmt.Sprintf("%s:%s", strings.ToLower(metadata.Config.App.Name), metadata.GitCommit)
+	if metadata.GitCommit == "" {
+		imageName = fmt.Sprintf("%s:latest", strings.ToLower(metadata.Config.App.Name))
+		dlog.Warn("Git commit is empty, using 'latest' tag for image")
+	}
+	dlog.Debug("Building image: %s", imageName)
+
+	// Create build context
+	buildContext, err := dm.createBuildContext(metadata)
 	if err != nil {
 		dlog.Error("Failed to create build context: %v", err)
-		return fmt.Errorf("failed to create build context: %w", err)
+		return "", fmt.Errorf("failed to create build context: %w", err)
 	}
 	defer buildContext.Close()
 
-	// // configure build options
-	// buildOptions := build.ImageBuildOptions{
-	// 	Tags:        []string{opts.ImageName},
-	// 	Dockerfile:  "Dockerfile",
-	// 	Remove:      true,
-	// 	ForceRemove: true,
-	// 	NoCache:     opts.NoCache,
-	// 	PullParent:  opts.Pull,
-	// 	Platform:    opts.Platform,
-	// 	Target:      opts.Target,
-	// 	Labels: map[string]string{
-	// 		"nextjs.version":   metadata.NextVersion,
-	// 		"nextjs.buildMode": metadata.Output,
-	// 	},
-	// }
-	// add build args from metadata
-	if envVars := dm.GetBuildArgs(); envVars == nil {
-		dlog.Error("Failed to get build args: %v", err)
-		return fmt.Errorf("failed to get build args: %w", err)
+	// Build options
+	buildOptions := build.ImageBuildOptions{
+		Tags:       []string{imageName},
+		Dockerfile: "Dockerfile",
+		BuildArgs:  dm.GetBuildArgs(),
+		Remove:     true,
+		NoCache:    opts.NoCache,
+		PullParent: true,
 	}
 
-	// Display build output
-	fd, isTerminal := term.GetFdInfo(os.Stdout)
-	dlog.Debug("Is terminal: %v, file descriptor: %d", isTerminal, fd)
-	//TODO: we can build the container here using .nextdeploy/metadata.json
-	nextruntime, err := nextcore.NewNextRuntime(&metadata)
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	// Build the image
+	buildResponse, err := cli.ImageBuild(ctx, buildContext, buildOptions)
 	if err != nil {
-		dlog.Error("error creating next runtime:%s", err)
-		return err
+		dlog.Error("Failed to build image: %v", err)
+		return "", fmt.Errorf("failed to build image: %w", err)
 	}
-	ID, err := nextruntime.CreateContainer(ctx)
+	defer buildResponse.Body.Close()
+
+	// Stream and parse build output
+	if err := dm.streamBuildOutput(buildResponse.Body); err != nil {
+		return "", fmt.Errorf("build failed: %w", err)
+	}
+
+	dlog.Success("✅ Successfully built image: %s", imageName)
+	return imageName, nil
+}
+
+// Helper method to create and start container
+func (dm *DockerManager) createAndStartContainer(ctx context.Context, metadata *nextcore.NextCorePayload, imageName string) (string, error) {
+	// Create runtime instance
+	runtime, err := nextcore.NewNextRuntime(metadata)
 	if err != nil {
-		dlog.Error("Failed to create container: %v", err)
-		return fmt.Errorf("failed to create container: %w", err)
+		dlog.Error("Error creating runtime: %v", err)
+		return "", fmt.Errorf("error creating runtime: %w", err)
 	}
 
-	dlog.Success("Docker image built successfully with ID: %s", ID)
-	return nil
+	// Create container
+	containerID, err := runtime.CreateContainer(ctx)
+	if err != nil {
+		dlog.Error("Error creating container: %v", err)
+		return "", fmt.Errorf("error creating container: %w", err)
+	}
 
+	dlog.Debug("Created container with ID: %s", containerID)
+	return containerID, nil
+}
+
+// Helper method to stream build output
+func (dm *DockerManager) streamBuildOutput(reader io.Reader) error {
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		var message struct {
+			Stream string `json:"stream"`
+			Error  string `json:"error"`
+			Status string `json:"status"`
+		}
+
+		if err := json.Unmarshal([]byte(line), &message); err != nil {
+			// If not JSON, log as raw output
+			dlog.Info("Build: %s", strings.TrimSpace(line))
+			continue
+		}
+
+		// Handle different message types
+		if message.Stream != "" {
+			dlog.Info("Build: %s", strings.TrimSpace(message.Stream))
+		}
+		if message.Status != "" {
+			dlog.Debug("Status: %s", message.Status)
+		}
+		if message.Error != "" {
+			dlog.Error("Build error: %s", message.Error)
+			return fmt.Errorf("build error: %s", message.Error)
+		}
+
+		// Check for error patterns in raw output as fallback
+		if strings.Contains(strings.ToLower(line), "error") {
+			dlog.Error("Build error detected: %s", line)
+			return fmt.Errorf("build error detected: %s", line)
+		}
+	}
+
+	return scanner.Err()
 }
 func (dm *DockerManager) createBuildContext(metadata *nextcore.NextCorePayload) (io.ReadCloser, error) {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	defer tw.Close()
 
-	// Add Dockerfile
-	// cwd, err := os.Getwd()
-	// if err != nil {
-	// 	dlog.Error("Failed to get current directory: %v", err)
-	// 	return nil, fmt.Errorf("failed to get current directory: %w", err)
-	// }
-	//packageManger, err := nextcore.DetectPackageManager(cwd)
 	dockerfileContent, err := os.ReadFile("Dockerfile")
 	dlog.Debug("Generated Dockerfile content:\n%s", dockerfileContent)
 	if err != nil {
@@ -452,13 +642,17 @@ func (dm *DockerManager) addMetadataAndAssets(tw *tar.Writer) error {
 }
 
 // TODO: build args are static we need load from somewhere that is user defined
-func (dc *DockerManager) GetBuildArgs() map[string]string {
-	return map[string]string{
-		"NODE_ENV":     "production",
-		"NODE_VERSION": "20-alpine",
-		"APP_ENV":      "production",
+func (dc *DockerManager) GetBuildArgs() map[string]*string {
+	nodeEnv := "production"
+	nodeVersion := "20-alpine"
+	appEnv := "production"
+
+	return map[string]*string{
+		"NODE_ENV":     &nodeEnv,
+		"NODE_VERSION": &nodeVersion,
+		"APP_ENV":      &appEnv,
 	}
-} // Helper function to add a file to tar if it exists
+}
 func (dm DockerManager) addFileIfExists(tw *tar.Writer, filename string) error {
 	content, err := os.ReadFile(filename)
 	if err != nil {
@@ -788,18 +982,29 @@ func (dm *DockerManager) PushImage(ctx context.Context, imageName string, Provis
 			return fmt.Errorf("failed to prepare ECR push context: %w", err)
 		}
 	}
-
-	dlog.Info("Pushing Docker image: %s", imageName)
-	cmd := exec.CommandContext(ctx, "docker", "push", imageName)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	err = cmd.Run()
-	if err != nil {
-		dlog.Error("Failed to push Docker image: %v", err)
-		return fmt.Errorf("%w: %s", ErrPushFailed, err)
+	if strings.Contains(cfg.Docker.Registry, "digitalocean") {
+		dlog.Info("Preparing DigitalOcean context for image push")
+		if err := registry.DigitalOceanRegistry(ctx); err != nil {
+			dlog.Error("Failed to prepare DigitalOcean push context: %v", err)
+			return fmt.Errorf("failed to prepare DigitalOcean push context: %w", err)
+		}
 	}
-	dlog.Success("Image pushed successfully: %s", imageName)
+	// Push the image using 'docker push' command  if default which docker hub
+	dockerhub := strings.Contains(cfg.Docker.Registry, "docker")
+	if dockerhub {
+		dlog.Info("Pushing Docker image: %s", imageName)
+		cmd := exec.CommandContext(ctx, "docker", "push", imageName)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		err = cmd.Run()
+		if err != nil {
+			dlog.Error("Failed to push Docker image: %v", err)
+			return fmt.Errorf("%w: %s", ErrPushFailed, err)
+		}
+		dlog.Success("Image pushed successfully: %s", imageName)
+	}
+
 	return nil
 }
 

@@ -224,6 +224,7 @@ func (nr *nextruntime) CreateContainer(ctx context.Context) (string, error) {
 	NextCoreLogger.Debug("the host config is:%+v", hostConfig)
 	neworkingConfig := nr.createNetworkingConfig()
 	NextCoreLogger.Debug("the networking config looks like this:%+v", neworkingConfig)
+	NextCoreLogger.Info("Creating container with name: %s", nr.getContainerName())
 	// create the container
 	resp, err := nr.dockerclient.ContainerCreate(
 		ctx,

@@ -1,7 +1,5 @@
 package cmd
 
-//FIX: cobra cli issue with Flags
-//  ----- we should not be adding ip to hosts evertime
 import (
 	"context"
 	"fmt"

@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"nextdeploy/shared/failfast"
 	"nextdeploy/cli/internal/server"
 	"nextdeploy/shared"
+	"nextdeploy/shared/failfast"
 	"os"
 	"os/signal"
 	"strings"
@@ -271,18 +271,44 @@ func installIfMissing(ctx context.Context, serverMgr *server.ServerStruct, serve
 		}
 	}
 
-	if len(missingPkgs) > 0 {
-		installCmd := fmt.Sprintf("sudo apt install -y %s", strings.Join(missingPkgs, " "))
-		if _, err := serverMgr.ExecuteCommand(ctx, serverName, installCmd, stream); err != nil {
-			return err
-		}
-		logToStream(stream, fmt.Sprintf("✓ Installed missing packages: %s", strings.Join(missingPkgs, ", ")), color.FgGreen)
-	} else {
+	if len(missingPkgs) == 0 {
 		logToStream(stream, "✓ All base packages already installed", color.FgGreen)
+		return nil
 	}
+
+	// Update package lists first
+	updateCmd := "sudo apt update"
+	if _, err := serverMgr.ExecuteCommand(ctx, serverName, updateCmd, stream); err != nil {
+		PrepLogs.Warn("Failed to update package lists: %v", err)
+	}
+
+	// Install with retries
+	installCmd := fmt.Sprintf("sudo DEBIAN_FRONTEND=noninteractive apt install -y %s", strings.Join(missingPkgs, " "))
+
+	maxRetries := 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			PrepLogs.Info("Retry attempt %d/%d for package installation", attempt, maxRetries)
+			time.Sleep(2 * time.Second) // Wait before retry
+		}
+
+		output, err := serverMgr.ExecuteCommand(ctx, serverName, installCmd, stream)
+		if err == nil {
+			logToStream(stream, fmt.Sprintf("✓ Installed missing packages: %s", strings.Join(missingPkgs, ", ")), color.FgGreen)
+			return nil
+		}
+
+		if attempt == maxRetries {
+			PrepLogs.Debug("Final installation attempt failed. Output: %s", output)
+			return fmt.Errorf("failed to install packages %s after %d attempts: %w",
+				strings.Join(missingPkgs, ", "), maxRetries, err)
+		}
+
+		PrepLogs.Warn("Installation attempt %d failed: %v", attempt, err)
+	}
+
 	return nil
 }
-
 func logToStream(stream io.Writer, message string, colorAttr color.Attribute) {
 	if stream != nil {
 		c := color.New(colorAttr)
@@ -315,10 +341,31 @@ func executeCommands(ctx context.Context, serverMgr *server.ServerStruct, server
 				color.New(color.FgYellow).Fprintf(stream, "▶ %s\n", cmd)
 			}
 
-			_, err := serverMgr.ExecuteCommand(ctx, serverName, cmd, stream)
-			failfast.Failfast(err, failfast.Error, fmt.Sprintf("Command failed: %s", cmd))
+			output, err := serverMgr.ExecuteCommand(ctx, serverName, cmd, stream)
+			if err != nil {
+				PrepLogs.Debug("Command failed: %s, Output: %s", cmd, output)
+				return fmt.Errorf("command failed: %s: %w", cmd, err)
+			}
 		}
 	}
+	return nil
+}
+func verifySudoAccess(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
+	PrepLogs.Info("Verifying sudo access...")
+
+	// Test if we can run sudo without password
+	testCmd := "sudo -n true 2>/dev/null && echo 'SUDO_OK' || echo 'SUDO_FAILED'"
+
+	output, err := serverMgr.ExecuteCommand(ctx, serverName, testCmd, stream)
+	if err != nil {
+		return fmt.Errorf("sudo test failed: %w", err)
+	}
+
+	if strings.Contains(output, "SUDO_FAILED") {
+		return fmt.Errorf("passwordless sudo not working. Output: %s", output)
+	}
+
+	PrepLogs.Debug("Sudo access verified: %s", strings.TrimSpace(output))
 	return nil
 }
 

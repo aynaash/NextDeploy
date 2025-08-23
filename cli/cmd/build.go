@@ -131,11 +131,16 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 	var buildArgs map[string]string
 	buildArgs = make(map[string]string)
 	for k, v := range dm.GetBuildArgs() {
-		// log out the build args
-		buildlogger.Info("Build arg: %s=%s\n", k, v)
-		// Skip empty values
-		if v != "" {
-			buildArgs[k] = v
+		// Check if the pointer is nil before dereferencing
+		if v != nil {
+			// log out the build args
+			buildlogger.Info("Build arg: %s=%s\n", k, *v)
+			// Skip empty values
+			if *v != "" {
+				buildArgs[k] = *v
+			}
+		} else {
+			buildlogger.Warn("Build arg %s is nil, skipping", k)
 		}
 	}
 	tag, _ := git.GetCommitHash()
@@ -167,7 +172,7 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 
 	// Execute build
 	ctx := context.Background()
-	if err := dm.BuildImage(ctx, opts); err != nil {
+	if err := dm.BuildAndDeploy(ctx, opts); err != nil {
 		buildlogger.Error("Build failed: %v", err)
 		return fmt.Errorf("build failed: %w", err)
 	}
