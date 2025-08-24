@@ -167,10 +167,7 @@ func verifyServerPrerequisites(ctx context.Context, serverMgr *server.ServerStru
 
 			output, err := serverMgr.ExecuteCommand(checkCtx, serverName, check.command, stream)
 			if err != nil {
-				fmt.Sprintf("Prerequisite check failed",
-					"command", check.command,
-					"error", err,
-					"timeout", check.timeout)
+				PrepLogs.Error("Failed prerequisite check %q: %v", check.command, err)
 				return fmt.Errorf("failed prerequisite check %q: %w", check.command, err)
 			}
 			verbose = true

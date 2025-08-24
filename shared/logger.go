@@ -357,7 +357,7 @@ func (l *Logger) Timed(label string, fn func()) {
 	l.logger.Print("\r\033[K")
 
 	duration := time.Since(start)
-	l.Success(fmt.Sprintf("Completed %s in %v", label, duration.Round(time.Millisecond)))
+	l.Info("%s completed in %s", label, duration)
 }
 
 // JSON logs data in pretty-printed JSON format
@@ -372,7 +372,9 @@ func (l *Logger) JSON(level LogLevel, data interface{}) {
 		return
 	}
 
-	l.Log(level, string(jsonData))
+	fmtattedJSON := string(jsonData)
+	fmt.Println("" + fmtattedJSON)
+
 }
 
 // Table logs tabular data
@@ -428,7 +430,8 @@ func (l *Logger) Table(level LogLevel, headers []string, rows [][]string) {
 		table.WriteString("\n")
 	}
 
-	l.Log(level, table.String())
+	l.Info("%s", table.String())
+
 }
 
 // Progress creates a progress bar

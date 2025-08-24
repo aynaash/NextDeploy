@@ -292,7 +292,7 @@ func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serve
 
 	var envVars []string
 	for key, value := range cfg.Environment {
-		envVars = append(envVars, fmt.Sprintf("-e %s=%s", key, value))
+		envVars = append(envVars, fmt.Sprintf("-e %v=%v", key, value))
 	}
 	if len(envVars) > 0 {
 		ShipLogs.Debug("  Setting environment variables: %s\n", strings.Join(envVars, ", "))
