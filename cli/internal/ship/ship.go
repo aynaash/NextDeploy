@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"nextdeploy/cli/internal/server"
+	"nextdeploy/shared"
 	"nextdeploy/shared/config"
 	"nextdeploy/shared/git"
-	"nextdeploy/shared"
-	"nextdeploy/cli/internal/server"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,7 +82,7 @@ func VerifyServers(ctx context.Context, serverMgr *server.ServerStruct, servers 
 
 func TransferRequiredFiles(ctx context.Context, serverMgr *server.ServerStruct, stream io.Writer, serverName string) error {
 	ShipLogs.Info("Transferring required files to %s...", serverName)
-
+	// TODO: add logic for transfering .nextdeploy directory
 	files := map[string]string{
 		"nextdeploy.yml.enc": "nextdeploy.yml.enc",
 		".env.enc":           ".env.enc",

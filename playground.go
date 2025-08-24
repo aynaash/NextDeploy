@@ -2,1013 +2,569 @@
 // +build ignore
 
 // internal/server/preparation/manager.go
-package main
+package
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"log"
-	"net"
-	"os"
-	"os/exec"
-	"os/signal"
-	"path/filepath"
+	"github.com/fatih/color"
+	"github.com/spf13/cobra"
+	"net/url"
+	"nextdeploy/shared/config"
+	"nextdeploy/shared"
+	"nextdeploy/cli/internal/server"
 	"strings"
-	"syscall"
 	"time"
 )
 
-// Command types that the daemon can handle
-type Command struct {
-	Type string                 `json:"type"`
-	Args map[string]interface{} `json:"args"`
+const (
+	sslMetadataDir = "/var/lib/nextdeploy/ssl_metadata"
+	caddyConfigDir = "/etc/caddy"
+)
+
+type SSLConfig struct {
+	Domain      string `yaml:"domain"`
+	Email       string `yaml:"email"`
+	Staging     bool   `yaml:"staging"`
+	Wildcard    bool   `yaml:"wildcard"`
+	DNSProvider string `yaml:"dns_provider"`
+	Force       bool   `yaml:"force"`
+	Enabled     bool   `yaml:"enabled"`
+	Provider    string `yaml:"provider"`
+	AutoRenew   bool   `yaml:"auto_renew"`
 }
 
-type Response struct {
-	Success bool        `json:"success"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
+var (
+	sslConfigFile string
+	sslConfig     SSLConfig
+)
+
+var SSLCommand = &cobra.Command{
+	Use:   "ssl",
+	Short: "Automate SSL setup and Caddy configuration",
+	Long: `Configure SSL certificates and Caddy for domains with:
+- Automatic Let's Encrypt certificates
+- DNS-01 challenge support for wildcards
+- Staging environment for testing
+- Configuration rollback on failure`,
+	RunE: runSSLCommand,
+}
+var (
+	sslogs = shared.PackageLogger("ssl", "SSL")
+)
+
+func init() {
+	rootCmd.AddCommand(SSLCommand)
 }
 
-type ContainerInfo struct {
-	ID      string            `json:"id"`
-	Name    string            `json:"name"`
-	Image   string            `json:"image"`
-	Status  string            `json:"status"`
-	Ports   map[string]string `json:"ports"`
-	Created string            `json:"created"`
-	Labels  map[string]string `json:"labels"`
-}
+func runSSLCommand(cmd *cobra.Command, args []string) error {
+	// Load configuration from YAML file
 
-// Daemon struct
-type NextDeployDaemon struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	listener   net.Listener
-	socketPath string
-	config     *DaemonConfig
-}
-
-type DaemonConfig struct {
-	SocketPath      string   `json:"socket_path"`
-	SocketMode      string   `json:"socket_mode"`
-	AllowedUsers    []string `json:"allowed_users"`
-	DockerSocket    string   `json:"docker_socket"`
-	ContainerPrefix string   `json:"container_prefix"`
-	LogLevel        string   `json:"log_level"`
-}
-
-func NewNextDeployDaemon(configPath string) (*NextDeployDaemon, error) {
-	config := &DaemonConfig{
-		SocketPath:      "/var/run/nextdeployd.sock",
-		SocketMode:      "0660",
-		DockerSocket:    "/var/run/docker.sock",
-		ContainerPrefix: "nextdeploy-",
-		LogLevel:        "info",
-	}
-
-	// Load config if exists
-	if configPath != "" {
-		if err := loadConfig(configPath, config); err != nil {
-			log.Printf("Warning: Could not load config file: %v", err)
-		}
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	return &NextDeployDaemon{
-		ctx:        ctx,
-		cancel:     cancel,
-		socketPath: config.SocketPath,
-		config:     config,
-	}, nil
-}
-
-func (d *NextDeployDaemon) Start() error {
-	// Check if we can access Docker
-	if err := d.checkDockerAccess(); err != nil {
-		return fmt.Errorf("docker access check failed: %w", err)
-	}
-
-	// Remove existing socket file if it exists
-	os.Remove(d.socketPath)
-
-	// Create Unix domain socket
-	listener, err := net.Listen("unix", d.socketPath)
+	// Load main configuration
+	cfg, err := config.Load()
 	if err != nil {
-		return fmt.Errorf("failed to create socket: %w", err)
-	}
-	d.listener = listener
-
-	// Set socket permissions (only local access)
-	if err := d.setSocketPermissions(); err != nil {
-		return fmt.Errorf("failed to set socket permissions: %w", err)
+		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	log.Printf("NextDeploy daemon started, listening on %s", d.socketPath)
-	log.Printf("Docker socket: %s", d.config.DockerSocket)
-
-	// Start accepting connections
-	go d.acceptConnections()
-
-	// Handle signals
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-
-	for {
-		select {
-		case sig := <-sigCh:
-			switch sig {
-			case syscall.SIGHUP:
-				log.Println("Received SIGHUP, reloading config...")
-				// Reload config logic here
-			case syscall.SIGINT, syscall.SIGTERM:
-				log.Printf("Received signal: %v", sig)
-				d.Shutdown()
-				return nil
-			}
-		case <-d.ctx.Done():
-			return nil
+	// Extract domain from URL if necessary
+	domain := cfg.App.Domain
+	if strings.HasPrefix(domain, "http") {
+		if u, err := url.Parse(domain); err == nil {
+			domain = u.Hostname()
 		}
 	}
-}
 
-func (d *NextDeployDaemon) checkDockerAccess() error {
-	cmd := exec.Command("docker", "version")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("docker not accessible: %w", err)
+	// Initialize sslConfig from the loaded configuration
+	sslConfig := SSLConfig{
+		Domain:      domain, // Fallback to app domain if SSL domain not specified
+		Email:       cfg.SSL.Email,
+		Staging:     cfg.SSL.Staging,
+		Wildcard:    cfg.SSL.Wildcard,
+		DNSProvider: cfg.SSL.DNSProvider,
+		Force:       cfg.SSL.Force,
+		Enabled:     cfg.SSL.Enabled,
+		Provider:    cfg.SSL.Provider,
+		AutoRenew:   cfg.SSL.AutoRenew,
 	}
-	return nil
-}
 
-func (d *NextDeployDaemon) setSocketPermissions() error {
-	// Set restrictive permissions - only root and specified users/groups
-	if err := os.Chmod(d.socketPath, 0660); err != nil {
+	// If SSL-specific domain is set, use that instead
+	if cfg.SSL.Domain != "" {
+		sslConfig.Domain = cfg.SSL.Domain
+	}
+
+	sslogs.Debug("SSL Configuration", "config", sslConfig)
+
+	// Validate inputs
+	if err := validateInputs(&sslConfig); err != nil {
 		return err
 	}
 
-	// Get the socket directory and ensure it's secure
-	socketDir := filepath.Dir(d.socketPath)
-	if err := os.Chmod(socketDir, 0755); err != nil {
-		log.Printf("Warning: Could not set directory permissions: %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	// Initialize server manager
+	serverMgr, err := server.New(
+		server.WithConfig(),
+		server.WithSSH(),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to initialize server manager: %w", err)
 	}
+	sslogs.Debug("Server manager initialized")
+	defer serverMgr.CloseSSHConnection()
 
-	log.Printf("Socket permissions set to 0660 on %s", d.socketPath)
-	return nil
-}
+	// Get deployment server
 
-func (d *NextDeployDaemon) acceptConnections() {
-	for {
-		conn, err := d.listener.Accept()
-		if err != nil {
-			select {
-			case <-d.ctx.Done():
-				return
-			default:
-				log.Printf("Error accepting connection: %v", err)
-				continue
-			}
-		}
+	serverName, err := TargetServer(ctx, serverMgr)
 
-		go d.handleConnection(conn)
+	if err != nil {
+		return fmt.Errorf("failed to get deployment server: %w", err)
 	}
-}
+	sslogs.Debug("Deployment server successfully ", "server", serverName)
 
-func (d *NextDeployDaemon) handleConnection(conn net.Conn) {
-	defer conn.Close()
-
-	// Set connection timeout
-	conn.SetDeadline(time.Now().Add(30 * time.Second))
-
-	decoder := json.NewDecoder(conn)
-	encoder := json.NewEncoder(conn)
-
-	var cmd Command
-	if err := decoder.Decode(&cmd); err != nil {
-		log.Printf("Error decoding command: %v", err)
-		return
-	}
-
-	log.Printf("Received command: %s with args: %v", cmd.Type, cmd.Args)
-
-	// Validate command
-	if err := d.validateCommand(cmd); err != nil {
-		response := Response{
-			Success: false,
-			Message: fmt.Sprintf("Command validation failed: %v", err),
-		}
-		encoder.Encode(response)
-		return
-	}
-
-	response := d.executeCommand(cmd)
-
-	if err := encoder.Encode(response); err != nil {
-		log.Printf("Error sending response: %v", err)
-	}
-}
-
-func (d *NextDeployDaemon) validateCommand(cmd Command) error {
-	// Basic command validation
-	allowedCommands := []string{
-		"swapcontainers", "listcontainers", "deploy", "status",
-		"restart", "logs", "stop", "start", "remove", "pull",
-		"inspect", "health", "rollback",
-	}
-
-	for _, allowed := range allowedCommands {
-		if cmd.Type == allowed {
+	// Check if certificate already exists
+	if !sslConfig.Force {
+		if exists, err := checkCertificateExists(ctx, serverMgr, serverName, domain); err != nil {
+			return fmt.Errorf("certificate check failed: %w", err)
+		} else if exists {
+			color.Green("✓ SSL certificate already configured for %s", sslConfig.Domain)
 			return nil
 		}
 	}
 
-	return fmt.Errorf("command not allowed: %s", cmd.Type)
-}
-
-func (d *NextDeployDaemon) executeCommand(cmd Command) Response {
-	switch cmd.Type {
-	case "swapcontainers":
-		return d.swapContainers(cmd.Args)
-	case "listcontainers":
-		return d.listContainers(cmd.Args)
-	case "deploy":
-		return d.deployContainer(cmd.Args)
-	case "status":
-		return d.getStatus()
-	case "restart":
-		return d.restartContainer(cmd.Args)
-	case "logs":
-		return d.getContainerLogs(cmd.Args)
-	case "stop":
-		return d.stopContainer(cmd.Args)
-	case "start":
-		return d.startContainer(cmd.Args)
-	case "remove":
-		return d.removeContainer(cmd.Args)
-	case "pull":
-		return d.pullImage(cmd.Args)
-	case "inspect":
-		return d.inspectContainer(cmd.Args)
-	case "health":
-		return d.healthCheck(cmd.Args)
-	case "rollback":
-		return d.rollbackContainer(cmd.Args)
-	default:
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Unknown command: %s", cmd.Type),
-		}
-	}
-}
-
-// Docker command implementations
-func (d *NextDeployDaemon) swapContainers(args map[string]interface{}) Response {
-	fromContainer, ok1 := args["from"].(string)
-	toContainer, ok2 := args["to"].(string)
-
-	if !ok1 || !ok2 {
-		return Response{
-			Success: false,
-			Message: "swapcontainers requires 'from' and 'to' arguments",
-		}
-	}
-
-	log.Printf("Swapping containers: %s <-> %s", fromContainer, toContainer)
-
-	// Get container details first
-	fromInfo, err := d.getContainerInfo(fromContainer)
-	if err != nil {
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Failed to get info for container %s: %v", fromContainer, err),
-		}
-	}
-
-	toInfo, err := d.getContainerInfo(toContainer)
-	if err != nil {
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Failed to get info for container %s: %v", toContainer, err),
-		}
-	}
-
-	// Stop both containers
-	if err := d.dockerCommand("stop", fromContainer); err != nil {
-		return Response{Success: false, Message: fmt.Sprintf("Failed to stop %s: %v", fromContainer, err)}
-	}
-
-	if err := d.dockerCommand("stop", toContainer); err != nil {
-		return Response{Success: false, Message: fmt.Sprintf("Failed to stop %s: %v", toContainer, err)}
-	}
-
-	// Rename containers (swap names)
-	tempName := fromContainer + "-temp-" + fmt.Sprintf("%d", time.Now().Unix())
-
-	if err := d.dockerCommand("rename", fromContainer, tempName); err != nil {
-		return Response{Success: false, Message: fmt.Sprintf("Failed to rename %s: %v", fromContainer, err)}
-	}
-
-	if err := d.dockerCommand("rename", toContainer, fromContainer); err != nil {
-		return Response{Success: false, Message: fmt.Sprintf("Failed to rename %s: %v", toContainer, err)}
-	}
-
-	if err := d.dockerCommand("rename", tempName, toContainer); err != nil {
-		return Response{Success: false, Message: fmt.Sprintf("Failed to rename %s: %v", tempName, err)}
-	}
-
-	// Start containers if they were running
-	if fromInfo.Status == "running" {
-		d.dockerCommand("start", toContainer)
-	}
-	if toInfo.Status == "running" {
-		d.dockerCommand("start", fromContainer)
-	}
-
-	return Response{
-		Success: true,
-		Message: fmt.Sprintf("Successfully swapped containers %s and %s", fromContainer, toContainer),
-	}
-}
-
-func (d *NextDeployDaemon) listContainers(args map[string]interface{}) Response {
-	showAll := false
-	if all, ok := args["all"].(bool); ok {
-		showAll = all
-	}
-
-	var cmd *exec.Cmd
-	if showAll {
-		cmd = exec.Command("docker", "ps", "-a", "--format", "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.CreatedAt}}")
-	} else {
-		cmd = exec.Command("docker", "ps", "--format", "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.CreatedAt}}")
-	}
-
-	output, err := cmd.Output()
-	if err != nil {
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Failed to list containers: %v", err),
-		}
-	}
-
-	// Parse container info
-	containers := d.parseContainerList(string(output))
-
-	return Response{
-		Success: true,
-		Message: fmt.Sprintf("Found %d containers", len(containers)),
-		Data:    containers,
-	}
-}
-
-func (d *NextDeployDaemon) deployContainer(args map[string]interface{}) Response {
-	image, ok1 := args["image"].(string)
-	if !ok1 {
-		return Response{
-			Success: false,
-			Message: "deploy requires 'image' argument",
-		}
-	}
-
-	containerName, ok2 := args["name"].(string)
-	if !ok2 {
-		containerName = d.config.ContainerPrefix + strings.ReplaceAll(image, ":", "-")
-	}
-
-	// Build docker run command
-	dockerArgs := []string{"run", "-d", "--name", containerName}
-
-	// Add ports if specified
-	if ports, ok := args["ports"].([]interface{}); ok {
-		for _, port := range ports {
-			if portStr, ok := port.(string); ok {
-				dockerArgs = append(dockerArgs, "-p", portStr)
-			}
-		}
-	}
-
-	// Add environment variables if specified
-	if envVars, ok := args["env"].([]interface{}); ok {
-		for _, env := range envVars {
-			if envStr, ok := env.(string); ok {
-				dockerArgs = append(dockerArgs, "-e", envStr)
-			}
-		}
-	}
-
-	// Add volumes if specified
-	if volumes, ok := args["volumes"].([]interface{}); ok {
-		for _, volume := range volumes {
-			if volStr, ok := volume.(string); ok {
-				dockerArgs = append(dockerArgs, "-v", volStr)
-			}
-		}
-	}
-
-	// Add restart policy
-	restartPolicy := "unless-stopped"
-	if restart, ok := args["restart"].(string); ok {
-		restartPolicy = restart
-	}
-	dockerArgs = append(dockerArgs, "--restart", restartPolicy)
-
-	// Add the image
-	dockerArgs = append(dockerArgs, image)
-
-	// Add command if specified
-	if command, ok := args["command"].(string); ok {
-		dockerArgs = append(dockerArgs, strings.Fields(command)...)
-	}
-
-	log.Printf("Deploying container with: docker %v", dockerArgs)
-
-	cmd := exec.Command("docker", dockerArgs...)
-	output, err := cmd.Output()
-	if err != nil {
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Failed to deploy container: %v", err),
-		}
-	}
-
-	containerID := strings.TrimSpace(string(output))
-
-	return Response{
-		Success: true,
-		Message: fmt.Sprintf("Successfully deployed container %s", containerName),
-		Data: map[string]string{
-			"container_id":   containerID,
-			"container_name": containerName,
-			"image":          image,
+	// Setup steps with rollback capability
+	steps := []struct {
+		name string
+		fn   func(context.Context, *server.ServerStruct, string) error
+		roll func(context.Context, *server.ServerStruct, string) error
+	}{
+		{
+			"Create working directory",
+			createWorkingDir,
+			removeWorkingDir,
+		},
+		{
+			"Configure Caddyfile",
+			configureCaddyfile,
+			rollbackCaddyfile,
+		},
+		{
+			"Reload Caddy",
+			reloadCaddy,
+			nil, // No rollback needed - next step will verify
+		},
+		{
+			"Verify HTTPS",
+			verifyHTTPS,
+			nil,
+		},
+		{
+			"Save metadata",
+			saveMetadata,
+			nil,
 		},
 	}
-}
 
-func (d *NextDeployDaemon) getStatus() Response {
-	// Get Docker system info
-	cmd := exec.Command("docker", "system", "df")
-	output, _ := cmd.Output()
-
-	// Get container counts
-	runningCmd := exec.Command("docker", "ps", "-q")
-	runningOutput, _ := runningCmd.Output()
-	runningCount := len(strings.Split(strings.TrimSpace(string(runningOutput)), "\n"))
-	if string(runningOutput) == "" {
-		runningCount = 0
-	}
-
-	allCmd := exec.Command("docker", "ps", "-aq")
-	allOutput, _ := allCmd.Output()
-	totalCount := len(strings.Split(strings.TrimSpace(string(allOutput)), "\n"))
-	if string(allOutput) == "" {
-		totalCount = 0
-	}
-
-	status := map[string]interface{}{
-		"daemon_status":      "healthy",
-		"docker_accessible":  true,
-		"containers_running": runningCount,
-		"containers_total":   totalCount,
-		"socket_path":        d.socketPath,
-		"docker_system_info": strings.TrimSpace(string(output)),
-	}
-
-	return Response{
-		Success: true,
-		Message: "Daemon status retrieved",
-		Data:    status,
-	}
-}
-
-func (d *NextDeployDaemon) restartContainer(args map[string]interface{}) Response {
-	container, ok := args["container"].(string)
-	if !ok {
-		return Response{
-			Success: false,
-			Message: "restart requires 'container' argument",
-		}
-	}
-
-	if err := d.dockerCommand("restart", container); err != nil {
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Failed to restart container %s: %v", container, err),
-		}
-	}
-
-	return Response{
-		Success: true,
-		Message: fmt.Sprintf("Successfully restarted container: %s", container),
-	}
-}
-
-func (d *NextDeployDaemon) getContainerLogs(args map[string]interface{}) Response {
-	container, ok1 := args["container"].(string)
-	if !ok1 {
-		return Response{
-			Success: false,
-			Message: "logs requires 'container' argument",
-		}
-	}
-
-	lines := "100" // default
-	if linesArg, ok := args["lines"]; ok {
-		lines = fmt.Sprintf("%v", linesArg)
-	}
-
-	follow := false
-	if followArg, ok := args["follow"].(bool); ok {
-		follow = followArg
-	}
-
-	dockerArgs := []string{"logs", "--tail", lines}
-	if follow {
-		dockerArgs = append(dockerArgs, "-f")
-	}
-	dockerArgs = append(dockerArgs, container)
-
-	cmd := exec.Command("docker", dockerArgs...)
-	output, err := cmd.Output()
-	if err != nil {
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Failed to get logs for %s: %v", container, err),
-		}
-	}
-
-	logLines := strings.Split(strings.TrimSpace(string(output)), "\n")
-
-	return Response{
-		Success: true,
-		Message: fmt.Sprintf("Retrieved %d log lines for %s", len(logLines), container),
-		Data:    logLines,
-	}
-}
-
-func (d *NextDeployDaemon) stopContainer(args map[string]interface{}) Response {
-	container, ok := args["container"].(string)
-	if !ok {
-		return Response{
-			Success: false,
-			Message: "stop requires 'container' argument",
-		}
-	}
-
-	if err := d.dockerCommand("stop", container); err != nil {
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Failed to stop container %s: %v", container, err),
-		}
-	}
-
-	return Response{
-		Success: true,
-		Message: fmt.Sprintf("Successfully stopped container: %s", container),
-	}
-}
-
-func (d *NextDeployDaemon) startContainer(args map[string]interface{}) Response {
-	container, ok := args["container"].(string)
-	if !ok {
-		return Response{
-			Success: false,
-			Message: "start requires 'container' argument",
-		}
-	}
-
-	if err := d.dockerCommand("start", container); err != nil {
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Failed to start container %s: %v", container, err),
-		}
-	}
-
-	return Response{
-		Success: true,
-		Message: fmt.Sprintf("Successfully started container: %s", container),
-	}
-}
-
-func (d *NextDeployDaemon) removeContainer(args map[string]interface{}) Response {
-	container, ok := args["container"].(string)
-	if !ok {
-		return Response{
-			Success: false,
-			Message: "remove requires 'container' argument",
-		}
-	}
-
-	force := false
-	if forceArg, ok := args["force"].(bool); ok {
-		force = forceArg
-	}
-
-	dockerArgs := []string{"rm"}
-	if force {
-		dockerArgs = append(dockerArgs, "-f")
-	}
-	dockerArgs = append(dockerArgs, container)
-
-	cmd := exec.Command("docker", dockerArgs...)
-	if err := cmd.Run(); err != nil {
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Failed to remove container %s: %v", container, err),
-		}
-	}
-
-	return Response{
-		Success: true,
-		Message: fmt.Sprintf("Successfully removed container: %s", container),
-	}
-}
-
-func (d *NextDeployDaemon) pullImage(args map[string]interface{}) Response {
-	image, ok := args["image"].(string)
-	if !ok {
-		return Response{
-			Success: false,
-			Message: "pull requires 'image' argument",
-		}
-	}
-
-	log.Printf("Pulling image: %s", image)
-
-	cmd := exec.Command("docker", "pull", image)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Failed to pull image %s: %v\nOutput: %s", image, err, string(output)),
-		}
-	}
-
-	return Response{
-		Success: true,
-		Message: fmt.Sprintf("Successfully pulled image: %s", image),
-		Data:    strings.TrimSpace(string(output)),
-	}
-}
-
-func (d *NextDeployDaemon) inspectContainer(args map[string]interface{}) Response {
-	container, ok := args["container"].(string)
-	if !ok {
-		return Response{
-			Success: false,
-			Message: "inspect requires 'container' argument",
-		}
-	}
-
-	cmd := exec.Command("docker", "inspect", container)
-	output, err := cmd.Output()
-	if err != nil {
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Failed to inspect container %s: %v", container, err),
-		}
-	}
-
-	var inspectData interface{}
-	if err := json.Unmarshal(output, &inspectData); err != nil {
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Failed to parse inspect output: %v", err),
-		}
-	}
-
-	return Response{
-		Success: true,
-		Message: fmt.Sprintf("Container %s inspection data", container),
-		Data:    inspectData,
-	}
-}
-
-func (d *NextDeployDaemon) healthCheck(args map[string]interface{}) Response {
-	container, ok := args["container"].(string)
-	if !ok {
-		// System health check
-		return d.getStatus()
-	}
-
-	// Container health check
-	cmd := exec.Command("docker", "inspect", "--format", "{{.State.Health.Status}}", container)
-	output, err := cmd.Output()
-	if err != nil {
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Failed to check health for %s: %v", container, err),
-		}
-	}
-
-	healthStatus := strings.TrimSpace(string(output))
-	healthy := healthStatus == "healthy" || healthStatus == "none"
-
-	return Response{
-		Success: healthy,
-		Message: fmt.Sprintf("Container %s health status: %s", container, healthStatus),
-		Data: map[string]interface{}{
-			"container":     container,
-			"health_status": healthStatus,
-			"healthy":       healthy,
-		},
-	}
-}
-
-func (d *NextDeployDaemon) rollbackContainer(args map[string]interface{}) Response {
-	container, ok1 := args["container"].(string)
-	if !ok1 {
-		return Response{
-			Success: false,
-			Message: "rollback requires 'container' argument",
-		}
-	}
-
-	// Look for previous version container
-	previousContainer := container + "-previous"
-
-	// Check if previous version exists
-	cmd := exec.Command("docker", "ps", "-a", "--filter", "name="+previousContainer, "--format", "{{.Names}}")
-	output, err := cmd.Output()
-	if err != nil || strings.TrimSpace(string(output)) == "" {
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("No previous version found for container %s", container),
-		}
-	}
-
-	// Stop current container
-	d.dockerCommand("stop", container)
-
-	// Rename current to backup
-	backupName := container + "-backup-" + fmt.Sprintf("%d", time.Now().Unix())
-	d.dockerCommand("rename", container, backupName)
-
-	// Rename previous to current
-	d.dockerCommand("rename", previousContainer, container)
-
-	// Start the rolled back container
-	if err := d.dockerCommand("start", container); err != nil {
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Failed to start rolled back container: %v", err),
-		}
-	}
-
-	return Response{
-		Success: true,
-		Message: fmt.Sprintf("Successfully rolled back container %s", container),
-		Data: map[string]string{
-			"container":      container,
-			"backup_created": backupName,
-		},
-	}
-}
-
-// Helper functions
-func (d *NextDeployDaemon) dockerCommand(args ...string) error {
-	cmd := exec.Command("docker", args...)
-	return cmd.Run()
-}
-
-func (d *NextDeployDaemon) getContainerInfo(containerName string) (*ContainerInfo, error) {
-	cmd := exec.Command("docker", "inspect", "--format", "{{.State.Status}}", containerName)
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-
-	return &ContainerInfo{
-		Name:   containerName,
-		Status: strings.TrimSpace(string(output)),
-	}, nil
-}
-
-func (d *NextDeployDaemon) parseContainerList(output string) []map[string]string {
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	var containers []map[string]string
-
-	if len(lines) <= 1 { // Only header or empty
-		return containers
-	}
-
-	for _, line := range lines[1:] { // Skip header
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		fields := strings.Fields(line)
-		if len(fields) >= 6 {
-			containers = append(containers, map[string]string{
-				"id":      fields[0],
-				"name":    fields[1],
-				"image":   fields[2],
-				"status":  fields[3],
-				"ports":   fields[4],
-				"created": strings.Join(fields[5:], " "),
-			})
-		}
-	}
-
-	return containers
-}
-
-func (d *NextDeployDaemon) Shutdown() {
-	log.Println("Shutting down daemon...")
-	d.cancel()
-
-	if d.listener != nil {
-		d.listener.Close()
-	}
-
-	// Clean up socket file
-	os.Remove(d.socketPath)
-	log.Println("Daemon stopped")
-}
-
-// Configuration loading
-func loadConfig(configPath string, config *DaemonConfig) error {
-	file, err := os.Open(configPath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	decoder := json.NewDecoder(file)
-	return decoder.Decode(config)
-}
-
-// Client functions for sending commands
-func sendCommand(socketPath string, cmd Command) (*Response, error) {
-	conn, err := net.Dial("unix", socketPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to daemon: %w", err)
-	}
-	defer conn.Close()
-
-	// Set timeout
-	conn.SetDeadline(time.Now().Add(30 * time.Second))
-
-	encoder := json.NewEncoder(conn)
-	decoder := json.NewDecoder(conn)
-
-	// Send command
-	if err := encoder.Encode(cmd); err != nil {
-		return nil, fmt.Errorf("failed to send command: %w", err)
-	}
-
-	// Receive response
-	var response Response
-	if err := decoder.Decode(&response); err != nil {
-		return nil, fmt.Errorf("failed to receive response: %w", err)
-	}
-
-	return &response, nil
-}
-
-// Command-line interface
-func main() {
-	socketPath := "/var/run/nextdeployd.sock"
-	configPath := "/etc/nextdeployd/config.json"
-
-	if len(os.Args) < 2 {
-		fmt.Println("NextDeploy Daemon - Docker Container Management")
-		fmt.Println("\nUsage:")
-		fmt.Println("  Start daemon: nextdeployd daemon [--config=/path/to/config.json]")
-		fmt.Println("\nContainer Commands:")
-		fmt.Println("  nextdeployd listcontainers [--all=true]")
-		fmt.Println("  nextdeployd deploy --image=nginx:latest --name=web-server --ports=80:8080")
-		fmt.Println("  nextdeployd start --container=web-server")
-		fmt.Println("  nextdeployd stop --container=web-server")
-		fmt.Println("  nextdeployd restart --container=web-server")
-		fmt.Println("  nextdeployd remove --container=web-server [--force=true]")
-		fmt.Println("  nextdeployd logs --container=web-server [--lines=50]")
-		fmt.Println("  nextdeployd inspect --container=web-server")
-		fmt.Println("\nDeployment Commands:")
-		fmt.Println("  nextdeployd swapcontainers --from=app-v1 --to=app-v2")
-		fmt.Println("  nextdeployd rollback --container=web-server")
-		fmt.Println("  nextdeployd pull --image=nginx:latest")
-		fmt.Println("\nHealth & Status:")
-		fmt.Println("  nextdeployd status")
-		fmt.Println("  nextdeployd health [--container=web-server]")
-		os.Exit(1)
-	}
-
-	command := os.Args[1]
-
-	if command == "daemon" {
-		// Check for config flag
-		for _, arg := range os.Args[2:] {
-			if strings.HasPrefix(arg, "--config=") {
-				configPath = strings.TrimPrefix(arg, "--config=")
-				break
-			}
-		}
-
-		// Run as daemon
-		daemon, err := NewNextDeployDaemon(configPath)
-		if err != nil {
-			log.Fatalf("Failed to create daemon: %v", err)
-		}
-
-		if err := daemon.Start(); err != nil {
-			log.Fatalf("Daemon failed: %v", err)
-		}
-		return
-	}
-
-	// Client mode - send command to running daemon
-	var cmd Command
-	args := make(map[string]interface{})
-
-	// Parse command-line arguments
-	for i := 2; i < len(os.Args); i++ {
-		arg := os.Args[i]
-		if strings.HasPrefix(arg, "--") {
-			parts := strings.SplitN(arg[2:], "=", 2)
-			if len(parts) == 2 {
-				// Try to parse as bool or number, otherwise keep as string
-				value := parts[1]
-				if value == "true" {
-					args[parts[0]] = true
-				} else if value == "false" {
-					args[parts[0]] = false
-				} else {
-					args[parts[0]] = value
+	// Execute steps
+	for _, step := range steps {
+		color.Cyan("\n▶ %s", step.name)
+		if err := step.fn(ctx, serverMgr, serverName); err != nil {
+			color.Red("✖ %s failed: %v", step.name, err)
+
+			// Execute rollback if defined
+			if step.roll != nil {
+				color.Yellow("↩ Rolling back %s", step.name)
+				if rollbackErr := step.roll(ctx, serverMgr, serverName); rollbackErr != nil {
+					color.Red("✖ Rollback failed: %v", rollbackErr)
 				}
 			}
+
+			return fmt.Errorf("%s failed: %w", step.name, err)
+		}
+		color.Green("✓ %s completed", step.name)
+	}
+
+	color.Green("\n✅ SSL setup completed successfully for %s", sslConfig.Domain)
+	return nil
+}
+func TargetServer(ctx context.Context, serverMgr *server.ServerStruct) (string, error) {
+	if depServer, err := serverMgr.GetDeploymentServer(); err == nil {
+		sslogs.Debug("Using deployment server:%s", depServer)
+		return depServer, nil
+	}
+
+	// fallback to first available server
+	servers := serverMgr.ListServers()
+	if len(servers) == 0 {
+		return "", fmt.Errorf("no server configured")
+	}
+
+	sslogs.Warn("No deployment server configured, using first server:%s", servers[0])
+	return servers[0], nil
+}
+func validateInputs(sslConfig *SSLConfig) error {
+	sslogs.Debug("Validating SSL configuration", "config", sslConfig)
+	// Validate domain
+
+	// Domain format validation
+	if !strings.Contains(sslConfig.Domain, ".") || strings.HasPrefix(sslConfig.Domain, ".") ||
+		strings.HasSuffix(sslConfig.Domain, ".") {
+		return fmt.Errorf("invalid domain format: must be a fully qualified domain name (e.g., 'example.com')")
+	}
+
+	// Wildcard validation
+	if sslConfig.Wildcard {
+		if sslConfig.DNSProvider == "" {
+			return fmt.Errorf("DNS provider is required for wildcard certificates (e.g., 'cloudflare', 'route53')")
+		}
+		if !strings.HasPrefix(sslConfig.Domain, "*.") {
+			sslogs.Warn("wildcard domains must start with '*.' (e.g., '*.example.com')")
 		}
 	}
 
-	cmd.Type = command
-	cmd.Args = args
-
-	// Send command to daemon
-	response, err := sendCommand(socketPath, cmd)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-
-		// Check if daemon is running
-		if strings.Contains(err.Error(), "connect") || strings.Contains(err.Error(), "no such file") {
-			fmt.Println("Hint: Is the daemon running? Start it with: nextdeployd daemon")
-			fmt.Printf("Socket path: %s\n", socketPath)
-		}
-		os.Exit(1)
+	// Email validation
+	if sslConfig.Email == "" {
+		return fmt.Errorf("email is required for SSL certificate registration")
+	}
+	if !isValidEmail(sslConfig.Email) {
+		return fmt.Errorf("invalid email format: must contain '@' and valid domain (e.g., 'admin@example.com')")
 	}
 
-	// Display response
-	if response.Success {
-		fmt.Printf("✅ %s\n", response.Message)
-		if response.Data != nil {
-			switch data := response.Data.(type) {
-			case []interface{}:
-				for _, item := range data {
-					if itemMap, ok := item.(map[string]interface{}); ok {
-						// Format container list nicely
-						for key, value := range itemMap {
-							fmt.Printf("  %s: %v\n", key, value)
-						}
-						fmt.Println()
-					} else {
-						fmt.Printf("  %v\n", item)
-					}
-				}
-			case map[string]interface{}:
-				for key, value := range data {
-					fmt.Printf("  %s: %v\n", key, value)
-				}
-			case []map[string]string:
-				// Handle container list format
-				if len(data) > 0 {
-					fmt.Printf("\n%-12s %-20s %-30s %-15s %-20s\n", "ID", "NAME", "IMAGE", "STATUS", "PORTS")
-					fmt.Println(strings.Repeat("-", 100))
-					for _, container := range data {
-						fmt.Printf("%-12s %-20s %-30s %-15s %-20s\n",
-							truncate(container["id"], 12),
-							truncate(container["name"], 20),
-							truncate(container["image"], 30),
-							container["status"],
-							truncate(container["ports"], 20))
-					}
-				}
-			case string:
-				fmt.Printf("  %s\n", data)
-			default:
-				if jsonData, err := json.MarshalIndent(data, "  ", "  "); err == nil {
-					fmt.Printf("  %s\n", string(jsonData))
-				} else {
-					fmt.Printf("  %v\n", data)
-				}
-			}
-		}
-	} else {
-		fmt.Printf("❌ %s\n", response.Message)
-		os.Exit(1)
+	// Staging environment warning
+	if sslConfig.Staging {
+		color.Yellow("⚠️  Using Let's Encrypt staging environment - certificates will not be trusted")
 	}
+
+	return nil
 }
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
+func isValidEmail(email string) bool {
+	parts := strings.Split(email, "@")
+	if len(parts) != 2 {
+		return false
 	}
-	return s[:maxLen-3] + "..."
+	if parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	return strings.Contains(parts[1], ".")
+}
+func checkCertificateExists(ctx context.Context, serverMgr *server.ServerStruct, serverName string, domain string) (bool, error) {
+	// TODO: Implement proper certificate existence checking logic
+	// Current implementation is mocked for development purposes
+
+	// Mock scenarios:
+	// - Return true for staging environment to test renewal flow
+	// - Return false for production to test new certificate flow
+	// - Simulate error cases for testing error handling
+
+	// Mock 1: Always return false in production to test new cert issuance
+	if !sslConfig.Staging {
+		sslogs.Debug("Mock: No existing certificate found (production mode)")
+		return false, nil
+	}
+
+	// Mock 2: Return true in staging environment
+	if sslConfig.Staging {
+		sslogs.Debug("Mock: Existing certificate found (staging mode)")
+		return true, nil
+	}
+
+	// Mock 3: Simulate error case (uncomment to test error handling)
+	// return false, fmt.Errorf("mock certificate check error")
+
+	// TODO: Actual implementation should:
+	// 1. Check multiple certificate storage locations:
+	//    - Caddy's default location (/var/lib/caddy/certificates)
+	//    - System certificate stores
+	//    - Custom locations from config
+
+	// 2. Verify certificate is valid and not expired
+	//    - Check expiration date
+	//    - Verify domain matches
+	//    - Check certificate chain
+
+	// 3. Handle different certificate types:
+	//    - Regular certificates
+	//    - Wildcard certificates
+	//    - SAN certificates
+
+	// 4. Support multiple ACME providers:
+	//    - Let's Encrypt
+	//    - Other ACME-compatible CAs
+
+	// Example of what real implementation might look like:
+	/*
+	   certPath := fmt.Sprintf(
+	       "/var/lib/caddy/certificates/acme-v02.api.letsencrypt.org-directory/%s/%s.crt",
+	       strings.ReplaceAll(domain, "*", "_wildcard"),
+	       domain,
+	   )
+
+	   cmd := fmt.Sprintf(
+	       "sudo test -f %s && sudo openssl x509 -in %s -noout -checkend 86400 && echo valid",
+	       certPath,
+	       certPath,
+	   )
+
+	   output, err := serverMgr.ExecuteCommand(ctx, serverName, cmd, nil)
+	   if err != nil {
+	       return false, fmt.Errorf("certificate check failed: %w", err)
+	   }
+
+	   return strings.Contains(output, "valid"), nil
+	*/
+
+	// Fallback return (should never reach here in mock mode)
+	return false, nil
+}
+func createWorkingDir(ctx context.Context, serverMgr *server.ServerStruct, serverName string) error {
+	cmds := []string{
+		fmt.Sprintf("sudo mkdir -p %s", sslMetadataDir),
+		fmt.Sprintf("sudo chown $(whoami): %s", sslMetadataDir),
+		fmt.Sprintf("mkdir -p %s/%s", sslMetadataDir, sslConfig.Domain),
+	}
+
+	for _, cmd := range cmds {
+		if _, err := serverMgr.ExecuteCommand(ctx, serverName, cmd, nil); err != nil {
+			return fmt.Errorf("failed to create working directory: %w", err)
+		}
+	}
+	return nil
+}
+
+func removeWorkingDir(ctx context.Context, serverMgr *server.ServerStruct, serverName string) error {
+	_, err := serverMgr.ExecuteCommand(ctx, serverName,
+		fmt.Sprintf("rm -rf %s/%s", sslMetadataDir, sslConfig.Domain), nil)
+	return err
+}
+
+func saveMetadata(ctx context.Context, serverMgr *server.ServerStruct, serverName string) error {
+	// TODO: Implement complete metadata saving logic
+	// Current implementation is mocked for development
+
+	color.Yellow("⚠️  Mock: Simulating metadata save for domain %s", sslConfig.Domain)
+
+	// Create mock metadata structure
+	meta := CertificateMetadata{
+		Domain:      sslConfig.Domain,
+		Email:       sslConfig.Email,
+		CreatedAt:   time.Now().Format(time.RFC3339),
+		Wildcard:    sslConfig.Wildcard,
+		Staging:     sslConfig.Staging,
+		DNSProvider: sslConfig.DNSProvider,
+	}
+
+	// Log what would be saved
+	sslogs.Debug("Would save certificate metadata",
+		"domain", meta.Domain,
+		"email", meta.Email,
+		"wildcard", meta.Wildcard,
+		"staging", meta.Staging)
+
+	/*
+	   REAL IMPLEMENTATION SHOULD:
+	   1. Create JSON metadata with all certificate details
+	   2. Handle proper file paths and permissions
+	   3. Upload to server in the correct location
+	   4. Include additional validation and error handling
+
+	   Example implementation:
+	   jsonData, err := json.MarshalIndent(meta, "", "  ")
+	   if err != nil {
+	       return fmt.Errorf("failed to marshal metadata: %w", err)
+	   }
+
+	   // Create local temporary file first
+	   localFile := "/tmp/ssl_metadata.json"
+	   if err := os.WriteFile(localFile, jsonData, 0644); err != nil {
+	       return fmt.Errorf("failed to create local metadata file: %w", err)
+	   }
+
+	   // Upload to server
+	   remotePath := fmt.Sprintf("%s/%s/metadata.json", sslMetadataDir, sslConfig.Domain)
+	   if err := serverMgr.UploadFile(ctx, serverName, remotePath, localFile); err != nil {
+	       return fmt.Errorf("failed to upload metadata: %w", err)
+	   }
+
+	   // Clean up local file
+	   defer os.Remove(localFile)
+
+	   // Set proper permissions on server
+	   permCmd := fmt.Sprintf("sudo chown caddy:caddy %s", remotePath)
+	   if _, err := serverMgr.ExecuteCommand(ctx, serverName, permCmd, nil); err != nil {
+	       return fmt.Errorf("failed to set metadata file permissions: %w", err)
+	   }
+	*/
+
+	return nil
+}
+func configureCaddyfile(ctx context.Context, serverMgr *server.ServerStruct, serverName string) error {
+	// TODO: Implement complete Caddyfile configuration logic
+	// Current implementation is mocked for development
+
+	color.Yellow("⚠️  Mock: Skipping actual Caddyfile configuration")
+	sslogs.Debug("Would generate and configure Caddyfile for domain", "domain", sslConfig.Domain)
+
+	/*
+	   REAL IMPLEMENTATION SHOULD:
+	   1. Generate proper Caddyfile configuration based on:
+	      - Domain (including wildcard handling)
+	      - SSL provider (Let's Encrypt, etc.)
+	      - DNS challenge configuration
+	      - TLS settings
+
+	   2. Handle file operations:
+	      - Create temporary local file
+	      - Upload to server
+	      - Move to final location
+	      - Set proper permissions
+
+	   3. Example implementation:
+	   config := generateCaddyConfig()
+	   tempFile := fmt.Sprintf("%s/%s/Caddyfile", sslMetadataDir, sslConfig.Domain)
+
+	   if err := serverMgr.UploadFile(ctx, serverName, tempFile, config); err != nil {
+	       return fmt.Errorf("failed to upload Caddyfile: %w", err)
+	   }
+
+	   finalPath := fmt.Sprintf("%s/Caddyfile.%s", caddyConfigDir, sslConfig.Domain)
+	   cmd := fmt.Sprintf("sudo mv %s %s && sudo chown caddy:caddy %s",
+	       tempFile, finalPath, finalPath)
+
+	   if _, err := serverMgr.ExecuteCommand(ctx, serverName, cmd, nil); err != nil {
+	       return fmt.Errorf("failed to move Caddyfile: %w", err)
+	   }
+
+	   includeCmd := fmt.Sprintf(`echo "import %s" | sudo tee -a %s/Caddyfile`,
+	       finalPath, caddyConfigDir)
+
+	   _, err := serverMgr.ExecuteCommand(ctx, serverName, includeCmd, nil)
+	   return err
+	*/
+
+	return nil
+}
+
+func generateCaddyConfig() string {
+	// TODO: Implement complete Caddyfile generation
+	// Current implementation returns mock config
+
+	/*
+	   REAL IMPLEMENTATION SHOULD:
+	   1. Handle different ACME providers
+	   2. Support both HTTP and DNS challenges
+	   3. Configure proper TLS settings
+	   4. Handle wildcard certificates
+	   5. Include all necessary directives
+
+	   Example:
+	   acmeServer := "https://acme-v02.api.letsencrypt.org/directory"
+	   if sslConfig.Staging {
+	       acmeServer = "https://acme-staging-v02.api.letsencrypt.org/directory"
+	   }
+
+	   config := fmt.Sprintf("%s {\n", sslConfig.Domain)
+	   config += fmt.Sprintf("  tls %s {\n", sslConfig.Email)
+	   config += "    protocols tls1.2 tls1.3\n"
+
+	   if sslConfig.Wildcard {
+	       config += fmt.Sprintf("    dns %s\n", sslConfig.DNSProvider)
+	   } else {
+	       config += "    http\n"
+	   }
+
+	   config += fmt.Sprintf("    acme_ca %s\n", acmeServer)
+	   config += "  }\n"
+	   config += "}\n"
+	*/
+
+	return "# Mock Caddyfile configuration\n" +
+		"# Real implementation will generate proper config\n"
+}
+
+func rollbackCaddyfile(ctx context.Context, serverMgr *server.ServerStruct, serverName string) error {
+	// TODO: Implement complete rollback logic
+	// Current implementation is mocked
+
+	color.Yellow("⚠️  Mock: Skipping actual Caddyfile rollback")
+	sslogs.Debug("Would rollback Caddyfile configuration for domain", "domain", sslConfig.Domain)
+
+	/*
+	   REAL IMPLEMENTATION SHOULD:
+	   1. Remove the generated Caddyfile
+	   2. Clean up any temporary files
+	   3. Remove the import line from main Caddyfile
+	   4. Handle errors gracefully
+
+	   Example:
+	   cmds := []string{
+	       fmt.Sprintf("sudo rm -f %s/Caddyfile.%s", caddyConfigDir, sslConfig.Domain),
+	       fmt.Sprintf(`sudo sed -i '/import %s\/Caddyfile.%s/d' %s/Caddyfile`,
+	           caddyConfigDir, sslConfig.Domain, caddyConfigDir),
+	   }
+
+	   for _, cmd := range cmds {
+	       if _, err := serverMgr.ExecuteCommand(ctx, serverName, cmd, nil); err != nil {
+	           sslogs.Warn("Failed during rollback", "cmd", cmd, "error", err)
+	       }
+	   }
+	*/
+
+	return nil
+}
+
+func reloadCaddy(ctx context.Context, serverMgr *server.ServerStruct, serverName string) error {
+	// TODO: Implement proper Caddy reload logic
+	// Current implementation is mocked
+
+	color.Yellow("⚠️  Mock: Skipping actual Caddy reload")
+	sslogs.Debug("Would reload Caddy service")
+
+	/*
+	   REAL IMPLEMENTATION SHOULD:
+	   1. Handle different reload methods
+	   2. Fallback to restart if reload fails
+	   3. Verify service status
+
+	   Example:
+	   _, err := serverMgr.ExecuteCommand(ctx, serverName,
+	       "sudo systemctl reload caddy || sudo systemctl restart caddy", os.Stdout)
+	   return err
+	*/
+
+	return nil
+}
+
+func verifyHTTPS(ctx context.Context, serverMgr *server.ServerStruct, serverName string) error {
+	// TODO: Implement proper HTTPS verification
+	// Current implementation is mocked
+
+	color.Yellow("⚠️  Mock: Skipping actual HTTPS verification")
+	sslogs.Debug("Would verify HTTPS access for domain", "domain", sslConfig.Domain)
+
+	/*
+	   REAL IMPLEMENTATION SHOULD:
+	   1. Perform proper TLS verification
+	   2. Check certificate validity
+	   3. Verify domain matches
+	   4. Handle different verification methods
+
+	   Example:
+	   url := fmt.Sprintf("https://%s", strings.TrimPrefix(sslConfig.Domain, "*."))
+	   cmd := fmt.Sprintf(`curl -sSI %s | grep -i "HTTP/.*200"`, url)
+
+	   _, err := serverMgr.ExecuteCommand(ctx, serverName, cmd, os.Stdout)
+	   return err
+	*/
+
+	return nil
+}
+
+type CertificateMetadata struct {
+	Domain      string `json:"domain"`
+	Email       string `json:"email"`
+	CreatedAt   string `json:"created_at"`
+	ExpiryDate  string `json:"expiry_date,omitempty"`
+	Wildcard    bool   `json:"wildcard"`
+	Staging     bool   `json:"staging"`
+	DNSProvider string `json:"dns_provider,omitempty"`
 }

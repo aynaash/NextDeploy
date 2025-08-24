@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -231,42 +230,6 @@ func (d *NextDeployDaemon) validateCommand(cmd Command) error {
 	}
 
 	return fmt.Errorf("command not allowed: %s", cmd.Type)
-}
-
-func (d *NextDeployDaemon) executeCommand(cmd Command) Response {
-	switch cmd.Type {
-	case "swapcontainers":
-		return d.swapContainers(cmd.Args)
-	case "listcontainers":
-		return d.listContainers(cmd.Args)
-	case "deploy":
-		return d.deployContainer(cmd.Args)
-	case "status":
-		return d.getStatus()
-	case "restart":
-		return d.restartContainer(cmd.Args)
-	case "logs":
-		return d.getContainerLogs(cmd.Args)
-	case "stop":
-		return d.stopContainer(cmd.Args)
-	case "start":
-		return d.startContainer(cmd.Args)
-	case "remove":
-		return d.removeContainer(cmd.Args)
-	case "pull":
-		return d.pullImage(cmd.Args)
-	case "inspect":
-		return d.inspectContainer(cmd.Args)
-	case "health":
-		return d.healthCheck(cmd.Args)
-	case "rollback":
-		return d.rollbackContainer(cmd.Args)
-	default:
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Unknown command: %s", cmd.Type),
-		}
-	}
 }
 
 // Docker command implementations
@@ -643,25 +606,18 @@ func (d *NextDeployDaemon) pullImage(args map[string]interface{}) Response {
 	log.Printf("Pulling image: %s", image)
 
 	// Handle authentication for registries if needed
-	err := handleRegistryAuth()
-	if err != nil {
-		LogError(logger, logConfig, fmt.Sprintf("Registry auth failed: %v", err))
-		os.Exit(1)
-	}
-
-	cmd := exec.Command("docker", "pull", image)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return Response{
-			Success: false,
-			Message: fmt.Sprintf("Failed to pull image %s: %v\nOutput: %s", image, err, string(output)),
+	registry := GetRegistryType()
+	if registry == "digitalocean" {
+		err := HandleDigitalOceanRegistryAuth()
+		if err != nil {
+			LogError(logger, logConfig, fmt.Sprintf("Registry auth failed: %v", err))
+			os.Exit(1)
 		}
 	}
-
+	// TODO: Add auth handling for other registries (ECR, GHCR, DockerHub) here
 	return Response{
 		Success: true,
 		Message: fmt.Sprintf("Successfully pulled image: %s", image),
-		Data:    strings.TrimSpace(string(output)),
 	}
 }
 

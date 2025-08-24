@@ -28,3 +28,15 @@ func Load() (*NextDeployConfig, error) {
 	fmt.Printf("%s Configuration loaded successfully\n", EmojiSuccess)
 	return &cfg, nil
 }
+
+func ReadConfigInServer(path string) (*NextDeployConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("Config file not found: %w", err)
+	}
+	var cfg NextDeployConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("Invalid config format: %w", err)
+	}
+	return &cfg, nil
+}
