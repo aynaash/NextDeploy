@@ -134,7 +134,7 @@ NextDeploy is an **open-source CLI and daemon** for deploying and managing Next.
 
 ## 📦 Installation
 
-Download the latest binaries from the [Releases](https://github.com/yourname/nextdeploy/releases) page.
+Download the latest binaries from the [Releases](https://github.com/aynaash/nextdeploy/releases) page.
 
 **Example for Linux:**
 
