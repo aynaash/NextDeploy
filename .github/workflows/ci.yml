@@ -3,73 +3,19 @@ name: NextDeploy CI/CD
 
 on:
   push:
-    branches: [ "main", "develop" ]
+    branches: [ "main" ]
     tags: [ "v*" ]
   pull_request:
-    branches: [ "main", "develop" ]
-
-# Environment variables shared across jobs
-env:
-  GO_VERSION: "1.22.x"
-  CGO_ENABLED: 0
-  GOFLAGS: "-mod=readonly"
+    branches: [ "main" ]
 
 jobs:
-  # Quality Assurance First
-  quality-checks:
-    name: Code Quality
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Install dependencies
-        run: go mod download
-
-      - name: Run security audit
-        run: go mod verify
-
-      - name: Run linters
-        uses: golangci/golangci-lint-action@v3
-        with:
-          version: latest
-
-      - name: Run unit tests with coverage
-        run: |
-          go test ./... -v -coverprofile=coverage.out -covermode=atomic
-          go tool cover -func=coverage.out
-
-      - name: Upload coverage report
-        uses: codecov/codecov-action@v3
-        with:
-          file: ./coverage.out
-
-  # Build and test across platforms
   build-test:
-    name: Build & Test (${{ matrix.os }})
-    needs: quality-checks
-    runs-on: ${{ matrix.os }}
+    name: Build & Test
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: [ "${{ env.GO_VERSION }}" ]
+        go-version: [ "1.22.x" ]
         os: [ ubuntu-latest, macos-latest, windows-latest ]
-        include:
-          - os: ubuntu-latest
-            platform: linux
-            suffix: ""
-          - os: macos-latest  
-            platform: darwin
-            suffix: ""
-          - os: windows-latest
-            platform: windows
-            suffix: ".exe"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -78,147 +24,59 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
-          cache: true
-          cache-dependency-path: go.sum
 
-      - name: Build binaries
+      - name: Install dependencies
+        run: go mod tidy
+
+      - name: Lint
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test ./... -v
+
+      - name: Build CLI (nextdeploy)
         run: |
-          mkdir -p bin
-          # Build CLI
-          go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
-                   -o bin/nextdeploy${{ matrix.suffix }} ./cli
-          
-          # Build Daemon
-          go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
-                   -o bin/nextdeployd${{ matrix.suffix }} ./daemon
+          go build -o bin/nextdeploy ./cli
 
-          # Generate checksums
-          cd bin && sha256sum * > checksums.txt
-
-      - name: Run integration tests
+      - name: Build Daemon (nextdeployd)
         run: |
-          # Add platform-specific test commands if needed
-          go test ./... -tags=integration -v
+          go build -o bin/nextdeployd ./daemon
 
-      - name: Upload build artifacts
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: binaries-${{ matrix.platform }}-${{ github.sha }}
-          path: |
-            bin/*
-            !bin/*.txt
-          retention-days: 7
+          name: nextdeploy-${{ matrix.os }}
+          path: bin/
 
-      - name: Upload checksums
-        uses: actions/upload-artifact@v4
-        with:
-          name: checksums-${{ matrix.platform }}
-          path: bin/checksums.txt
-          retention-days: 7
-
-  # Release with extended platform support
   release:
-    name: Create Release
+    name: Release Binaries
     needs: build-test
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version: "1.22.x"
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist/
-          pattern: binaries-*
-          merge-multiple: true
-
-      - name: Build multi-architecture binaries
+      - name: Build release binaries
         run: |
-          mkdir -p release-binaries
-          
-          # Build for additional architectures
-          platforms=(
-            "linux amd64"
-            "linux arm64" 
-            "darwin amd64"
-            "darwin arm64"
-            "windows amd64"
-            "windows arm64"
-          )
-          
-          for platform in "${platforms[@]}"; do
-            read -r goos goarch <<< "$platform"
-            suffix=""
-            if [ "$goos" = "windows" ]; then
-              suffix=".exe"
-            fi
-            
-            echo "Building for $goos/$goarch..."
-            
-            # Build CLI
-            GOOS=$goos GOARCH=$goarch go build \
-              -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
-              -o release-binaries/nextdeploy-$goos-$goarch$suffix ./cli
-            
-            # Build Daemon
-            GOOS=$goos GOARCH=$goarch go build \
-              -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
-              -o release-binaries/nextdeployd-$goos-$goarch$suffix ./daemon
-          done
-          
-          # Generate comprehensive checksums
-          cd release-binaries && sha256sum * > checksums.txt
+          mkdir -p dist
+          GOOS=linux   GOARCH=amd64 go build -o dist/nextdeploy-linux-amd64 ./cli
+          GOOS=linux   GOARCH=amd64 go build -o dist/nextdeployd-linux-amd64 ./daemon
 
-      - name: Create GitHub Release
+          GOOS=darwin  GOARCH=amd64 go build -o dist/nextdeploy-darwin-amd64 ./cli
+          GOOS=darwin  GOARCH=amd64 go build -o dist/nextdeployd-darwin-amd64 ./daemon
+
+          GOOS=windows GOARCH=amd64 go build -o dist/nextdeploy-windows-amd64.exe ./cli
+          GOOS=windows GOARCH=amd64 go build -o dist/nextdeployd-windows-amd64.exe ./daemon
+
+      - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            release-binaries/*
-            dist/**/*
-          body: |
-            ## NextDeploy ${{ github.ref_name }}
-            
-            ### Changes
-            ${{ github.event.head_commit.message }}
-            
-            ### Binaries
-            Built for multiple platforms and architectures.
-            
-            ### Verification
-            Verify downloads with:
-            ```bash
-            sha256sum -c checksums.txt
-            ```
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') }}
+          files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Notify on success
-  notify:
-    name: Notify Success
-    needs: release
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Send notification
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { data: release } = await github.rest.repos.getReleaseByTag({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag: context.ref.replace('refs/tags/', '')
-            });
-            
-            // Send to Slack/Discord/Teams here
-            console.log(`Release created: ${release.html_url}`);
