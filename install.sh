@@ -5,9 +5,19 @@ set -euo pipefail
 # Configuration
 REPO_OWNER="aynaash"
 REPO_NAME="NextDeploy"
-BINARY_NAME="nextdeploy-daemon-linux-amd64"
-INSTALL_PATH="/usr/local/bin/nextdeploy-daemon"
+BINARY_NAME="nextdeployd-linux-amd64"
 GITHUB_API_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
+
+# Determine install path based on permissions
+if [ -w "/usr/local/bin" ] || [ "$(id -u)" -eq 0 ]; then
+    INSTALL_PATH="/usr/local/bin/nextdeployd"
+    INSTALL_TYPE="system"
+else
+    # Create local bin directory if it doesn't exist
+    mkdir -p "$HOME/.local/bin"
+    INSTALL_PATH="$HOME/.local/bin/nextdeployd"
+    INSTALL_TYPE="user"
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -64,11 +74,26 @@ check_dependencies() {
     log_success "All dependencies are available"
 }
 
-# Check if running as root for installation to /usr/local/bin
+# Check and create installation directory
 check_permissions() {
-    if [ ! -w "$(dirname "$INSTALL_PATH")" ]; then
-        log_error "Cannot write to $(dirname "$INSTALL_PATH"). Please run with sudo or as root."
-        exit 1
+    local install_dir
+    install_dir=$(dirname "$INSTALL_PATH")
+    
+    if [ ! -w "$install_dir" ]; then
+        if [ "$INSTALL_TYPE" = "system" ]; then
+            log_error "Cannot write to $install_dir. Please run with sudo or as root."
+            exit 1
+        else
+            log_error "Cannot write to $install_dir"
+            exit 1
+        fi
+    fi
+    
+    if [ "$INSTALL_TYPE" = "user" ]; then
+        log_info "Installing to user directory: $INSTALL_PATH"
+        log_warning "Make sure $HOME/.local/bin is in your PATH"
+    else
+        log_info "Installing to system directory: $INSTALL_PATH"
     fi
 }
 
@@ -233,11 +258,21 @@ main() {
     
     echo
     log_success "NextDeploy daemon installed successfully!"
-    log_info "You can now use: nextdeploy-daemon"
+    
+    if [ "$INSTALL_TYPE" = "user" ]; then
+        log_info "Binary installed at: $INSTALL_PATH"
+        log_info "To use nextdeploy-daemon from anywhere, add this to your shell profile:"
+        log_info "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc"
+        log_info "  source ~/.bashrc"
+        log_info ""
+        log_info "Or run directly with: $INSTALL_PATH"
+    else
+        log_info "You can now use: nextdeployd"
+    fi
     
     # Show usage hint if binary supports help
     if "$INSTALL_PATH" --help >/dev/null 2>&1; then
-        log_info "Run 'nextdeploy-daemon --help' for usage information"
+        log_info "Run 'nextdeployd --help' for usage information"
     fi
 }
 
