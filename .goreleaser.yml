@@ -1,0 +1,83 @@
+
+project_name: nextdeploy
+
+before:
+  hooks:
+    - go mod tidy
+
+env:
+  - CGO_ENABLED=0
+
+# Build CLI and Daemon across common OS/ARCH (add more as needed)
+builds:
+  - id: nextdeploy-cli
+    main: ./cli
+    binary: nextdeploy
+    flags: [ -trimpath ]
+    ldflags:
+      - -s -w
+    goos: [ linux, darwin, windows ]
+    goarch: [ amd64, arm64 ]
+    goarm: [ '7' ]
+    ignore:
+      - goos: darwin
+        goarch: 386
+    mod_timestamp: '{{ .CommitDate }}'
+  - id: nextdeploy-daemon
+    main: ./daemon
+    binary: nextdeployd
+    flags: [ -trimpath ]
+    ldflags:
+      - -s -w
+    goos: [ linux, darwin, windows ]
+    goarch: [ amd64, arm64 ]
+    goarm: [ '7' ]
+    mod_timestamp: '{{ .CommitDate }}'
+
+archives:
+  - id: universal
+    builds: [ nextdeploy-cli, nextdeploy-daemon ]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+      - docs/**
+
+checksum:
+  name_template: "checksums.txt"
+
+signs:
+  - artifacts: checksum
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+
+# Optional SBOM (enable if you want)
+sboms:
+  - artifacts: archive
+
+# Optional Homebrew tap example (commented until you have a tap repo)
+# brews:
+#   - name: nextdeploy
+#     tap:
+#       owner: your-org
+#       name: homebrew-tap
+#     commit_author:
+#       name: NextDeploy CI
+#       email: ci@nextdeploy.dev
+#     url_template: "https://github.com/your-org/your-repo/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+#     description: "CLI and daemon for deploying Next.js apps on any VPS."
+#     homepage: "https://github.com/your-org/your-repo"
+#     install: |
+#       bin.install "nextdeploy"
+#       bin.install "nextdeployd"

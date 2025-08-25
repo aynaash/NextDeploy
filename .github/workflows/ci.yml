@@ -8,75 +8,157 @@ on:
   pull_request:
     branches: [ "main" ]
 
+# Kill redundant runs for the same ref
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pin toolchain behavior (mirrors Caddy’s approach to reproducibility)
+  GOTOOLCHAIN: local
+
+permissions:
+  contents: read
+
 jobs:
   build-test:
-    name: Build & Test
-    runs-on: ubuntu-latest
+    name: Build, Test, Smoke (${{ matrix.os }} / Go ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        go-version: [ "1.22.x" ]
+        go: [ "1.22.x", "1.23.x", "1.24.x" ]
         os: [ ubuntu-latest, macos-latest, windows-latest ]
     steps:
-      - name: Checkout code
+      - name: Harden the runner (Audit outbound)
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: ${{ matrix.go }}
+          check-latest: true
+          cache: false  # we use actions/cache below for explicit control
 
-      - name: Install dependencies
-        run: go mod tidy
+      # Module & build cache (cross-OS safe keys)
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ matrix.go }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ matrix.go }}-
+            ${{ runner.os }}-go-
 
-      - name: Lint
+      - name: Print Go env
+        run: |
+          which go && go version
+          go env
+
+      - name: Tidy & Vendor Check
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum || (echo "Run 'go mod tidy' locally and commit changes."; exit 1)
+
+      - name: Vet
         run: go vet ./...
 
-      - name: Run tests
-        run: go test ./... -v
+      - name: Test (race+coverage)
+        run: |
+          go test -race -coverprofile=coverage.out -covermode=atomic -v ./...
+        shell: bash
 
+      # Build both CLI and daemon with trimpath and size flags
       - name: Build CLI (nextdeploy)
         run: |
-          go build -o bin/nextdeploy ./cli
-
+          mkdir -p bin
+          go build -trimpath -ldflags="-s -w" -o bin/nextdeploy${{ runner.os == 'Windows' && '.exe' || '' }} ./cli
       - name: Build Daemon (nextdeployd)
         run: |
-          go build -o bin/nextdeployd ./daemon
+          go build -trimpath -ldflags="-s -w" -o bin/nextdeployd${{ runner.os == 'Windows' && '.exe' || '' }} ./daemon
 
-      - name: Upload Artifacts
+      # Minimal smoke tests — prove the binaries execute
+      - name: Smoke (CLI --version)
+        run: |
+          ./bin/nextdeploy${{ runner.os == 'Windows' && '.exe' || '' }} --version || ./bin/nextdeploy${{ runner.os == 'Windows' && '.exe' || '' }} -h
+        shell: bash
+      - name: Smoke (Daemon --version)
+        run: |
+          ./bin/nextdeployd${{ runner.os == 'Windows' && '.exe' || '' }} --version || ./bin/nextdeployd${{ runner.os == 'Windows' && '.exe' || '' }} -h
+        shell: bash
+
+      - name: Upload Artifacts (traceable)
         uses: actions/upload-artifact@v4
         with:
-          name: nextdeploy-${{ matrix.os }}
+          name: nextdeploy_${{ runner.os }}_go${{ matrix.go }}_${{ github.sha }}
           path: bin/
+          compression-level: 0
 
-  release:
-    name: Release Binaries
-    needs: build-test
+  # Snapshot build with GoReleaser on PRs and pushes to main (no GitHub Release)
+  snapshot:
+    name: GoReleaser Snapshot
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [ build-test ]
+    if: startsWith(github.ref, 'refs/heads/')
     steps:
-      - name: Checkout code
+      - name: Harden the runner (Audit outbound)
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.22.x"
+          go-version: "1.24.x"
+          check-latest: true
 
-      - name: Build release binaries
-        run: |
-          mkdir -p dist
-          GOOS=linux   GOARCH=amd64 go build -o dist/nextdeploy-linux-amd64 ./cli
-          GOOS=linux   GOARCH=amd64 go build -o dist/nextdeployd-linux-amd64 ./daemon
-
-          GOOS=darwin  GOARCH=amd64 go build -o dist/nextdeploy-darwin-amd64 ./cli
-          GOOS=darwin  GOARCH=amd64 go build -o dist/nextdeployd-darwin-amd64 ./daemon
-
-          GOOS=windows GOARCH=amd64 go build -o dist/nextdeploy-windows-amd64.exe ./cli
-          GOOS=windows GOARCH=amd64 go build -o dist/nextdeployd-windows-amd64.exe ./daemon
-
-      - name: Upload Release Assets
-        uses: softprops/action-gh-release@v2
+      - name: GoReleaser (snapshot)
+        uses: goreleaser/goreleaser-action@v6
         with:
-          files: dist/*
+          version: latest
+          args: build --clean --snapshot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Real releases on tags: v*
+  release:
+    name: Publish Release (GoReleaser)
+    runs-on: ubuntu-latest
+    needs: [ build-test ]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write    # required to create GitHub Releases
+    steps:
+      - name: Harden the runner (Audit outbound)
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout (full history for changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          check-latest: true
+
+      - name: GoReleaser (release)
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

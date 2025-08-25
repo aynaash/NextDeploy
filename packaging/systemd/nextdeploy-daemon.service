@@ -1,0 +1,32 @@
+
+[Unit]
+Description=NextDeploy Daemon - Deployment and Monitoring Service
+Documentation=https://github.com/aynaash/NextDeploy
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+# Run the daemon binary
+ExecStart=/usr/bin/nextdeploy-daemon --config /etc/nextdeploy/config.yml
+
+# Restart policy
+Restart=always
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+# Log to journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nextdeploy-daemon
+
+# Drop privileges (you can create a 'nextdeploy' user/group later)
+User=nextdeploy
+Group=nextdeploy
+
+[Install]
+WantedBy=multi-user.target
