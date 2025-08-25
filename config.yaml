@@ -1,4 +1,0 @@
-port: 8080
-host: "localhost"
-debug: true
-log_file: "nextdeploy.log"
