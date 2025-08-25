@@ -105,12 +105,13 @@ func runDeployment(ctx context.Context, serverMgr *server.ServerStruct, servers 
 	if err := ship.VerifyDeployment(ctx, serverMgr, servers[0], stream); err != nil {
 		return fmt.Errorf("post-deployment verification failed: %w", err)
 	}
-	if serve {
-		ShipLogs.Info(" ==== PHASE 4: Refresh caddy  ====")
-		if err := ship.SetupCaddy(ctx, serverMgr, servers[0], fresh, stream); err != nil {
-			return fmt.Errorf("caddy setup failed: %w", err)
-		}
-	}
+	//TODO: Re-enable Caddy setup using daemon
+	// if serve {
+	// 	ShipLogs.Info(" ==== PHASE 4: Refresh caddy  ====")
+	// 	if err := ship.SetupCaddy(ctx, serverMgr, servers[0], fresh, stream); err != nil {
+	// 		return fmt.Errorf("caddy setup failed: %w", err)
+	// 	}
+	// }
 
 	return nil
 }

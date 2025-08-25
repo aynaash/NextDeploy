@@ -225,14 +225,14 @@ func buildCmd() {
 	}{
 		{
 			name:        "nextdeployd (daemon)",
-			source:      daemonPath,
+			source:      "./daemon", // Package path instead of file path
 			output:      filepath.Join(*outputDir, "nextdeployd"),
 			environment: getDaemonEnv(),
 			ldflags:     fmt.Sprintf("-s -w -X main.Version=%s -X main.Commit=%s -X main.BuildTime=%s", version, commit, buildTime),
 		},
 		{
 			name:    "nextdeploy (CLI)",
-			source:  cliPath,
+			source:  "./cli", // Package path instead of file path
 			output:  filepath.Join(*outputDir, "nextdeploy"),
 			ldflags: fmt.Sprintf("-X main.Version=%s -X main.Commit=%s", version, commit),
 		},
@@ -245,7 +245,17 @@ func buildCmd() {
 		}
 
 		log.Printf("🔨 Building %s...", t.name)
-		cmd := exec.Command("go", "build", "-ldflags", t.ldflags, "-o", t.output, t.source)
+
+		// Build the PACKAGE, not just the main.go file
+		pkgPath := strings.TrimSuffix(t.source, "/main.go")
+		if pkgPath == t.source {
+			// Fallback if the path doesn't end with /main.go
+			pkgPath = filepath.Dir(t.source)
+		}
+
+		// With this:
+		pkgPath = strings.TrimSuffix(t.source, "/main.go")
+		cmd := exec.Command("go", "build", "-ldflags", t.ldflags, "-o", t.output, pkgPath)
 		cmd.Env = append(os.Environ(), t.environment...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

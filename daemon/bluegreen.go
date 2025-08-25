@@ -12,7 +12,9 @@ import (
 )
 
 func SetupBlueGreenDeployment() error {
-	cfg, err := config.ReadConfigInServer("/home/app/.nextdeplo.yaml")
+	// Decrypt files first
+	DecryptFiles()
+	cfg, err := ReadConfigInServer("/home/app/.nextdeploy.yml")
 	if err != nil {
 		return fmt.Errorf("failed to read config: %w", err)
 	}

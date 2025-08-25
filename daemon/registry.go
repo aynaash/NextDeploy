@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"nextdeploy/shared/config"
 	"nextdeploy/shared/envstore"
 	"os"
 	"os/exec"
@@ -58,7 +57,7 @@ func HandleDigitalOceanRegistryAuth() error {
 
 	// read config file
 	nextdeployPath := "~/app/nextdeploy.yml"
-	cfg, err := config.ReadConfigInServer(nextdeployPath)
+	cfg, err := ReadConfigInServer(nextdeployPath)
 	if err != nil {
 		fmt.Printf("Failed to read nextdeploy.yml file: %v\n", err)
 		return err
@@ -89,7 +88,7 @@ func HandleDigitalOceanRegistryAuth() error {
 
 func GetRegistryType() string {
 	nextdeployPath := "~/app/nextdeploy.yml"
-	cfg, err := config.ReadConfigInServer(nextdeployPath)
+	cfg, err := ReadConfigInServer(nextdeployPath)
 	if err != nil {
 		fmt.Printf("Failed to read nextdeploy.yml file: %v\n", err)
 		return ""

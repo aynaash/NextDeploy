@@ -66,7 +66,6 @@ func encryptFiles() {
 		Elogs.Error("Failed to read encryption key from %s: %v", keyPath, err)
 		os.Exit(1)
 	}
-	Elogs.Info("Using encryption key from %s", key)
 	// Encrypt the encrypt
 	if err := sm.EncryptFile("nextdeploy.yml", key); err != nil {
 		Elogs.Error("Failed to encrypt files: %v", err)

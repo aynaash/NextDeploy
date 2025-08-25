@@ -274,3 +274,10 @@ func (sm *SecretManager) loadWindowsKey() ([]byte, error) {
 	// Optional: decrypt key here if you encrypted it
 	return []byte(encryptedKey), nil
 }
+
+func (sm *SecretManager) GetKeyOsAgnosticPath() string {
+	// platform agnostic key path
+	home, _ := os.UserHomeDir()
+	appname := sm.GetAppName()
+	return home + "/.nextdeploy/" + appname + "/master.key"
+}
