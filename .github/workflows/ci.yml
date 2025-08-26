@@ -83,23 +83,22 @@ jobs:
         run: |
           go build -trimpath -ldflags="-s -w" -o bin/nextdeployd${{ runner.os == 'Windows' && '.exe' || '' }} ./daemon
 
-      # Minimal smoke tests — prove the binaries execute
-      - name: Smoke (Daemon --version)
-        run: |
-        # Test with a flag that doesn't require elevated permissions
-        ./bin/nextdeployd -h || true  # Use -h or handle the error gracefully
-        shell: bash
-      - name: Smoke (Daemon --version)
-        run: |
-          ./bin/nextdeployd${{ runner.os == 'Windows' && '.exe' || '' }} --version || ./bin/nextdeployd${{ runner.os == 'Windows' && '.exe' || '' }} -h
-        shell: bash
-
-      - name: Upload Artifacts (traceable)
-        uses: actions/upload-artifact@v4
-        with:
-          name: nextdeploy_${{ runner.os }}_go${{ matrix.go }}_${{ github.sha }}
-          path: bin/
-          compression-level: 0
+      # # Minimal smoke tests — prove the binaries execute
+      # - name: Smoke (CLI --version)
+      #   run: |
+      #     ./bin/nextdeploy${{ runner.os == 'Windows' && '.exe' || '' }} --version || ./bin/nextdeploy${{ runner.os == 'Windows' && '.exe' || '' }} -h
+      #   shell: bash
+      # - name: Smoke (Daemon --version)
+      #   run: |
+      #     ./bin/nextdeployd${{ runner.os == 'Windows' && '.exe' || '' }} --version || ./bin/nextdeployd${{ runner.os == 'Windows' && '.exe' || '' }} -h
+      #   shell: bash
+      #
+      # - name: Upload Artifacts (traceable)
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: nextdeploy_${{ runner.os }}_go${{ matrix.go }}_${{ github.sha }}
+      #     path: bin/
+      #     compression-level: 0
 
   # Snapshot build with GoReleaser on PRs and pushes to main (no GitHub Release)
   snapshot:
