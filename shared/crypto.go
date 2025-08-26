@@ -133,8 +133,14 @@ func ZeroKey(key []byte) {
 	runtime.KeepAlive(key)
 
 	// For Linux/Unix:
-	if _, _, err := syscall.Syscall(syscall.SYS_MUNLOCK, uintptr(unsafe.Pointer(&key[0])), uintptr(len(key)), 0); err != 0 {
-		log.Printf("Warning: failed to unlock memory: %v", err)
+	// check os type and only execute on unix machines
+	if runtime.GOOS == "windows" {
+		return
+	} else {
+		if _, _, err := syscall.Syscall(syscall.SYS_MUNLOCK, uintptr(unsafe.Pointer(&key[0])), uintptr(len(key)), 0); err != 0 {
+			log.Printf("Warning: failed to unlock memory: %v", err)
+		}
+
 	}
 }
 func GenerateKeyPair() (*KeyPair, error) {
