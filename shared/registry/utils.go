@@ -2,6 +2,8 @@ package registry
 
 import (
 	"fmt"
+	"nextdeploy/shared/config"
+	"nextdeploy/shared/git"
 	"regexp"
 	"strings"
 )
@@ -28,4 +30,18 @@ func ExtractECRDetails(ecrURI string) (string, string, string, error) {
 	// matches[2] = region (us-east-1)
 	// matches[3] = repo name (hersiyussuf/hersi.dev)
 	return accountID, region, repoName, nil
+}
+
+func GetLatestImageName() string {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Printf("Failed to load configuration: %v\n", err)
+		return ""
+	}
+	gitCommit, err := git.GetCommitHash()
+	if err != nil {
+		fmt.Printf("Failed to get git commit hash: %v\n", err)
+		return ""
+	}
+	return fmt.Sprintf("%s:%s", cfg.Docker.Image, gitCommit)
 }

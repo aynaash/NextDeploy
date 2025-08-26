@@ -16,8 +16,10 @@ import (
 var (
 	ShipLogs    = shared.PackageLogger("ship::", "🚢::")
 	dryRun      bool
-	serve       bool
 	credentials bool
+	newapp      bool
+	bluegreen   bool
+	serve       bool
 )
 
 var shipCmd = &cobra.Command{
@@ -35,6 +37,9 @@ var shipCmd = &cobra.Command{
 func init() {
 	shipCmd.Flags().BoolVarP(&serve, "serve", "s", false, "Perform new caddy setup")
 	shipCmd.Flags().BoolVarP(&credentials, "credentials", "c", false, "Use credentials for deployment")
+	shipCmd.Flags().BoolVarP(&dryRun, "dry-run", "d", false, "Simulate deployment without making changes")
+	shipCmd.Flags().BoolVarP(&newapp, "new", "n", false, "Indicate this is a new application deployment")
+	shipCmd.Flags().BoolVarP(&bluegreen, "bluegreen", "b", false, "Use blue-green deployment strategy")
 
 	rootCmd.AddCommand(shipCmd)
 }

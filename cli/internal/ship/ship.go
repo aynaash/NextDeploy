@@ -6,6 +6,7 @@ import (
 	"io"
 	"nextdeploy/cli/internal/server"
 	"nextdeploy/shared"
+	"nextdeploy/shared/registry"
 	"os"
 	"path/filepath"
 	"strings"
@@ -311,6 +312,12 @@ func TransferRequiredFiles(ctx context.Context, serverMgr *server.ServerStruct, 
 
 func DeployContainers(ctx context.Context, serverMgr *server.ServerStruct, serverName string, credentials bool, stream io.Writer) error {
 	ShipLogs.Info("Deploying containers on %s...\n", serverName)
+
+	// get git commits tags to swap containers  if not first time
+	latestImage := registry.GetLatestImageName()
+	ShipLogs.Debug("Latest image to deploy: %s", latestImage)
+	// get current running container details
+	// swap with latest container
 	return nil
 }
 

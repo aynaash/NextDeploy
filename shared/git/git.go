@@ -57,6 +57,38 @@ func GetCurrentBranch() (string, error) {
 
 	return branch, nil
 }
+
+// GetSecondLatestCommitHash returns the second latest commit hash in the current repository
+func GetSecondLatestCommitHash() (string, error) {
+	// Run git log command to get the last two commits
+	cmd := exec.Command("git", "log", "--pretty=format:%H", "-n", "2")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get git log: %w", err)
+	}
+
+	// Split the output by newlines to get individual commit hashes
+	commits := strings.Split(strings.TrimSpace(string(output)), "\n")
+
+	if len(commits) < 2 {
+		return "", fmt.Errorf("not enough commits in repository (need at least 2, got %d)", len(commits))
+	}
+
+	// The second commit is at index 1 (index 0 is the latest)
+	return commits[1], nil
+}
+
+// Alternative version using git rev-parse for better performance
+func GetSecondLatestCommitHashAlt() (string, error) {
+	// Get the parent of the latest commit (which would be the second latest)
+	cmd := exec.Command("git", "rev-parse", "HEAD~1")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get parent commit: %w", err)
+	}
+
+	return strings.TrimSpace(string(output)), nil
+}
 func GetCommitHash() (string, error) {
 	cmd := exec.Command("git", "rev-parse", "--short=7", "HEAD")
 

@@ -84,7 +84,7 @@ Modern DevOps can become complex and opaque. You often don't own your pipeline, 
 *   🔄 GitHub webhook CI/CD automation
 *   ⏪ Rollbacks and release tracking
 *   🔌 Stack plugins (Rails, Go, Astro, Bun, etc.)
-*   🌐 Team dashboard and multitenant support
+*   🌐 Team dashboard and multitenant support(in the future)
 
 ---
 
@@ -93,8 +93,7 @@ Modern DevOps can become complex and opaque. You often don't own your pipeline, 
 NextDeploy is built for developers who value **autonomy, simplicity, and control**.
 
 We welcome contributors:
-*   🔌 **Plugin Authors:** Extend support for new frameworks (Rust, Deno, Rails, etc.).
-*   📡 **Systems Engineers:** Help enhance the metrics daemon (Go or Rust).
+*   📡 **Systems Engineers:** Help enhance the daemon.
 *   🛡️ **Security Reviewers:** Help us strengthen our security flows.
 *   🧠 **Product Contributors:** Developers who build and use their own tools.
 
