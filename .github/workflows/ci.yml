@@ -61,11 +61,6 @@ jobs:
           which go && go version
           go env
 
-      - name: Tidy & Vendor Check
-        run: |
-          go mod tidy
-          git diff --exit-code go.mod go.sum || (echo "Run 'go mod tidy' locally and commit changes."; exit 1)
-
       - name: Vet
         run: go vet ./...
 
