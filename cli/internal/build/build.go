@@ -2,8 +2,8 @@ package build
 
 import (
 	"fmt"
-	"nextdeploy/shared/git"
 	"nextdeploy/shared"
+	"nextdeploy/shared/git"
 	"nextdeploy/shared/nextdeploy"
 	"strings"
 	"time"

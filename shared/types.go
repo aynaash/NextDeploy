@@ -32,14 +32,14 @@ const (
 )
 
 type AgentMessage struct {
-	Source    AgentType       `json:"source"`
-	Target    AgentType       `json:"target"`
-	Type      MessageType     `json:"type"`
-	Payload   json.RawMessage `json:"payload"`
-	Timestamp int64           `json:"timestamp"`
-	AgentID   string          `json:"agent_id"`
-	Signature string          `json:"signature,omitempty"` // ECC signature of the message
-	Context  map[string]string `json:"context,omitempty"` // Additional context for the message
+	Source    AgentType         `json:"source"`
+	Target    AgentType         `json:"target"`
+	Type      MessageType       `json:"type"`
+	Payload   json.RawMessage   `json:"payload"`
+	Timestamp int64             `json:"timestamp"`
+	AgentID   string            `json:"agent_id"`
+	Signature string            `json:"signature,omitempty"` // ECC signature of the message
+	Context   map[string]string `json:"context,omitempty"`   // Additional context for the message
 }
 
 // CommandPayload represents a command sent to an agent

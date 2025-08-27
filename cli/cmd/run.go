@@ -12,9 +12,9 @@ package cmd
 import (
 	"fmt"
 	"github.com/spf13/cobra"
+	"nextdeploy/shared"
 	"nextdeploy/shared/failfast"
 	"nextdeploy/shared/git"
-	"nextdeploy/shared"
 	"nextdeploy/shared/nextdeploy"
 	"nextdeploy/shared/secrets"
 	"os"

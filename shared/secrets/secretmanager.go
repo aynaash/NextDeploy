@@ -1,8 +1,8 @@
 package secrets
 
 import (
-	"nextdeploy/shared/config"
 	"nextdeploy/shared"
+	"nextdeploy/shared/config"
 	"os"
 	"path/filepath"
 	"sync"

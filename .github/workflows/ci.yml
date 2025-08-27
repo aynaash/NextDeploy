@@ -22,7 +22,7 @@ concurrency:
 
 env:
   GOTOOLCHAIN: local
-  GO_VERSION: "1.24.x"
+  GO_VERSION: "1.25.x"
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
@@ -52,10 +52,12 @@ jobs:
           check-latest: true
 
       - name: Run Gosec Security Scanner
-        uses: securecodewarrior/github-action-gosec@master
+        uses: cosmos/gosec-action@v2
         with:
-          args: '-fmt sarif -out gosec.sarif ./...'
-
+          args: ./...
+          sarif_output: gosec.sarif
+          fail_on_issue: true
+      
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v3
         with:
