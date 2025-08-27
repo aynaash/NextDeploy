@@ -1,0 +1,18 @@
+#!/bin/sh
+set -e
+
+echo "Running pre-commit checks..."
+
+# Format check
+if ! gofmt -l . | grep -q '^$'; then
+    echo "Code needs formatting. Run: gofmt -w ."
+    exit 1
+fi
+
+# Lint check
+golangci-lint run
+
+# Test check
+go test -short ./...
+
+echo "All checks passed!"

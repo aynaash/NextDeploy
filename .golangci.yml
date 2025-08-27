@@ -1,6 +1,24 @@
 
-- name: Lint
-  uses: golangci/golangci-lint-action@v6
-  with:
-    version: latest
-    args: --timeout=5m
+linters:
+  # Disable all linters by default and enable only these
+  disable-all: true
+  enable:
+    - gofmt
+    - goimports
+    - govet
+    - staticcheck
+    - errcheck
+    - typecheck
+    - unused
+    - ineffassign
+    - misspell
+
+linters-settings:
+  govet:
+    check-shadowing: true
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck

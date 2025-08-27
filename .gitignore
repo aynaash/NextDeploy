@@ -1,4 +1,6 @@
 /bin/ 
 /.env
 ./.keys 
+.secrets
 
+.secrets

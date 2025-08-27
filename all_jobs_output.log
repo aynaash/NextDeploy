@@ -1,0 +1,719 @@
+time="2025-08-27T12:13:26+03:00" level=info msg="Using docker host 'unix:///var/run/docker.sock', and daemon socket 'unix:///var/run/docker.sock'"
+[Release Pipeline/build-and-release   ] ⭐ Run Set up job
+[Release Pipeline/build-and-release   ] 🚀  Start image=catthehacker/ubuntu:act-latest
+[NextDeploy  CI/CD/Lint & Code Quality] ⭐ Run Set up job
+[NextDeploy  CI/CD/Lint & Code Quality] 🚀  Start image=catthehacker/ubuntu:act-latest
+[Lint/lint-3                          ] ⭐ Run Set up job
+[Lint/lint-1                          ] ⭐ Run Set up job
+[NextDeploy  CI/CD/Security Scan      ] ⭐ Run Set up job
+[Lint/govulncheck                     ] ⭐ Run Set up job
+[NextDeploy  CI/CD/Security Scan      ] 🚀  Start image=catthehacker/ubuntu:act-latest
+[Lint/lint-1                          ] 🚀  Start image=catthehacker/ubuntu:act-latest
+[Lint/govulncheck                     ] 🚀  Start image=catthehacker/ubuntu:act-latest
+[Lint/dependency-review               ] ⭐ Run Set up job
+[Lint/dependency-review               ] 🚀  Start image=catthehacker/ubuntu:act-latest
+[Lint/lint-3                          ] 🚀  Start image=catthehacker/ubuntu:act-latest
+[Lint/lint-2                          ] 🚧  Skipping unsupported platform -- Try running with `-P macos-14=...`
+[Lint/govulncheck                     ]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[Lint/lint-3                          ]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[Lint/lint-1                          ]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[Release Pipeline/build-and-release   ]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[NextDeploy  CI/CD/Lint & Code Quality]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[NextDeploy  CI/CD/Security Scan      ]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[Lint/dependency-review               ]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[Lint/dependency-review               ] using DockerAuthConfig authentication for docker pull
+[Lint/govulncheck                     ] using DockerAuthConfig authentication for docker pull
+[Lint/lint-3                          ] using DockerAuthConfig authentication for docker pull
+[NextDeploy  CI/CD/Security Scan      ] using DockerAuthConfig authentication for docker pull
+[Release Pipeline/build-and-release   ] using DockerAuthConfig authentication for docker pull
+[Lint/lint-1                          ] using DockerAuthConfig authentication for docker pull
+[NextDeploy  CI/CD/Lint & Code Quality] using DockerAuthConfig authentication for docker pull
+[NextDeploy  CI/CD/Security Scan      ]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[NextDeploy  CI/CD/Security Scan      ]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[Release Pipeline/build-and-release   ]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[NextDeploy  CI/CD/Security Scan      ]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[NextDeploy  CI/CD/Security Scan      ]   ✅  Success - Set up job
+[NextDeploy  CI/CD/Security Scan      ]   ☁  git clone 'https://github.com/step-security/harden-runner' # ref=v2
+[Lint/lint-1                          ]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[Release Pipeline/build-and-release   ]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[Lint/lint-1                          ]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[NextDeploy  CI/CD/Lint & Code Quality]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[Lint/dependency-review               ]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[NextDeploy  CI/CD/Security Scan      ] ⭐ Run Pre Harden Runner
+[Lint/lint-3                          ]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[NextDeploy  CI/CD/Security Scan      ]   🐳  docker cp src=/home/elitebook/.cache/act/step-security-harden-runner@v2/ dst=/var/run/act/actions/step-security-harden-runner@v2/
+[Lint/govulncheck                     ]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[Lint/lint-3                          ]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[NextDeploy  CI/CD/Lint & Code Quality]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[Lint/dependency-review               ]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[Lint/govulncheck                     ]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[Release Pipeline/build-and-release   ]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[Lint/lint-1                          ]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[Lint/lint-3                          ]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[Release Pipeline/build-and-release   ]   ✅  Success - Set up job
+[Release Pipeline/build-and-release   ]   ☁  git clone 'https://github.com/softprops/action-gh-release' # ref=v1
+[Lint/lint-1                          ]   ✅  Success - Set up job
+[NextDeploy  CI/CD/Lint & Code Quality]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[Lint/govulncheck                     ]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[Lint/lint-1                          ]   ☁  git clone 'https://github.com/step-security/harden-runner' # ref=002fdce3c6a235733a90a27c80493a3241e56863
+[Lint/dependency-review               ]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[NextDeploy  CI/CD/Security Scan      ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/step-security-harden-runner@v2/dist/pre/index.js] user= workdir=
+[Lint/lint-3                          ]   ✅  Success - Set up job
+[Lint/lint-3                          ]   ☁  git clone 'https://github.com/step-security/harden-runner' # ref=002fdce3c6a235733a90a27c80493a3241e56863
+[NextDeploy  CI/CD/Lint & Code Quality]   ✅  Success - Set up job
+[NextDeploy  CI/CD/Lint & Code Quality]   ☁  git clone 'https://github.com/step-security/harden-runner' # ref=v2
+[Lint/dependency-review               ]   ✅  Success - Set up job
+[Lint/govulncheck                     ]   ✅  Success - Set up job
+[Lint/dependency-review               ]   ☁  git clone 'https://github.com/step-security/harden-runner' # ref=002fdce3c6a235733a90a27c80493a3241e56863
+[Lint/govulncheck                     ]   ☁  git clone 'https://github.com/step-security/harden-runner' # ref=002fdce3c6a235733a90a27c80493a3241e56863
+[NextDeploy  CI/CD/Security Scan      ]   | [harden-runner] pre-step
+[NextDeploy  CI/CD/Security Scan      ]   | [!] Current Configuration: 
+[NextDeploy  CI/CD/Security Scan      ]   | {"repo":"aynaash/NextOperations","run_id":"1","correlation_id":"f67faec1-4674-4f7e-b6ae-f65f50cb3fa3","working_directory":"/home/elitebook/Music/twoyears/NextDeploy/nextdeploy","api_url":"https://agent.api.stepsecurity.io/v1","allowed_endpoints":"","egress_policy":"audit","disable_telemetry":false,"disable_sudo":false,"disable_sudo_and_containers":false,"disable_file_monitoring":false,"private":false,"is_github_hosted":false,"is_debug":false,"one_time_key":""}
+[NextDeploy  CI/CD/Security Scan      ]   | 
+[NextDeploy  CI/CD/Security Scan      ]   | [32mView security insights and recommended policy at:[0m
+[NextDeploy  CI/CD/Security Scan      ]   | https://app.stepsecurity.io/github/aynaash/NextOperations/actions/runs/1
+[NextDeploy  CI/CD/Security Scan      ]   | RUNNER_NAME: 
+[NextDeploy  CI/CD/Security Scan      ]   | This job is running on a self-hosted runner.
+[NextDeploy  CI/CD/Security Scan      ]   ✅  Success - Pre Harden Runner
+[NextDeploy  CI/CD/Security Scan      ]   ☁  git clone 'https://github.com/actions/setup-go' # ref=v5
+[Release Pipeline/build-and-release   ] ⭐ Run Main actions/checkout@v4
+[Release Pipeline/build-and-release   ]   🐳  docker cp src=/home/elitebook/Music/twoyears/NextDeploy/nextdeploy/. dst=/home/elitebook/Music/twoyears/NextDeploy/nextdeploy
+[Lint/lint-1                          ] ⭐ Run Pre Harden the runner (Audit all outbound calls)
+[Lint/lint-1                          ]   🐳  docker cp src=/home/elitebook/.cache/act/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/ dst=/var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/
+[Lint/lint-1                          ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/dist/pre/index.js] user= workdir=
+[Release Pipeline/build-and-release   ]   ✅  Success - Main actions/checkout@v4
+[Release Pipeline/build-and-release   ] ⭐ Run Main Build Binaries
+[Release Pipeline/build-and-release   ]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/1] user= workdir=
+[Release Pipeline/build-and-release   ]   | 🔨 Building CLI for current platform...
+[Release Pipeline/build-and-release   ]   | /bin/sh: 1: go: not found
+[Release Pipeline/build-and-release   ]   | make: *** [Makefile:80: build-cli] Error 127
+[Release Pipeline/build-and-release   ]   ❌  Failure - Main Build Binaries
+[Release Pipeline/build-and-release   ] exitcode '2': failure
+[Release Pipeline/build-and-release   ] ⭐ Run Complete job
+[Release Pipeline/build-and-release   ]   ✅  Success - Complete job
+[Release Pipeline/build-and-release   ] 🏁  Job failed
+[Lint/lint-1                          ]   | [harden-runner] pre-step
+[Lint/lint-1                          ]   | [!] Current Configuration: 
+[Lint/lint-1                          ]   | {"repo":"aynaash/NextOperations","run_id":"1","correlation_id":"d37cbe3a-0843-4e73-8a03-1ebb58570349","working_directory":"/home/elitebook/Music/twoyears/NextDeploy/nextdeploy","api_url":"https://agent.api.stepsecurity.io/v1","allowed_endpoints":"","egress_policy":"audit","disable_telemetry":false,"disable_sudo":false,"disable_sudo_and_containers":false,"disable_file_monitoring":false,"private":false,"is_github_hosted":false,"is_debug":false,"one_time_key":""}
+[Lint/lint-1                          ]   | 
+[Lint/lint-1                          ]   | [32mView security insights and recommended policy at:[0m
+[Lint/lint-1                          ]   | https://app.stepsecurity.io/github/aynaash/NextOperations/actions/runs/1
+[Lint/lint-1                          ]   | RUNNER_NAME: 
+[Lint/lint-1                          ]   | This job is running on a self-hosted runner.
+[Lint/lint-1                          ]   ✅  Success - Pre Harden the runner (Audit all outbound calls)
+[Lint/lint-1                          ]   ☁  git clone 'https://github.com/actions/setup-go' # ref=d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+[Lint/lint-3                          ] ⭐ Run Pre Harden the runner (Audit all outbound calls)
+[Lint/lint-3                          ]   🐳  docker cp src=/home/elitebook/.cache/act/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/ dst=/var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/
+[Lint/lint-3                          ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/dist/pre/index.js] user= workdir=
+[Lint/lint-3                          ]   | [harden-runner] pre-step
+[Lint/lint-3                          ]   | [!] Current Configuration: 
+[Lint/lint-3                          ]   | {"repo":"aynaash/NextOperations","run_id":"1","correlation_id":"4e7f8774-2a1f-4bf6-a511-d910db80bbc9","working_directory":"/home/elitebook/Music/twoyears/NextDeploy/nextdeploy","api_url":"https://agent.api.stepsecurity.io/v1","allowed_endpoints":"","egress_policy":"audit","disable_telemetry":false,"disable_sudo":false,"disable_sudo_and_containers":false,"disable_file_monitoring":false,"private":false,"is_github_hosted":false,"is_debug":false,"one_time_key":""}
+[Lint/lint-3                          ]   | 
+[Lint/lint-3                          ]   | [32mView security insights and recommended policy at:[0m
+[Lint/lint-3                          ]   | https://app.stepsecurity.io/github/aynaash/NextOperations/actions/runs/1
+[Lint/lint-3                          ]   | RUNNER_NAME: 
+[Lint/lint-3                          ]   | This job is running on a self-hosted runner.
+[Lint/lint-3                          ]   ✅  Success - Pre Harden the runner (Audit all outbound calls)
+[Lint/lint-3                          ]   ☁  git clone 'https://github.com/actions/setup-go' # ref=d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+[NextDeploy  CI/CD/Lint & Code Quality] ⭐ Run Pre Harden Runner
+[NextDeploy  CI/CD/Lint & Code Quality]   🐳  docker cp src=/home/elitebook/.cache/act/step-security-harden-runner@v2/ dst=/var/run/act/actions/step-security-harden-runner@v2/
+[NextDeploy  CI/CD/Lint & Code Quality]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/step-security-harden-runner@v2/dist/pre/index.js] user= workdir=
+[NextDeploy  CI/CD/Lint & Code Quality]   | [harden-runner] pre-step
+[NextDeploy  CI/CD/Lint & Code Quality]   | [!] Current Configuration: 
+[NextDeploy  CI/CD/Lint & Code Quality]   | {"repo":"aynaash/NextOperations","run_id":"1","correlation_id":"617b9705-975a-4561-a5cb-71690401feb3","working_directory":"/home/elitebook/Music/twoyears/NextDeploy/nextdeploy","api_url":"https://agent.api.stepsecurity.io/v1","allowed_endpoints":"","egress_policy":"audit","disable_telemetry":false,"disable_sudo":false,"disable_sudo_and_containers":false,"disable_file_monitoring":false,"private":false,"is_github_hosted":false,"is_debug":false,"one_time_key":""}
+[NextDeploy  CI/CD/Lint & Code Quality]   | 
+[NextDeploy  CI/CD/Lint & Code Quality]   | [32mView security insights and recommended policy at:[0m
+[NextDeploy  CI/CD/Lint & Code Quality]   | https://app.stepsecurity.io/github/aynaash/NextOperations/actions/runs/1
+[NextDeploy  CI/CD/Lint & Code Quality]   | RUNNER_NAME: 
+[NextDeploy  CI/CD/Lint & Code Quality]   | This job is running on a self-hosted runner.
+[NextDeploy  CI/CD/Lint & Code Quality]   ✅  Success - Pre Harden Runner
+[NextDeploy  CI/CD/Lint & Code Quality]   ☁  git clone 'https://github.com/actions/setup-go' # ref=v5
+[Lint/dependency-review               ] ⭐ Run Pre Harden the runner (Audit all outbound calls)
+[Lint/dependency-review               ]   🐳  docker cp src=/home/elitebook/.cache/act/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/ dst=/var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/
+[Lint/dependency-review               ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/dist/pre/index.js] user= workdir=
+[Lint/dependency-review               ]   | [harden-runner] pre-step
+[Lint/dependency-review               ]   | [!] Current Configuration: 
+[Lint/dependency-review               ]   | {"repo":"aynaash/NextOperations","run_id":"1","correlation_id":"c3ed7c75-b403-489a-bae2-6cac2c9c7a45","working_directory":"/home/elitebook/Music/twoyears/NextDeploy/nextdeploy","api_url":"https://agent.api.stepsecurity.io/v1","allowed_endpoints":"","egress_policy":"audit","disable_telemetry":false,"disable_sudo":false,"disable_sudo_and_containers":false,"disable_file_monitoring":false,"private":false,"is_github_hosted":false,"is_debug":false,"one_time_key":""}
+[Lint/dependency-review               ]   | 
+[Lint/dependency-review               ]   | [32mView security insights and recommended policy at:[0m
+[Lint/dependency-review               ]   | https://app.stepsecurity.io/github/aynaash/NextOperations/actions/runs/1
+[Lint/dependency-review               ]   | RUNNER_NAME: 
+[Lint/dependency-review               ]   | This job is running on a self-hosted runner.
+[Lint/dependency-review               ]   ✅  Success - Pre Harden the runner (Audit all outbound calls)
+[Lint/dependency-review               ]   ☁  git clone 'https://github.com/actions/dependency-review-action' # ref=da24556b548a50705dd671f47852072ea4c105d9
+[Lint/govulncheck                     ] ⭐ Run Pre Harden the runner (Audit all outbound calls)
+[Lint/govulncheck                     ]   🐳  docker cp src=/home/elitebook/.cache/act/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/ dst=/var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/
+[Lint/govulncheck                     ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/dist/pre/index.js] user= workdir=
+[Lint/govulncheck                     ]   | [harden-runner] pre-step
+[Lint/govulncheck                     ]   | [!] Current Configuration: 
+[Lint/govulncheck                     ]   | {"repo":"aynaash/NextOperations","run_id":"1","correlation_id":"a60405bf-edf5-4ce8-86ba-b7368c687ce3","working_directory":"/home/elitebook/Music/twoyears/NextDeploy/nextdeploy","api_url":"https://agent.api.stepsecurity.io/v1","allowed_endpoints":"","egress_policy":"audit","disable_telemetry":false,"disable_sudo":false,"disable_sudo_and_containers":false,"disable_file_monitoring":false,"private":false,"is_github_hosted":false,"is_debug":false,"one_time_key":""}
+[Lint/govulncheck                     ]   | 
+[Lint/govulncheck                     ]   | [32mView security insights and recommended policy at:[0m
+[Lint/govulncheck                     ]   | https://app.stepsecurity.io/github/aynaash/NextOperations/actions/runs/1
+[Lint/govulncheck                     ]   | RUNNER_NAME: 
+[Lint/govulncheck                     ]   | This job is running on a self-hosted runner.
+[Lint/govulncheck                     ]   ✅  Success - Pre Harden the runner (Audit all outbound calls)
+[Lint/govulncheck                     ]   ☁  git clone 'https://github.com/golang/govulncheck-action' # ref=b625fbe08f3bccbe446d94fbf87fcc875a4f50ee
+[NextDeploy  CI/CD/Security Scan      ]   ☁  git clone 'https://github.com/securecodewarrior/github-action-gosec' # ref=master
+[Lint/lint-1                          ]   ☁  git clone 'https://github.com/golangci/golangci-lint-action' # ref=4afd733a84b1f43292c63897423277bb7f4313a9
+[Lint/lint-3                          ]   ☁  git clone 'https://github.com/golangci/golangci-lint-action' # ref=4afd733a84b1f43292c63897423277bb7f4313a9
+[NextDeploy  CI/CD/Lint & Code Quality]   ☁  git clone 'https://github.com/golangci/golangci-lint-action' # ref=v6
+[Lint/dependency-review               ] ⭐ Run Main Harden the runner (Audit all outbound calls)
+[Lint/dependency-review               ]   🐳  docker cp src=/home/elitebook/.cache/act/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/ dst=/var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/
+[Lint/govulncheck                     ] ⭐ Run Pre govulncheck
+[Lint/dependency-review               ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/dist/index.js] user= workdir=
+[Lint/govulncheck                     ]   ☁  git clone 'https://github.com/actions/setup-go' # ref=v5.0.0
+[NextDeploy  CI/CD/Security Scan      ] Unable to clone https://github.com/securecodewarrior/github-action-gosec refs/heads/master: repository not found: Repository not found.
+[NextDeploy  CI/CD/Security Scan      ] ⭐ Run Complete job
+[NextDeploy  CI/CD/Security Scan      ] Cleaning up container for job Security Scan
+[Lint/dependency-review               ]   | [harden-runner] main-step
+[Lint/dependency-review               ]   | [32mView security insights and recommended policy at:[0m
+[Lint/dependency-review               ]   | https://app.stepsecurity.io/github/aynaash/NextOperations/actions/runs/1
+[Lint/dependency-review               ]   ✅  Success - Main Harden the runner (Audit all outbound calls)
+[Lint/dependency-review               ] ⭐ Run Main Checkout Repository
+[Lint/dependency-review               ]   🐳  docker cp src=/home/elitebook/Music/twoyears/NextDeploy/nextdeploy/. dst=/home/elitebook/Music/twoyears/NextDeploy/nextdeploy
+[NextDeploy  CI/CD/Security Scan      ]   ✅  Success - Complete job
+[NextDeploy  CI/CD/Security Scan      ] 🏁  Job succeeded
+[Lint/lint-1                          ] 🧪  Matrix: map[OS_LABEL:ubuntu-latest os:linux]
+[Lint/lint-1                          ] ⭐ Run Main Harden the runner (Audit all outbound calls)
+[Lint/lint-1                          ]   🐳  docker cp src=/home/elitebook/.cache/act/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/ dst=/var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/
+[Lint/lint-1                          ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/dist/index.js] user= workdir=
+[Lint/dependency-review               ]   ✅  Success - Main Checkout Repository
+[Lint/dependency-review               ] ⭐ Run Main Dependency Review
+[Lint/dependency-review               ]   🐳  docker cp src=/home/elitebook/.cache/act/actions-dependency-review-action@da24556b548a50705dd671f47852072ea4c105d9/ dst=/var/run/act/actions/actions-dependency-review-action@da24556b548a50705dd671f47852072ea4c105d9/
+[Lint/lint-1                          ]   | [harden-runner] main-step
+[Lint/lint-1                          ]   | [32mView security insights and recommended policy at:[0m
+[Lint/lint-1                          ]   | https://app.stepsecurity.io/github/aynaash/NextOperations/actions/runs/1
+[Lint/lint-1                          ]   ✅  Success - Main Harden the runner (Audit all outbound calls)
+[Lint/lint-1                          ] ⭐ Run Main actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+[Lint/lint-1                          ]   🐳  docker cp src=/home/elitebook/Music/twoyears/NextDeploy/nextdeploy/. dst=/home/elitebook/Music/twoyears/NextDeploy/nextdeploy
+[Lint/dependency-review               ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/actions-dependency-review-action@da24556b548a50705dd671f47852072ea4c105d9/dist/index.js] user= workdir=
+[Lint/lint-3                          ] 🧪  Matrix: map[OS_LABEL:windows-latest os:windows]
+[Lint/lint-3                          ] ⭐ Run Main Harden the runner (Audit all outbound calls)
+[Lint/lint-3                          ]   🐳  docker cp src=/home/elitebook/.cache/act/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/ dst=/var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/
+[Lint/lint-3                          ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/dist/index.js] user= workdir=
+[Lint/dependency-review               ]   ❗  ::error::Bad Request - https://docs.github.com/rest/dependency-graph/dependency-review#get-a-diff-of-the-dependencies-between-commits
+[Lint/dependency-review               ]   ❌  Failure - Main Dependency Review
+[Lint/dependency-review               ] exitcode '1': failure
+[Lint/dependency-review               ] ⭐ Run Post Harden the runner (Audit all outbound calls)
+[Lint/lint-1                          ]   ✅  Success - Main actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+[Lint/dependency-review               ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/dist/post/index.js] user= workdir=
+[Lint/lint-3                          ]   | [harden-runner] main-step
+[Lint/lint-3                          ]   | [32mView security insights and recommended policy at:[0m
+[Lint/lint-3                          ]   | https://app.stepsecurity.io/github/aynaash/NextOperations/actions/runs/1
+[Lint/lint-1                          ] ⭐ Run Main actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+[Lint/lint-3                          ]   ✅  Success - Main Harden the runner (Audit all outbound calls)
+[Lint/lint-1                          ]   🐳  docker cp src=/home/elitebook/.cache/act/actions-setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5/ dst=/var/run/act/actions/actions-setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5/
+[Lint/lint-3                          ] ⭐ Run Main actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+[Lint/lint-3                          ]   🐳  docker cp src=/home/elitebook/Music/twoyears/NextDeploy/nextdeploy/. dst=/home/elitebook/Music/twoyears/NextDeploy/nextdeploy
+[Lint/dependency-review               ]   | [harden-runner] post-step
+[Lint/dependency-review               ]   ✅  Success - Post Harden the runner (Audit all outbound calls)
+[Lint/dependency-review               ] ⭐ Run Complete job
+[Lint/lint-1                          ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/actions-setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5/dist/setup/index.js] user= workdir=
+[Lint/dependency-review               ]   ✅  Success - Complete job
+[Lint/dependency-review               ] 🏁  Job failed
+[NextDeploy  CI/CD/Lint & Code Quality] ⭐ Run Main Harden Runner
+[NextDeploy  CI/CD/Lint & Code Quality]   🐳  docker cp src=/home/elitebook/.cache/act/step-security-harden-runner@v2/ dst=/var/run/act/actions/step-security-harden-runner@v2/
+[Lint/lint-1                          ]   | Setup go version spec ~1.24
+[Lint/lint-1                          ]   | Attempting to resolve the latest version from the manifest...
+[NextDeploy  CI/CD/Lint & Code Quality]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/step-security-harden-runner@v2/dist/index.js] user= workdir=
+[Lint/govulncheck                     ]   ✅  Success - Pre govulncheck
+[Lint/govulncheck                     ] ⭐ Run Main Harden the runner (Audit all outbound calls)
+[Lint/govulncheck                     ]   🐳  docker cp src=/home/elitebook/.cache/act/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/ dst=/var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/
+[NextDeploy  CI/CD/Lint & Code Quality]   | [harden-runner] main-step
+[NextDeploy  CI/CD/Lint & Code Quality]   | [32mView security insights and recommended policy at:[0m
+[NextDeploy  CI/CD/Lint & Code Quality]   | https://app.stepsecurity.io/github/aynaash/NextOperations/actions/runs/1
+[NextDeploy  CI/CD/Lint & Code Quality]   ✅  Success - Main Harden Runner
+[NextDeploy  CI/CD/Lint & Code Quality] ⭐ Run Main Checkout
+[NextDeploy  CI/CD/Lint & Code Quality]   🐳  docker cp src=/home/elitebook/Music/twoyears/NextDeploy/nextdeploy/. dst=/home/elitebook/Music/twoyears/NextDeploy/nextdeploy
+[Lint/govulncheck                     ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/dist/index.js] user= workdir=
+[Lint/lint-1                          ]   | matching ~1.24...
+[Lint/lint-1                          ]   | Resolved as '1.24.6'
+[Lint/lint-1                          ]   | Found in cache @ /opt/hostedtoolcache/go/1.24.6/x64
+[Lint/lint-1                          ]   | Added go to the path
+[Lint/lint-1                          ]   | Successfully set up Go version ~1.24
+[Lint/lint-1                          ]   | [command]/opt/hostedtoolcache/go/1.24.6/x64/bin/go env GOMODCACHE
+[Lint/lint-1                          ]   | [command]/opt/hostedtoolcache/go/1.24.6/x64/bin/go env GOCACHE
+[Lint/lint-1                          ]   | /root/go/pkg/mod
+[Lint/lint-1                          ]   | /root/.cache/go-build
+[Lint/lint-1                          ]   | Cache is not found
+[Lint/lint-1                          ]   ❓ add-matcher /run/act/actions/actions-setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5/matchers.json
+[Lint/lint-1                          ]   | go version go1.24.6 linux/amd64
+[Lint/lint-1                          ]   | 
+[Lint/lint-1                          ]   ❓  ::group::go env
+[Lint/govulncheck                     ]   | [harden-runner] main-step
+[Lint/govulncheck                     ]   | [32mView security insights and recommended policy at:[0m
+[Lint/govulncheck                     ]   | https://app.stepsecurity.io/github/aynaash/NextOperations/actions/runs/1
+[Lint/lint-3                          ]   ✅  Success - Main actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+[Lint/govulncheck                     ]   ✅  Success - Main Harden the runner (Audit all outbound calls)
+[Lint/lint-1                          ]   | AR='ar'
+[Lint/lint-1                          ]   | CC='gcc'
+[Lint/lint-1                          ]   | CGO_CFLAGS='-O2 -g'
+[Lint/lint-1                          ]   | CGO_CPPFLAGS=''
+[Lint/lint-1                          ]   | CGO_CXXFLAGS='-O2 -g'
+[Lint/lint-1                          ]   | CGO_ENABLED='1'
+[Lint/lint-1                          ]   | CGO_FFLAGS='-O2 -g'
+[Lint/lint-1                          ]   | CGO_LDFLAGS='-O2 -g'
+[Lint/lint-1                          ]   | CXX='g++'
+[Lint/lint-1                          ]   | GCCGO='gccgo'
+[Lint/lint-1                          ]   | GO111MODULE=''
+[Lint/lint-1                          ]   | GOAMD64='v1'
+[Lint/lint-1                          ]   | GOARCH='amd64'
+[Lint/lint-1                          ]   | GOAUTH='netrc'
+[Lint/lint-1                          ]   | GOBIN=''
+[Lint/lint-1                          ]   | GOCACHE='/root/.cache/go-build'
+[Lint/lint-1                          ]   | GOCACHEPROG=''
+[Lint/lint-1                          ]   | GODEBUG=''
+[Lint/lint-1                          ]   | GOENV='/root/.config/go/env'
+[Lint/lint-1                          ]   | GOEXE=''
+[Lint/lint-1                          ]   | GOEXPERIMENT=''
+[Lint/lint-1                          ]   | GOFIPS140='off'
+[Lint/lint-1                          ]   | GOFLAGS=''
+[Lint/lint-1                          ]   | GOGCCFLAGS='-fPIC -m64 -pthread -Wl,--no-gc-sections -fmessage-length=0 -ffile-prefix-map=/tmp/go-build2147063661=/tmp/go-build -gno-record-gcc-switches'
+[Lint/lint-1                          ]   | GOHOSTARCH='amd64'
+[Lint/lint-1                          ]   | GOHOSTOS='linux'
+[Lint/lint-1                          ]   | GOINSECURE=''
+[Lint/lint-1                          ]   | GOMOD='/home/elitebook/Music/twoyears/NextDeploy/nextdeploy/go.mod'
+[Lint/lint-1                          ]   | GOMODCACHE='/root/go/pkg/mod'
+[Lint/lint-1                          ]   | GONOPROXY=''
+[Lint/lint-1                          ]   | GONOSUMDB=''
+[Lint/lint-1                          ]   | GOOS='linux'
+[Lint/lint-1                          ]   | GOPATH='/root/go'
+[Lint/lint-1                          ]   | GOPRIVATE=''
+[Lint/lint-1                          ]   | GOPROXY='https://proxy.golang.org,direct'
+[Lint/lint-1                          ]   | GOROOT='/opt/hostedtoolcache/go/1.24.6/x64'
+[Lint/lint-1                          ]   | GOSUMDB='sum.golang.org'
+[Lint/lint-1                          ]   | GOTELEMETRY='local'
+[Lint/lint-1                          ]   | GOTELEMETRYDIR='/root/.config/go/telemetry'
+[Lint/lint-1                          ]   | GOTMPDIR=''
+[Lint/lint-1                          ]   | GOTOOLCHAIN='local'
+[Lint/lint-1                          ]   | GOTOOLDIR='/opt/hostedtoolcache/go/1.24.6/x64/pkg/tool/linux_amd64'
+[Lint/lint-1                          ]   | GOVCS=''
+[Lint/lint-1                          ]   | GOVERSION='go1.24.6'
+[Lint/lint-1                          ]   | GOWORK=''
+[Lint/lint-1                          ]   | PKG_CONFIG='pkg-config'
+[Lint/lint-1                          ]   | 
+[Lint/lint-1                          ]   ❓  ::endgroup::
+[Lint/lint-3                          ] ⭐ Run Main actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+[Lint/lint-1                          ]   ✅  Success - Main actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+[Lint/lint-3                          ]   🐳  docker cp src=/home/elitebook/.cache/act/actions-setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5/ dst=/var/run/act/actions/actions-setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5/
+[Lint/govulncheck                     ] ⭐ Run Main govulncheck
+[Lint/lint-1                          ]   ⚙  ::set-output:: cache-hit=false
+[Lint/lint-1                          ]   ⚙  ::set-output:: go-version=1.24.6
+[Lint/lint-1                          ]   ⚙  ::add-path:: /opt/hostedtoolcache/go/1.24.6/x64/bin
+[Lint/lint-1                          ]   ⚙  ::add-path:: /root/go/bin
+[Lint/govulncheck                     ]   🐳  docker cp src=/home/elitebook/.cache/act/golang-govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee/ dst=/var/run/act/actions/golang-govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee/
+[Lint/lint-1                          ] ⭐ Run Main golangci-lint
+[Lint/lint-1                          ]   🐳  docker cp src=/home/elitebook/.cache/act/golangci-golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9/ dst=/var/run/act/actions/golangci-golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9/
+[Lint/govulncheck                     ] ⭐ Run Main actions/checkout@v4.1.1
+[Lint/govulncheck                     ]   🐳  docker cp src=/home/elitebook/Music/twoyears/NextDeploy/nextdeploy/. dst=/home/elitebook/Music/twoyears/NextDeploy/nextdeploy
+[Lint/lint-3                          ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/actions-setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5/dist/setup/index.js] user= workdir=
+[Lint/lint-1                          ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/golangci-golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9/dist/run/index.js] user= workdir=
+[Lint/lint-3                          ]   | Setup go version spec ~1.24
+[Lint/lint-3                          ]   | Attempting to resolve the latest version from the manifest...
+[Lint/lint-1                          ]   ❓  ::group::prepare environment
+[Lint/lint-1                          ]   | Checking for go.mod: go.mod
+[NextDeploy  CI/CD/Lint & Code Quality]   ✅  Success - Main Checkout
+[Lint/lint-1                          ]   | Cache not found for input keys: golangci-lint.cache-Linux-2903-7469e5d5be5140233e158136dcc97e6f6da27654, golangci-lint.cache-Linux-2903-
+[Lint/lint-1                          ]   | Finding needed golangci-lint version...
+[NextDeploy  CI/CD/Lint & Code Quality] ⭐ Run Main Setup Go
+[NextDeploy  CI/CD/Lint & Code Quality]   🐳  docker cp src=/home/elitebook/.cache/act/actions-setup-go@v5/ dst=/var/run/act/actions/actions-setup-go@v5/
+[Lint/lint-3                          ]   | matching ~1.24...
+[Lint/lint-3                          ]   | Resolved as '1.24.6'
+[Lint/lint-3                          ]   | Found in cache @ /opt/hostedtoolcache/go/1.24.6/x64
+[Lint/lint-3                          ]   | Added go to the path
+[Lint/lint-3                          ]   | Successfully set up Go version ~1.24
+[Lint/lint-1                          ]   | Requested golangci-lint 'latest', using 'v2.4.0', calculation took 832ms
+[Lint/lint-1                          ]   | Installation mode: binary
+[Lint/lint-1                          ]   | Installing golangci-lint binary v2.4.0...
+[Lint/lint-1                          ]   | Downloading binary https://github.com/golangci/golangci-lint/releases/download/v2.4.0/golangci-lint-2.4.0-linux-amd64.tar.gz ...
+[Lint/lint-3                          ]   | [command]/opt/hostedtoolcache/go/1.24.6/x64/bin/go env GOMODCACHE
+[Lint/lint-3                          ]   | [command]/opt/hostedtoolcache/go/1.24.6/x64/bin/go env GOCACHE
+[Lint/lint-3                          ]   | /root/go/pkg/mod
+[Lint/lint-3                          ]   | /root/.cache/go-build
+[Lint/lint-3                          ]   | Cache is not found
+[Lint/lint-3                          ]   ❓ add-matcher /run/act/actions/actions-setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5/matchers.json
+[Lint/lint-3                          ]   | go version go1.24.6 linux/amd64
+[Lint/lint-3                          ]   | 
+[Lint/lint-3                          ]   ❓  ::group::go env
+[NextDeploy  CI/CD/Lint & Code Quality]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/actions-setup-go@v5/dist/setup/index.js] user= workdir=
+[Lint/lint-3                          ]   | AR='ar'
+[Lint/lint-3                          ]   | CC='gcc'
+[Lint/lint-3                          ]   | CGO_CFLAGS='-O2 -g'
+[Lint/lint-3                          ]   | CGO_CPPFLAGS=''
+[Lint/lint-3                          ]   | CGO_CXXFLAGS='-O2 -g'
+[Lint/lint-3                          ]   | CGO_ENABLED='1'
+[Lint/lint-3                          ]   | CGO_FFLAGS='-O2 -g'
+[Lint/lint-3                          ]   | CGO_LDFLAGS='-O2 -g'
+[Lint/lint-3                          ]   | CXX='g++'
+[Lint/lint-3                          ]   | GCCGO='gccgo'
+[Lint/lint-3                          ]   | GO111MODULE=''
+[Lint/lint-3                          ]   | GOAMD64='v1'
+[Lint/lint-3                          ]   | GOARCH='amd64'
+[Lint/lint-3                          ]   | GOAUTH='netrc'
+[Lint/lint-3                          ]   | GOBIN=''
+[Lint/lint-3                          ]   | GOCACHE='/root/.cache/go-build'
+[Lint/lint-3                          ]   | GOCACHEPROG=''
+[Lint/lint-3                          ]   | GODEBUG=''
+[Lint/lint-3                          ]   | GOENV='/root/.config/go/env'
+[Lint/lint-3                          ]   | GOEXE=''
+[Lint/lint-3                          ]   | GOEXPERIMENT=''
+[Lint/lint-3                          ]   | GOFIPS140='off'
+[Lint/lint-3                          ]   | GOFLAGS=''
+[Lint/lint-3                          ]   | GOGCCFLAGS='-fPIC -m64 -pthread -Wl,--no-gc-sections -fmessage-length=0 -ffile-prefix-map=/tmp/go-build310731220=/tmp/go-build -gno-record-gcc-switches'
+[Lint/lint-3                          ]   | GOHOSTARCH='amd64'
+[Lint/lint-3                          ]   | GOHOSTOS='linux'
+[Lint/lint-3                          ]   | GOINSECURE=''
+[Lint/lint-3                          ]   | GOMOD='/home/elitebook/Music/twoyears/NextDeploy/nextdeploy/go.mod'
+[Lint/lint-3                          ]   | GOMODCACHE='/root/go/pkg/mod'
+[Lint/lint-3                          ]   | GONOPROXY=''
+[Lint/lint-3                          ]   | GONOSUMDB=''
+[Lint/lint-3                          ]   | GOOS='linux'
+[Lint/lint-3                          ]   | GOPATH='/root/go'
+[Lint/lint-3                          ]   | GOPRIVATE=''
+[Lint/lint-3                          ]   | GOPROXY='https://proxy.golang.org,direct'
+[Lint/lint-3                          ]   | GOROOT='/opt/hostedtoolcache/go/1.24.6/x64'
+[Lint/lint-3                          ]   | GOSUMDB='sum.golang.org'
+[Lint/lint-3                          ]   | GOTELEMETRY='local'
+[Lint/lint-3                          ]   | GOTELEMETRYDIR='/root/.config/go/telemetry'
+[Lint/lint-3                          ]   | GOTMPDIR=''
+[Lint/lint-3                          ]   | GOTOOLCHAIN='local'
+[Lint/lint-3                          ]   | GOTOOLDIR='/opt/hostedtoolcache/go/1.24.6/x64/pkg/tool/linux_amd64'
+[Lint/lint-3                          ]   | GOVCS=''
+[Lint/lint-3                          ]   | GOVERSION='go1.24.6'
+[Lint/lint-3                          ]   | GOWORK=''
+[Lint/lint-3                          ]   | PKG_CONFIG='pkg-config'
+[Lint/lint-3                          ]   | 
+[Lint/lint-3                          ]   ❓  ::endgroup::
+[Lint/lint-3                          ]   ✅  Success - Main actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+[Lint/lint-3                          ]   ⚙  ::set-output:: cache-hit=false
+[Lint/lint-3                          ]   ⚙  ::set-output:: go-version=1.24.6
+[Lint/lint-3                          ]   ⚙  ::add-path:: /opt/hostedtoolcache/go/1.24.6/x64/bin
+[Lint/lint-3                          ]   ⚙  ::add-path:: /root/go/bin
+[Lint/lint-3                          ] ⭐ Run Main golangci-lint
+[Lint/lint-3                          ]   🐳  docker cp src=/home/elitebook/.cache/act/golangci-golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9/ dst=/var/run/act/actions/golangci-golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9/
+[Lint/govulncheck                     ]   ✅  Success - Main actions/checkout@v4.1.1
+[Lint/govulncheck                     ] ⭐ Run Main actions/setup-go@v5.0.0
+[Lint/govulncheck                     ]   🐳  docker cp src=/home/elitebook/.cache/act/actions-setup-go@v5.0.0/ dst=/var/run/act/actions/actions-setup-go@v5.0.0/
+[NextDeploy  CI/CD/Lint & Code Quality]   | Setup go version spec 1.24.x
+[NextDeploy  CI/CD/Lint & Code Quality]   | Attempting to resolve the latest version from the manifest...
+[Lint/govulncheck                     ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/actions-setup-go@v5.0.0/dist/setup/index.js] user= workdir=
+[Lint/lint-3                          ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/golangci-golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9/dist/run/index.js] user= workdir=
+[Lint/govulncheck                     ]   | Setup go version spec ~1.24.1
+[Lint/govulncheck                     ]   | Attempting to resolve the latest version from the manifest...
+[NextDeploy  CI/CD/Lint & Code Quality]   | matching 1.24.x...
+[NextDeploy  CI/CD/Lint & Code Quality]   | Resolved as '1.24.6'
+[NextDeploy  CI/CD/Lint & Code Quality]   | Found in cache @ /opt/hostedtoolcache/go/1.24.6/x64
+[NextDeploy  CI/CD/Lint & Code Quality]   | Added go to the path
+[NextDeploy  CI/CD/Lint & Code Quality]   | Successfully set up Go version 1.24.x
+[NextDeploy  CI/CD/Lint & Code Quality]   | [command]/opt/hostedtoolcache/go/1.24.6/x64/bin/go env GOMODCACHE
+[NextDeploy  CI/CD/Lint & Code Quality]   | [command]/opt/hostedtoolcache/go/1.24.6/x64/bin/go env GOCACHE
+[NextDeploy  CI/CD/Lint & Code Quality]   | /root/go/pkg/mod
+[NextDeploy  CI/CD/Lint & Code Quality]   | /root/.cache/go-build
+[NextDeploy  CI/CD/Lint & Code Quality]   | Cache is not found
+[NextDeploy  CI/CD/Lint & Code Quality]   ❓ add-matcher /run/act/actions/actions-setup-go@v5/matchers.json
+[NextDeploy  CI/CD/Lint & Code Quality]   | go version go1.24.6 linux/amd64
+[NextDeploy  CI/CD/Lint & Code Quality]   | 
+[NextDeploy  CI/CD/Lint & Code Quality]   ❓  ::group::go env
+[Lint/lint-3                          ]   ❓  ::group::prepare environment
+[Lint/lint-3                          ]   | Checking for go.mod: go.mod
+[Lint/lint-3                          ]   | Cache not found for input keys: golangci-lint.cache-Linux-2903-7469e5d5be5140233e158136dcc97e6f6da27654, golangci-lint.cache-Linux-2903-
+[Lint/lint-3                          ]   | Finding needed golangci-lint version...
+[NextDeploy  CI/CD/Lint & Code Quality]   | AR='ar'
+[NextDeploy  CI/CD/Lint & Code Quality]   | CC='gcc'
+[NextDeploy  CI/CD/Lint & Code Quality]   | CGO_CFLAGS='-O2 -g'
+[NextDeploy  CI/CD/Lint & Code Quality]   | CGO_CPPFLAGS=''
+[NextDeploy  CI/CD/Lint & Code Quality]   | CGO_CXXFLAGS='-O2 -g'
+[NextDeploy  CI/CD/Lint & Code Quality]   | CGO_ENABLED='1'
+[NextDeploy  CI/CD/Lint & Code Quality]   | CGO_FFLAGS='-O2 -g'
+[NextDeploy  CI/CD/Lint & Code Quality]   | CGO_LDFLAGS='-O2 -g'
+[NextDeploy  CI/CD/Lint & Code Quality]   | CXX='g++'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GCCGO='gccgo'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GO111MODULE=''
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOAMD64='v1'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOARCH='amd64'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOAUTH='netrc'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOBIN=''
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOCACHE='/root/.cache/go-build'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOCACHEPROG=''
+[NextDeploy  CI/CD/Lint & Code Quality]   | GODEBUG=''
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOENV='/root/.config/go/env'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOEXE=''
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOEXPERIMENT=''
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOFIPS140='off'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOFLAGS=''
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOGCCFLAGS='-fPIC -m64 -pthread -Wl,--no-gc-sections -fmessage-length=0 -ffile-prefix-map=/tmp/go-build3130761999=/tmp/go-build -gno-record-gcc-switches'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOHOSTARCH='amd64'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOHOSTOS='linux'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOINSECURE=''
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOMOD='/home/elitebook/Music/twoyears/NextDeploy/nextdeploy/go.mod'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOMODCACHE='/root/go/pkg/mod'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GONOPROXY=''
+[NextDeploy  CI/CD/Lint & Code Quality]   | GONOSUMDB=''
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOOS='linux'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOPATH='/root/go'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOPRIVATE=''
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOPROXY='https://proxy.golang.org,direct'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOROOT='/opt/hostedtoolcache/go/1.24.6/x64'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOSUMDB='sum.golang.org'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOTELEMETRY='local'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOTELEMETRYDIR='/root/.config/go/telemetry'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOTMPDIR=''
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOTOOLCHAIN='local'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOTOOLDIR='/opt/hostedtoolcache/go/1.24.6/x64/pkg/tool/linux_amd64'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOVCS=''
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOVERSION='go1.24.6'
+[NextDeploy  CI/CD/Lint & Code Quality]   | GOWORK=''
+[NextDeploy  CI/CD/Lint & Code Quality]   | PKG_CONFIG='pkg-config'
+[NextDeploy  CI/CD/Lint & Code Quality]   | 
+[NextDeploy  CI/CD/Lint & Code Quality]   ❓  ::endgroup::
+[NextDeploy  CI/CD/Lint & Code Quality]   ✅  Success - Main Setup Go
+[NextDeploy  CI/CD/Lint & Code Quality]   ⚙  ::set-output:: go-version=1.24.6
+[NextDeploy  CI/CD/Lint & Code Quality]   ⚙  ::set-output:: cache-hit=false
+[NextDeploy  CI/CD/Lint & Code Quality]   ⚙  ::add-path:: /opt/hostedtoolcache/go/1.24.6/x64/bin
+[NextDeploy  CI/CD/Lint & Code Quality]   ⚙  ::add-path:: /root/go/bin
+[Lint/lint-3                          ]   | Requested golangci-lint 'latest', using 'v2.4.0', calculation took 450ms
+[Lint/lint-3                          ]   | Installation mode: binary
+[Lint/lint-3                          ]   | Installing golangci-lint binary v2.4.0...
+[Lint/lint-3                          ]   | Downloading binary https://github.com/golangci/golangci-lint/releases/download/v2.4.0/golangci-lint-2.4.0-linux-amd64.tar.gz ...
+[NextDeploy  CI/CD/Lint & Code Quality] ⭐ Run Main golangci-lint
+[NextDeploy  CI/CD/Lint & Code Quality]   🐳  docker cp src=/home/elitebook/.cache/act/golangci-golangci-lint-action@v6/ dst=/var/run/act/actions/golangci-golangci-lint-action@v6/
+[Lint/lint-1                          ]   | [command]/usr/bin/tar xz --overwrite --warning=no-unknown-keyword --overwrite -C /root -f /tmp/81936046-118f-4a78-a7aa-6427e4cd9f2d
+[NextDeploy  CI/CD/Lint & Code Quality]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/golangci-golangci-lint-action@v6/dist/run/index.js] user= workdir=
+[Lint/lint-1                          ]   | Installed golangci-lint into /root/golangci-lint-2.4.0-linux-amd64/golangci-lint in 6809ms
+[Lint/lint-1                          ]   | Prepared env in 7825ms
+[Lint/lint-1                          ]   ❓  ::endgroup::
+[Lint/lint-1                          ]   ❓  ::group::run golangci-lint
+[Lint/lint-1                          ]   | Running [/root/golangci-lint-2.4.0-linux-amd64/golangci-lint config path] in [/home/elitebook/Music/twoyears/NextDeploy/nextdeploy] ...
+[Lint/govulncheck                     ]   | matching ~1.24.1...
+[Lint/govulncheck                     ]   | Resolved as '1.24.6'
+[Lint/govulncheck                     ]   | Found in cache @ /opt/hostedtoolcache/go/1.24.6/x64
+[Lint/govulncheck                     ]   | Added go to the path
+[Lint/govulncheck                     ]   | Successfully set up Go version ~1.24.1
+[Lint/govulncheck                     ]   | [command]/opt/hostedtoolcache/go/1.24.6/x64/bin/go env GOMODCACHE
+[Lint/govulncheck                     ]   | [command]/opt/hostedtoolcache/go/1.24.6/x64/bin/go env GOCACHE
+[Lint/govulncheck                     ]   | /root/go/pkg/mod
+[Lint/govulncheck                     ]   | /root/.cache/go-build
+[Lint/govulncheck                     ]   | Cache is not found
+[Lint/govulncheck                     ]   ❓ add-matcher /run/act/actions/actions-setup-go@v5.0.0/matchers.json
+[Lint/govulncheck                     ]   | go version go1.24.6 linux/amd64
+[Lint/govulncheck                     ]   | 
+[Lint/govulncheck                     ]   ❓  ::group::go env
+[Lint/lint-1                          ]   | Running [/root/golangci-lint-2.4.0-linux-amd64/golangci-lint run  --timeout 10m] in [/home/elitebook/Music/twoyears/NextDeploy/nextdeploy] ...
+[NextDeploy  CI/CD/Lint & Code Quality]   ❓  ::group::prepare environment
+[NextDeploy  CI/CD/Lint & Code Quality]   | Checking for go.mod: go.mod
+[Lint/govulncheck                     ]   | AR='ar'
+[Lint/govulncheck                     ]   | CC='gcc'
+[Lint/govulncheck                     ]   | CGO_CFLAGS='-O2 -g'
+[Lint/govulncheck                     ]   | CGO_CPPFLAGS=''
+[Lint/govulncheck                     ]   | CGO_CXXFLAGS='-O2 -g'
+[Lint/govulncheck                     ]   | CGO_ENABLED='1'
+[Lint/govulncheck                     ]   | CGO_FFLAGS='-O2 -g'
+[Lint/govulncheck                     ]   | CGO_LDFLAGS='-O2 -g'
+[Lint/govulncheck                     ]   | CXX='g++'
+[Lint/govulncheck                     ]   | GCCGO='gccgo'
+[Lint/govulncheck                     ]   | GO111MODULE=''
+[Lint/govulncheck                     ]   | GOAMD64='v1'
+[Lint/govulncheck                     ]   | GOARCH='amd64'
+[Lint/govulncheck                     ]   | GOAUTH='netrc'
+[Lint/govulncheck                     ]   | GOBIN=''
+[Lint/govulncheck                     ]   | GOCACHE='/root/.cache/go-build'
+[Lint/govulncheck                     ]   | GOCACHEPROG=''
+[Lint/govulncheck                     ]   | GODEBUG=''
+[Lint/govulncheck                     ]   | GOENV='/root/.config/go/env'
+[Lint/govulncheck                     ]   | GOEXE=''
+[Lint/govulncheck                     ]   | GOEXPERIMENT=''
+[Lint/govulncheck                     ]   | GOFIPS140='off'
+[Lint/govulncheck                     ]   | GOFLAGS=''
+[Lint/govulncheck                     ]   | GOGCCFLAGS='-fPIC -m64 -pthread -Wl,--no-gc-sections -fmessage-length=0 -ffile-prefix-map=/tmp/go-build1404159951=/tmp/go-build -gno-record-gcc-switches'
+[Lint/govulncheck                     ]   | GOHOSTARCH='amd64'
+[Lint/govulncheck                     ]   | GOHOSTOS='linux'
+[Lint/govulncheck                     ]   | GOINSECURE=''
+[Lint/govulncheck                     ]   | GOMOD='/home/elitebook/Music/twoyears/NextDeploy/nextdeploy/go.mod'
+[Lint/govulncheck                     ]   | GOMODCACHE='/root/go/pkg/mod'
+[Lint/govulncheck                     ]   | GONOPROXY=''
+[Lint/govulncheck                     ]   | GONOSUMDB=''
+[Lint/govulncheck                     ]   | GOOS='linux'
+[Lint/govulncheck                     ]   | GOPATH='/root/go'
+[Lint/govulncheck                     ]   | GOPRIVATE=''
+[Lint/govulncheck                     ]   | GOPROXY='https://proxy.golang.org,direct'
+[Lint/govulncheck                     ]   | GOROOT='/opt/hostedtoolcache/go/1.24.6/x64'
+[Lint/govulncheck                     ]   | GOSUMDB='sum.golang.org'
+[Lint/govulncheck                     ]   | GOTELEMETRY='local'
+[Lint/govulncheck                     ]   | GOTELEMETRYDIR='/root/.config/go/telemetry'
+[Lint/govulncheck                     ]   | GOTMPDIR=''
+[Lint/govulncheck                     ]   | GOTOOLCHAIN='local'
+[Lint/govulncheck                     ]   | GOTOOLDIR='/opt/hostedtoolcache/go/1.24.6/x64/pkg/tool/linux_amd64'
+[Lint/govulncheck                     ]   | GOVCS=''
+[Lint/govulncheck                     ]   | GOVERSION='go1.24.6'
+[Lint/govulncheck                     ]   | GOWORK=''
+[Lint/govulncheck                     ]   | PKG_CONFIG='pkg-config'
+[Lint/govulncheck                     ]   | 
+[Lint/govulncheck                     ]   ❓  ::endgroup::
+[Lint/govulncheck                     ]   ✅  Success - Main actions/setup-go@v5.0.0
+[Lint/govulncheck                     ]   ⚙  ::set-output:: cache-hit=false
+[Lint/govulncheck                     ]   ⚙  ::set-output:: go-version=1.24.6
+[Lint/govulncheck                     ]   ⚙  ::add-path:: /opt/hostedtoolcache/go/1.24.6/x64/bin
+[Lint/govulncheck                     ]   ⚙  ::add-path:: /root/go/bin
+[Lint/lint-3                          ]   | [command]/usr/bin/tar xz --overwrite --warning=no-unknown-keyword --overwrite -C /root -f /tmp/f97b282e-164f-4a6c-aa54-71063e5094c2
+[NextDeploy  CI/CD/Lint & Code Quality]   | Cache not found for input keys: golangci-lint.cache-Linux-2903-7469e5d5be5140233e158136dcc97e6f6da27654, golangci-lint.cache-Linux-2903-
+[NextDeploy  CI/CD/Lint & Code Quality]   | Finding needed golangci-lint version...
+[NextDeploy  CI/CD/Lint & Code Quality]   | Installation mode: binary
+[NextDeploy  CI/CD/Lint & Code Quality]   | Installing golangci-lint binary v1.64.8...
+[NextDeploy  CI/CD/Lint & Code Quality]   | Downloading binary https://github.com/golangci/golangci-lint/releases/download/v1.64.8/golangci-lint-1.64.8-linux-amd64.tar.gz ...
+[Lint/lint-1                          ]   | Error: can't load config: unsupported version of the configuration: "" See https://golangci-lint.run/docs/product/migration-guide for migration instructions
+[Lint/lint-1                          ]   | The command is terminated due to an error: can't load config: unsupported version of the configuration: "" See https://golangci-lint.run/docs/product/migration-guide for migration instructions
+[Lint/lint-1                          ]   | 
+[Lint/lint-1                          ]   ❗  ::error::golangci-lint exit with code 3
+[Lint/lint-1                          ]   | Ran golangci-lint in 624ms
+[Lint/lint-1                          ]   ❓  ::endgroup::
+[Lint/govulncheck                     ] ⭐ Run Main Install govulncheck
+[Lint/lint-1                          ]   ❌  Failure - Main golangci-lint
+[Lint/lint-1                          ]   ⚙  ::add-path:: /root/golangci-lint-2.4.0-linux-amd64
+[Lint/lint-1                          ] exitcode '1': failure
+[Lint/govulncheck                     ]   🐳  docker exec cmd=[bash --noprofile --norc -e -o pipefail /var/run/act/workflow/1-composite-2.sh] user= workdir=
+[Lint/lint-1                          ] ⭐ Run Post golangci-lint
+[Lint/lint-1                          ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/golangci-golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9/dist/post_run/index.js] user= workdir=
+[Lint/lint-3                          ]   | Installed golangci-lint into /root/golangci-lint-2.4.0-linux-amd64/golangci-lint in 4416ms
+[Lint/lint-3                          ]   | Prepared env in 5013ms
+[Lint/lint-3                          ]   ❓  ::endgroup::
+[Lint/lint-3                          ]   ❓  ::group::run golangci-lint
+[Lint/lint-3                          ]   | Running [/root/golangci-lint-2.4.0-linux-amd64/golangci-lint config path] in [/home/elitebook/Music/twoyears/NextDeploy/nextdeploy] ...
+[Lint/lint-1                          ]   | [warning] Path Validation Error: Path(s) specified in the action for caching do(es) not exist, hence no cache is being saved.
+[Lint/lint-1                          ]   ✅  Success - Post golangci-lint
+[Lint/lint-3                          ]   | Running [/root/golangci-lint-2.4.0-linux-amd64/golangci-lint run  --timeout 10m] in [/home/elitebook/Music/twoyears/NextDeploy/nextdeploy] ...
+[Lint/lint-1                          ] ⭐ Run Post Harden the runner (Audit all outbound calls)
+[Lint/lint-1                          ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/dist/post/index.js] user= workdir=
+[Lint/lint-3                          ]   | Error: can't load config: unsupported version of the configuration: "" See https://golangci-lint.run/docs/product/migration-guide for migration instructions
+[Lint/lint-3                          ]   | The command is terminated due to an error: can't load config: unsupported version of the configuration: "" See https://golangci-lint.run/docs/product/migration-guide for migration instructions
+[Lint/lint-3                          ]   | 
+[Lint/lint-3                          ]   ❗  ::error::golangci-lint exit with code 3
+[Lint/lint-3                          ]   | Ran golangci-lint in 597ms
+[Lint/lint-3                          ]   ❓  ::endgroup::
+[Lint/lint-3                          ]   ❌  Failure - Main golangci-lint
+[Lint/lint-3                          ]   ⚙  ::add-path:: /root/golangci-lint-2.4.0-linux-amd64
+[Lint/lint-3                          ] exitcode '1': failure
+[Lint/lint-3                          ] ⭐ Run Post golangci-lint
+[Lint/lint-3                          ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/golangci-golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9/dist/post_run/index.js] user= workdir=
+[Lint/lint-1                          ]   | [harden-runner] post-step
+[Lint/lint-1                          ]   ✅  Success - Post Harden the runner (Audit all outbound calls)
+[Lint/lint-1                          ] ⭐ Run Complete job
+[Lint/lint-1                          ]   ✅  Success - Complete job
+[Lint/lint-1                          ] 🏁  Job failed
+[Lint/govulncheck                     ]   | go: downloading golang.org/x/vuln v1.1.4
+[Lint/govulncheck                     ]   | go: downloading golang.org/x/telemetry v0.0.0-20240522233618-39ace7a40ae7
+[Lint/govulncheck                     ]   | go: downloading golang.org/x/mod v0.22.0
+[Lint/govulncheck                     ]   | go: downloading golang.org/x/tools v0.29.0
+[Lint/lint-3                          ]   | [warning] Path Validation Error: Path(s) specified in the action for caching do(es) not exist, hence no cache is being saved.
+[Lint/lint-3                          ]   ✅  Success - Post golangci-lint
+[Lint/govulncheck                     ]   | go: downloading golang.org/x/sync v0.10.0
+[Lint/lint-3                          ] ⭐ Run Post Harden the runner (Audit all outbound calls)
+[Lint/lint-3                          ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/dist/post/index.js] user= workdir=
+[NextDeploy  CI/CD/Lint & Code Quality]   | [command]/usr/bin/tar xz --overwrite --warning=no-unknown-keyword --overwrite -C /root -f /tmp/ddafc257-7a0e-4813-ad97-a4a903cf4c4e
+[Lint/lint-3                          ]   | [harden-runner] post-step
+[Lint/lint-3                          ]   ✅  Success - Post Harden the runner (Audit all outbound calls)
+[Lint/lint-3                          ] ⭐ Run Complete job
+[Lint/lint-3                          ]   ✅  Success - Complete job
+[Lint/lint-3                          ] 🏁  Job failed
+[NextDeploy  CI/CD/Lint & Code Quality]   | Installed golangci-lint into /root/golangci-lint-1.64.8-linux-amd64/golangci-lint in 5463ms
+[NextDeploy  CI/CD/Lint & Code Quality]   | Prepared env in 5652ms
+[NextDeploy  CI/CD/Lint & Code Quality]   ❓  ::endgroup::
+[NextDeploy  CI/CD/Lint & Code Quality]   ❓  ::group::run golangci-lint
+[NextDeploy  CI/CD/Lint & Code Quality]   | Running [/root/golangci-lint-1.64.8-linux-amd64/golangci-lint config path] in [/home/elitebook/Music/twoyears/NextDeploy/nextdeploy] ...
+[NextDeploy  CI/CD/Lint & Code Quality]   | Running [/root/golangci-lint-1.64.8-linux-amd64/golangci-lint config verify] in [/home/elitebook/Music/twoyears/NextDeploy/nextdeploy] ...
+[NextDeploy  CI/CD/Lint & Code Quality]   ❓  ::endgroup::
+[NextDeploy  CI/CD/Lint & Code Quality]   ❗  ::error::Failed to run: Error: Command failed: /root/golangci-lint-1.64.8-linux-amd64/golangci-lint config verify%0Ajsonschema: "linters-settings.govet" does not validate with "/properties/linters-settings/properties/govet/additionalProperties": additional properties 'check-shadowing' not allowed%0AFailed executing command with error: the configuration contains invalid elements%0A, Error: Command failed: /root/golangci-lint-1.64.8-linux-amd64/golangci-lint config verify%0Ajsonschema: "linters-settings.govet" does not validate with "/properties/linters-settings/properties/govet/additionalProperties": additional properties 'check-shadowing' not allowed%0AFailed executing command with error: the configuration contains invalid elements%0A%0A    at ChildProcess.exithandler (node:child_process:422:12)%0A    at ChildProcess.emit (node:events:517:28)%0A    at maybeClose (node:internal/child_process:1098:16)%0A    at ChildProcess._handle.onexit (node:internal/child_process:303:5)
+[NextDeploy  CI/CD/Lint & Code Quality]   ❗  ::error::Command failed: /root/golangci-lint-1.64.8-linux-amd64/golangci-lint config verify%0Ajsonschema: "linters-settings.govet" does not validate with "/properties/linters-settings/properties/govet/additionalProperties": additional properties 'check-shadowing' not allowed%0AFailed executing command with error: the configuration contains invalid elements%0A
+[NextDeploy  CI/CD/Lint & Code Quality]   ❌  Failure - Main golangci-lint
+[NextDeploy  CI/CD/Lint & Code Quality]   ⚙  ::add-path:: /root/golangci-lint-1.64.8-linux-amd64
+[NextDeploy  CI/CD/Lint & Code Quality] exitcode '1': failure
+[NextDeploy  CI/CD/Lint & Code Quality] ⭐ Run Post golangci-lint
+[NextDeploy  CI/CD/Lint & Code Quality]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/golangci-golangci-lint-action@v6/dist/post_run/index.js] user= workdir=
+[NextDeploy  CI/CD/Lint & Code Quality]   | [warning] Path Validation Error: Path(s) specified in the action for caching do(es) not exist, hence no cache is being saved.
+[NextDeploy  CI/CD/Lint & Code Quality]   ✅  Success - Post golangci-lint
+[NextDeploy  CI/CD/Lint & Code Quality] ⭐ Run Post Harden Runner
+[NextDeploy  CI/CD/Lint & Code Quality]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/step-security-harden-runner@v2/dist/post/index.js] user= workdir=
+[NextDeploy  CI/CD/Lint & Code Quality]   | [harden-runner] post-step
+[NextDeploy  CI/CD/Lint & Code Quality]   ✅  Success - Post Harden Runner
+[NextDeploy  CI/CD/Lint & Code Quality] ⭐ Run Complete job
+[NextDeploy  CI/CD/Lint & Code Quality]   ✅  Success - Complete job
+[NextDeploy  CI/CD/Lint & Code Quality] 🏁  Job failed
+[Lint/govulncheck                     ]   ✅  Success - Main Install govulncheck
+[Lint/govulncheck                     ] ⭐ Run Main Run govulncheck
+[Lint/govulncheck                     ]   🐳  docker exec cmd=[bash --noprofile --norc -e -o pipefail /var/run/act/workflow/1-composite-3.sh] user= workdir=
+[Lint/govulncheck                     ]   | === Symbol Results ===
+[Lint/govulncheck                     ]   | 
+[Lint/govulncheck                     ]   | Vulnerability #1: GO-2025-3830
+[Lint/govulncheck                     ]   |     Moby firewalld reload makes published container ports accessible from remote
+[Lint/govulncheck                     ]   |     hosts in github.com/docker/docker
+[Lint/govulncheck                     ]   |   More info: https://pkg.go.dev/vuln/GO-2025-3830
+[Lint/govulncheck                     ]   |   Module: github.com/docker/docker
+[Lint/govulncheck                     ]   |     Found in: github.com/docker/docker@v28.3.2+incompatible
+[Lint/govulncheck                     ]   |     Fixed in: github.com/docker/docker@v28.3.3+incompatible
+[Lint/govulncheck                     ]   |     Example traces found:
+[Lint/govulncheck                     ]   |       #1: shared/nextcore/runtime.go:18:2: nextcore.init calls client.init, which calls api.init
+[Lint/govulncheck                     ]   |       #2: shared/nextcore/runtime.go:15:2: nextcore.init calls container.init, which calls blkiodev.init
+[Lint/govulncheck                     ]   |       #3: shared/docker/docker.go:11:2: docker.init calls build.init
+[Lint/govulncheck                     ]   |       #4: shared/nextcore/runtime.go:18:2: nextcore.init calls client.init, which calls checkpoint.init
+[Lint/govulncheck                     ]   |       #5: shared/caddy/caddy.go:194:27: caddy.CaddyManager.PatchConfig calls http.Client.Do, which eventually calls client.CheckRedirect
+[Lint/govulncheck                     ]   |       #6: shared/nextcore/runtime.go:229:46: nextcore.nextruntime.CreateContainer calls client.Client.ContainerCreate
+[Lint/govulncheck                     ]   |       #7: shared/nextcore/runtime.go:619:39: nextcore.nextruntime.GetRuntimeStats calls client.Client.ContainerStats
+[Lint/govulncheck                     ]   |       #8: shared/docker/docker.go:244:34: docker.DockerManager.BuildAndDeploy calls client.Client.ImageBuild
+[Lint/govulncheck                     ]   |       #9: shared/nextcore/runtime.go:86:44: nextcore.nextruntime.ensureNetwork calls client.Client.NetworkCreate
+[Lint/govulncheck                     ]   |       #10: shared/nextcore/runtime.go:73:55: nextcore.nextruntime.ensureNetwork calls client.Client.NetworkInspect
+[Lint/govulncheck                     ]   |       #11: shared/nextcore/runtime.go:246:41: nextcore.nextruntime.Cleanup calls client.Client.NetworkRemove
+[Lint/govulncheck                     ]   |       #12: shared/docker/docker.go:217:38: docker.DockerManager.BuildAndDeploy calls client.NewClientWithOpts
+[Lint/govulncheck                     ]   |       #13: shared/caddy/caddy.go:194:27: caddy.CaddyManager.PatchConfig calls http.Client.Do, which eventually calls client.NewClientWithOpts
+[Lint/govulncheck                     ]   |       #14: shared/docker/docker.go:217:87: docker.DockerManager.BuildAndDeploy calls client.WithAPIVersionNegotiation
+[Lint/govulncheck                     ]   |       #15: shared/docker/docker.go:854:20: docker.DockerManager.GenerateDockerfileContent calls fmt.Sprintf, which eventually calls client.emptyIDError.Error
+[Lint/govulncheck                     ]   |       #16: shared/docker/docker.go:854:20: docker.DockerManager.GenerateDockerfileContent calls fmt.Sprintf, which eventually calls client.errConnectionFailed.Error
+[Lint/govulncheck                     ]   |       #17: shared/registry/awsuser.go:227:40: registry.DeleteLoginProfile calls iam.Client.DeleteLoginProfile, which eventually calls client.errConnectionFailed.Unwrap
+[Lint/govulncheck                     ]   |       #18: shared/docker/docker.go:854:20: docker.DockerManager.GenerateDockerfileContent calls fmt.Sprintf, which eventually calls client.httpError.Error
+[Lint/govulncheck                     ]   |       #19: cli/cmd/root.go:72:27: cmd.Execute calls cobra.Command.Execute, which eventually calls client.httpError.Is
+[Lint/govulncheck                     ]   |       #20: shared/registry/awsuser.go:227:40: registry.DeleteLoginProfile calls iam.Client.DeleteLoginProfile, which eventually calls client.httpError.Unwrap
+[Lint/govulncheck                     ]   |       #21: shared/nextcore/runtime.go:18:2: nextcore.init calls client.init
+[Lint/govulncheck                     ]   |       #22: shared/nextcore/runtime.go:15:2: nextcore.init calls container.init, which calls common.init
+[Lint/govulncheck                     ]   |       #23: shared/docker/docker.go:244:34: docker.DockerManager.BuildAndDeploy calls client.Client.ImageBuild, which eventually calls container.Isolation.IsDefault
+[Lint/govulncheck                     ]   |       #24: shared/nextcore/runtime.go:15:2: nextcore.init calls container.init
+[Lint/govulncheck                     ]   |       #25: shared/nextcore/runtime.go:18:2: nextcore.init calls client.init, which calls events.init
+[Lint/govulncheck                     ]   |       #26: shared/nextcore/runtime.go:18:2: nextcore.init calls client.init, which calls filters.init
+[Lint/govulncheck                     ]   |       #27: shared/nextcore/runtime.go:18:2: nextcore.init calls client.init, which calls image.init
+[Lint/govulncheck                     ]   |       #28: shared/nextcore/runtime.go:18:2: nextcore.init calls client.init, which calls lazyregexp.New
+[Lint/govulncheck                     ]   |       #29: shared/docker/docker.go:244:34: docker.DockerManager.BuildAndDeploy calls client.Client.ImageBuild, which eventually calls lazyregexp.Regexp.FindStringSubmatch
+[Lint/govulncheck                     ]   |       #30: shared/docker/docker.go:921:21: docker.DockerManager.CheckDockerInstalled calls exec.Command, which eventually calls lazyregexp.Regexp.build
+[Lint/govulncheck                     ]   |       #31: shared/nextcore/runtime.go:18:2: nextcore.init calls client.init, which calls lazyregexp.init
+[Lint/govulncheck                     ]   |       #32: shared/nextcore/runtime.go:16:2: nextcore.init calls mount.init
+[Lint/govulncheck                     ]   |       #33: shared/nextcore/runtime.go:17:2: nextcore.init calls network.init, which calls multierror.init
+[Lint/govulncheck                     ]   |       #34: shared/nextcore/runtime.go:17:2: nextcore.init calls network.init
+[Lint/govulncheck                     ]   |       #35: shared/nextcore/runtime.go:18:2: nextcore.init calls client.init, which calls registry.init
+[Lint/govulncheck                     ]   |       #36: shared/nextcore/runtime.go:18:2: nextcore.init calls client.init, which eventually calls runtime.init
+[Lint/govulncheck                     ]   |       #37: shared/nextcore/runtime.go:15:2: nextcore.init calls container.init, which calls storage.init
+[Lint/govulncheck                     ]   |       #38: shared/nextcore/runtime.go:15:2: nextcore.init calls container.init, which calls strslice.init
+[Lint/govulncheck                     ]   |       #39: shared/nextcore/runtime.go:18:2: nextcore.init calls client.init, which calls swarm.init
+[Lint/govulncheck                     ]   |       #40: shared/nextcore/runtime.go:18:2: nextcore.init calls client.init, which calls system.init
+[Lint/govulncheck                     ]   |       #41: shared/nextcore/runtime.go:18:2: nextcore.init calls client.init, which calls time.init
+[Lint/govulncheck                     ]   |       #42: shared/nextcore/runtime.go:18:2: nextcore.init calls client.init, which calls types.init
+[Lint/govulncheck                     ]   |       #43: shared/nextcore/runtime.go:229:46: nextcore.nextruntime.CreateContainer calls client.Client.ContainerCreate, which calls versions.GreaterThanOrEqualTo
+[Lint/govulncheck                     ]   |       #44: shared/nextcore/runtime.go:229:46: nextcore.nextruntime.CreateContainer calls client.Client.ContainerCreate, which calls versions.LessThan
+[Lint/govulncheck                     ]   |       #45: shared/nextcore/runtime.go:18:2: nextcore.init calls client.init, which calls versions.init
+[Lint/govulncheck                     ]   |       #46: shared/nextcore/runtime.go:18:2: nextcore.init calls client.init, which calls volume.init
+[Lint/govulncheck                     ]   | 
+[Lint/govulncheck                     ]   | Your code is affected by 1 vulnerability from 1 module.
+[Lint/govulncheck                     ]   | This scan found no other vulnerabilities in packages you import or modules you
+[Lint/govulncheck                     ]   | require.
+[Lint/govulncheck                     ]   | Use '-show verbose' for more details.
+[Lint/govulncheck                     ]   ❌  Failure - Main Run govulncheck
+[Lint/govulncheck                     ] exitcode '3': failure
+[Lint/govulncheck                     ]   ❌  Failure - Main govulncheck
+[Lint/govulncheck                     ] exitcode '3': failure
+[Lint/govulncheck                     ] ⭐ Run Post govulncheck
+[Lint/govulncheck                     ]   🐳  docker cp src=/home/elitebook/.cache/act/golang-govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee/ dst=/var/run/act/actions/golang-govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee/
+[Lint/govulncheck                     ]   ✅  Success - Post govulncheck
+[Lint/govulncheck                     ] ⭐ Run Post Harden the runner (Audit all outbound calls)
+[Lint/govulncheck                     ]   🐳  docker exec cmd=[/opt/acttoolcache/node/18.20.8/x64/bin/node /var/run/act/actions/step-security-harden-runner@002fdce3c6a235733a90a27c80493a3241e56863/dist/post/index.js] user= workdir=
+[Lint/govulncheck                     ]   | [harden-runner] post-step
+[Lint/govulncheck                     ]   ✅  Success - Post Harden the runner (Audit all outbound calls)
+[Lint/govulncheck                     ] ⭐ Run Complete job
+[Lint/govulncheck                     ]   ✅  Success - Complete job
+[Lint/govulncheck                     ] 🏁  Job failed
+Error: repository not found: Repository not found.

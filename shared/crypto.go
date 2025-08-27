@@ -1,3 +1,6 @@
+//go:build !windows
+// +build !windows
+
 package shared
 
 import (
@@ -105,6 +108,7 @@ func VerifyMessageSignature(msg AgentMessage) bool {
 
 	return ecdsa.Verify(publicKey, hash[:], sig.R, sig.S)
 }
+
 func SecureKeyMemory(key []byte) {
 	// Use platform-specific secure memory functions
 	if len(key) == 0 {
@@ -118,7 +122,6 @@ func SecureKeyMemory(key []byte) {
 }
 
 // ZeroKey securely wipes keys from memory
-
 func ZeroKey(key []byte) {
 	if len(key) == 0 {
 		return
@@ -133,16 +136,11 @@ func ZeroKey(key []byte) {
 	runtime.KeepAlive(key)
 
 	// For Linux/Unix:
-	// check os type and only execute on unix machines
-	if runtime.GOOS == "windows" {
-		return
-	} else {
-		if _, _, err := syscall.Syscall(syscall.SYS_MUNLOCK, uintptr(unsafe.Pointer(&key[0])), uintptr(len(key)), 0); err != 0 {
-			log.Printf("Warning: failed to unlock memory: %v", err)
-		}
-
+	if _, _, err := syscall.Syscall(syscall.SYS_MUNLOCK, uintptr(unsafe.Pointer(&key[0])), uintptr(len(key)), 0); err != 0 {
+		log.Printf("Warning: failed to unlock memory: %v", err)
 	}
 }
+
 func GenerateKeyPair() (*KeyPair, error) {
 	curve := ecdh.X25519()
 	// generate ECDH key pair
@@ -314,5 +312,4 @@ func LoadKeyFromFile(filename string) ([]byte, error) {
 		return nil, fmt.Errorf("invalid key size: expected %d, got %d", PrivateKeySize, len(key))
 	}
 	return key, nil
-
 }
