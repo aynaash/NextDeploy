@@ -24,8 +24,3 @@ jobs:
         with:
           files: dist/*
           generate_release_notes: true
-      
-      # Update installation scripts
-      - name: Update Web Installer
-        run: |
-          ./scripts/update-installer.sh ${{ github.ref_name }}
