@@ -10,6 +10,7 @@ import (
 	"nextdeploy/shared/config"
 	"nextdeploy/shared/envstore"
 	"nextdeploy/shared/git"
+	"nextdeploy/shared/sanitizer"
 	"os"
 	"os/exec"
 	"strings"
@@ -107,12 +108,16 @@ func pushDockerImage() error {
 		return errors.New("registry URL is not set")
 	}
 	commit, err := git.GetCommitHash()
+	if err != nil {
+		return fmt.Errorf("failed to get commit hash: %w", err)
+	}
 	name := cfg.Docker.Image + ":" + commit
 	oceanlogs.Info("Pushing Docker image to DigitalOcean registry: %s", name)
 	imageName := fmt.Sprintf("%s/%s", registryURL, name)
 	fmt.Println("Pushing Docker image:", imageName)
 
 	// tag the Docker image
+	imageName = sanitizer.DockerImageName(imageName)
 	cmdTag := exec.Command("docker", "tag", name, imageName)
 	cmdTag.Stdout = os.Stdout
 	cmdTag.Stderr = os.Stderr
@@ -121,6 +126,7 @@ func pushDockerImage() error {
 	}
 
 	// Push the Docker image to the DigitalOcean registry
+	imageName = sanitizer.DockerImageName(imageName)
 	cmd := exec.Command("docker", "push", imageName)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
