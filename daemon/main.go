@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"nextdeploy/shared"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -106,6 +108,23 @@ func (d *NextDeployDaemon) Start() error {
 		return fmt.Errorf("failed to create socket: %w", err)
 	}
 	d.listener = listener
+
+	//TODO: add a go routine that observers the running container and restarts if it stops on either port 3000 or 3001
+	go func() {
+		for {
+			time.Sleep(60 * time.Second)
+			// Check if listener is still active
+			if d.listener == nil {
+				log.Println("Listener is nil, exiting observer")
+				return
+			}
+			// Check if Docker is still accessible
+			if err := d.checkDockerAccess(); err != nil {
+				log.Printf("Warning: Docker access lost: %v", err)
+			}
+
+		}
+	}()
 
 	// Set socket permissions (only local access)
 	if err := d.setSocketPermissions(); err != nil {
@@ -838,6 +857,18 @@ func sendCommand(socketPath string, cmd Command) (*Response, error) {
 
 // Command-line interface
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "update" {
+		fmt.Println("Checking for updates...")
+		UpdateDaemon()
+		fmt.Println("Update completed successfully.")
+		os.Exit(0)
+	}
+	version := flag.Bool("version", false, "Show version info")
+	flag.Parse()
+	if *version {
+		fmt.Println("NextDeploy Daemon:", shared.Version)
+		os.Exit(0)
+	}
 	config := LoggerConfig{
 		LogDir:      "/var/log/nextdeployd",
 		LogFileName: "nextdeployd.log",

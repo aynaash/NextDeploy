@@ -32,6 +32,22 @@ func ExtractECRDetails(ecrURI string) (string, string, string, error) {
 	return accountID, region, repoName, nil
 }
 
+func GetCurrentRunningContainerName() string {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Printf("Failed to load configuration: %v\n", err)
+		return ""
+	}
+	// latest second last git commit
+	gitCommit, err := git.GetSecondLatestCommitHashAlt()
+	if err != nil {
+		fmt.Printf("Failed to get git commit hash: %v\n", err)
+		return ""
+	}
+	currentImage := fmt.Sprintf("%s:%s", cfg.Docker.Image, gitCommit)
+	fmt.Printf("Current Docker image: %s\n", currentImage)
+	return currentImage
+}
 func GetLatestImageName() string {
 	cfg, err := config.Load()
 	if err != nil {

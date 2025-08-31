@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"fmt"
+	"nextdeploy/shared"
 	"os"
 	"strings"
 
@@ -14,12 +15,13 @@ import (
 
 // Semantic color functions
 var (
-	title     = color.New(color.FgHiBlue, color.Bold).SprintFunc()
-	success   = color.New(color.FgHiGreen).SprintFunc()
-	warning   = color.New(color.FgHiYellow, color.Bold).SprintFunc()
-	errorMsg  = color.New(color.FgHiRed, color.Bold).SprintFunc()
-	command   = color.New(color.FgCyan).SprintFunc()
-	highlight = color.New(color.Bold).SprintFunc()
+	title       = color.New(color.FgHiBlue, color.Bold).SprintFunc()
+	success     = color.New(color.FgHiGreen).SprintFunc()
+	warning     = color.New(color.FgHiYellow, color.Bold).SprintFunc()
+	errorMsg    = color.New(color.FgHiRed, color.Bold).SprintFunc()
+	command     = color.New(color.FgCyan).SprintFunc()
+	highlight   = color.New(color.Bold).SprintFunc()
+	versionFlag = false
 )
 
 // rootCmd is the main command
@@ -69,6 +71,11 @@ Deploy your Next.js app to *any* VPS — with Docker, SSL, logs, and zero downti
 func Execute() {
 	fmt.Println()
 
+	if versionFlag {
+		fmt.Println("NextDeploy version:", shared.Version)
+		os.Exit(0)
+	}
+
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Printf("\n%s %s\n\n",
 			errorMsg("❌ Error:"), err,
@@ -86,6 +93,7 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.PersistentFlags().BoolVarP(&versionFlag, "version", "v", false, "Show version information")
 	rootCmd.SetHelpTemplate(fmt.Sprintf(`%s
 %s
 

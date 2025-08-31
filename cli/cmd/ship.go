@@ -7,6 +7,7 @@ import (
 	"nextdeploy/cli/internal/server"
 	"nextdeploy/cli/internal/ship"
 	"nextdeploy/shared"
+	"nextdeploy/shared/registry"
 	"os"
 	"os/signal"
 
@@ -110,13 +111,40 @@ func runDeployment(ctx context.Context, serverMgr *server.ServerStruct, servers 
 	if err := ship.VerifyDeployment(ctx, serverMgr, servers[0], stream); err != nil {
 		return fmt.Errorf("post-deployment verification failed: %w", err)
 	}
-	//TODO: Re-enable Caddy setup using daemon
-	// if serve {
-	// 	ShipLogs.Info(" ==== PHASE 4: Refresh caddy  ====")
-	// 	if err := ship.SetupCaddy(ctx, serverMgr, servers[0], fresh, stream); err != nil {
-	// 		return fmt.Errorf("caddy setup failed: %w", err)
-	// 	}
-	// }
+	// serverMgr execture nextdeployd pull --image=image --newapp --bluegreen
+	latestImageName := registry.GetLatestImageName()
+
+	ShipLogs.Info("Pulling latest image: %s", latestImageName)
+
+	output, err := serverMgr.ExecuteCommand(ctx, servers[0], fmt.Sprintf("nextdeployd pull --image=%s", latestImageName), stream)
+	if err != nil {
+		ShipLogs.Error("Error pulling latest image: %v", err)
+		return fmt.Errorf("failed to pull latest image: %w", err)
+	}
+	ShipLogs.Info("Pull output: %s", output)
+
+	currentContainer := registry.GetLatestImageName()
+	ShipLogs.Info("Current running container: %s", currentContainer)
+
+	// switch to new container
+	ShipLogs.Info("Switching to new container...")
+
+	switchResult, err := serverMgr.ExecuteCommand(ctx, servers[0], fmt.Sprintf("nextdeployd switch --current=%s --new=%s --newapp=%t --bluegreen=%t", currentContainer, latestImageName, newapp, bluegreen), stream)
+	if err != nil {
+		ShipLogs.Error("Error switching containers: %v", err)
+		return fmt.Errorf("failed to switch containers: %w", err)
+	}
+	ShipLogs.Info("Switch output: %s", switchResult)
+
+	if serve {
+		ShipLogs.Info("Setting up Caddy server...")
+		caddyOutput, err := serverMgr.ExecuteCommand(ctx, servers[0], "nextdeployd caddy --setup", stream)
+		if err != nil {
+			ShipLogs.Error("Error setting up Caddy: %v", err)
+			return fmt.Errorf("failed to setup Caddy: %w", err)
+		}
+		ShipLogs.Info("Caddy setup output: %s", caddyOutput)
+	}
 
 	return nil
 }

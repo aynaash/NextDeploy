@@ -330,7 +330,6 @@ func (s *ServerStruct) BasicCaddySetup(ctx context.Context, serverName string, s
 
 }
 
-// ExecuteCommand runs a command on the specified server with context support
 // ExecuteCommand runs a command on the specified server with context support and streaming
 func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command string, stream io.Writer) (string, error) {
 	client, err := s.getSSHClient(serverName)

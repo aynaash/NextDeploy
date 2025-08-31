@@ -19,6 +19,7 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/zalando/go-keyring v0.2.6
 	golang.org/x/crypto v0.40.0
+	golang.org/x/sys v0.35.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -68,7 +69,6 @@ require (
 	go.opentelemetry.io/otel/sdk v1.37.0 // indirect
 	go.opentelemetry.io/otel/trace v1.37.0 // indirect
 	golang.org/x/net v0.42.0 // indirect
-	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 )
