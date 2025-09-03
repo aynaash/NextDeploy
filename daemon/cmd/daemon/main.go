@@ -21,7 +21,7 @@ func main() {
 
 	if len(os.Args) > 1 && os.Args[1] == "update" {
 		fmt.Println("Checking for updates...")
-		// Update logic here
+		UpdateDaemon()
 		fmt.Println("Update completed successfully.")
 		os.Exit(0)
 	}
@@ -30,7 +30,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create daemon: %v", err)
 	}
-
 	if err := daemonInstance.Start(); err != nil {
 		log.Fatalf("Daemon failed: %v", err)
 	}

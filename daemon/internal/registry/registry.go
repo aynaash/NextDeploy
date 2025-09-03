@@ -1,7 +1,8 @@
-package main
+package registry
 
 import (
 	"fmt"
+	"nextdeploy/daemon/internal/config"
 	"nextdeploy/shared/envstore"
 	"os"
 	"os/exec"
@@ -57,7 +58,7 @@ func HandleDigitalOceanRegistryAuth() error {
 
 	// read config file
 	nextdeployPath := "~/app/nextdeploy.yml"
-	cfg, err := ReadConfigInServer(nextdeployPath)
+	cfg, err := config.ReadConfigInServer(nextdeployPath)
 	if err != nil {
 		fmt.Printf("Failed to read nextdeploy.yml file: %v\n", err)
 		return err
@@ -71,7 +72,7 @@ func HandleDigitalOceanRegistryAuth() error {
 	} else if err != nil {
 		fmt.Printf("Failed to check build lock file: %v\n", err)
 	}
-	commit, err := GetGitCommit(filePath) // parse the lock file content to get the image name and tag
+	commit, err := config.GetGitCommit(filePath)
 	if err != nil {
 		fmt.Printf("Failed to get git commit from build lock file: %v\n", err)
 		return err
@@ -88,7 +89,7 @@ func HandleDigitalOceanRegistryAuth() error {
 
 func GetRegistryType() string {
 	nextdeployPath := "~/app/nextdeploy.yml"
-	cfg, err := ReadConfigInServer(nextdeployPath)
+	cfg, err := config.ReadConfigInServer(nextdeployPath)
 	if err != nil {
 		fmt.Printf("Failed to read nextdeploy.yml file: %v\n", err)
 		return ""
