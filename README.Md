@@ -1,55 +1,74 @@
-## 🛠️ NextDeploy CLI — DevOps for Developers Who Care
+---
 
-Tired of opaque platforms and complex CI/CD? **NextDeploy CLI** is your path to simplicity and control.
+# ⚡ NextDeploy
 
-It deploys **Next.js apps directly to your own VPS** — with proper secrets management, real Docker, and minimal friction. You get full-stack control from local development to live production, all from your terminal.
+NextDeploy is an **open-source CLI + daemon** for deploying and managing **Next.js applications** on your own infrastructure.
+No lock-in. No magic. Just **Docker, SSH, and full control**.
 
 ---
 
-### ⚙️ What It Does
+## 🚀 Why NextDeploy?
 
-*   🧱 **Builds** production-ready Docker images for your Next.js app.
-*   🚀 **Deploys** your container to any VPS (Hetzner, DigitalOcean, AWS, bare metal) via SSH.
-*   🔐 **Injects secrets** securely and dynamically directly from **Doppler**.
-*   📦 **Ships** builds from your local machine or CI environment with full transparency.
-*   📊 **Streams** logs and metrics directly from your running container.
-*   🧪 **Runimage:** Test production-like builds locally using real secrets.
+* 🧱 **Builds** Docker images optimized for Next.js
+* 🚀 **Ships** to any VPS (Hetzner, DigitalOcean, AWS, bare metal) via SSH
+* 🔐 **Injects secrets** securely with [Doppler](https://doppler.com)
+* 📊 **Streams logs & metrics** from running containers
+* 🧪 **Runimage:** test production builds locally with real secrets
+* 🛠️ **Daemon support:** health checks, logs, and automation on servers
 
-One tool. One config. No mandatory dashboards.
-
----
-
-### 🔐 Doppler Integrated. No `.env` Files.
-
-NextDeploy is built **Doppler-first**, eliminating the risk of unsecured `.env` files.
-
-*   Load secrets dynamically at deploy time.
-*   Secrets are encrypted and managed securely in Doppler.
-*   No hardcoding, no manual copying, no risk of leaking.
-*   Full environment scoping: dev, staging, prod.
-*   Change a secret → restart container → done.
-*   Works identically in CI or local development.
+One tool. One config. Full transparency.
 
 ---
 
-### 🚀 Quick Start
+## 📦 Installation
+
+Choose your platform:
+
+**Linux**
 
 ```bash
-go install github.com/aynaash/nextdeploy@latest
+curl -fsSL https://nextdeploy.one/linux-cli.sh | sh
 ```
+
+**macOS**
 
 ```bash
-nextdeploy init       # Scaffolds a Dockerfile and nextdeploy.yml config
-nextdeploy build      # Creates a production-optimized Docker image
-nextdeploy secrets    # Manage your Doppler secret integrations
-nextdeploy runimage   # Run your image locally with secrets injected
-nextdeploy provision  # Set up a new server with the built-in setup
-nextdeploy prepare    # Prepare a server to receive deployments
-nextdeploy ship       # Deploy to your VPS via SSH with Doppler secrets
-nextdeploy serve      # Serve your app online
+curl -fsSL https://nextdeploy.one/mac-cli.sh | sh
 ```
 
-Test with production configuration before deploying:
+**Windows (PowerShell, Run as Admin)**
+
+```powershell
+iwr -useb https://nextdeploy.one/windows.ps1 | iex
+```
+
+**Daemon (Linux/Mac)**
+
+```bash
+curl -fsSL https://nextdeploy.one/nextdeployd.sh | sh
+```
+
+⚠️ **Pro tip:** version your installers. For production use:
+
+```bash
+curl -fsSL https://nextdeploy.one/install.sh | sh          # latest stable
+curl -fsSL https://nextdeploy.one/install/v0.1.0.sh | sh   # pinned version
+```
+
+---
+
+## ⚡ Quick Start
+
+```bash
+nextdeploy init       # Scaffold Dockerfile + nextdeploy.yml
+nextdeploy build      # Build production Docker image
+nextdeploy runimage   # Run locally with Doppler secrets
+nextdeploy provision  # Prepare a fresh VPS
+nextdeploy ship       # Deploy to your server
+nextdeploy serve      # Serve app online
+```
+
+Test with production config before shipping:
 
 ```bash
 nextdeploy runimage --prod
@@ -57,94 +76,65 @@ nextdeploy runimage --prod
 
 ---
 
-### 🧠 Our Philosophy
+## 🔐 Secrets Done Right
 
-Modern DevOps can become complex and opaque. You often don't own your pipeline, see your deployments, or fully control your secrets.
+NextDeploy is **Doppler-first** — no more `.env` files:
 
-**NextDeploy is the alternative.** It's built for clarity and ownership. You deploy what you understand, keeping the process lean, fast, and completely auditable.
-
----
-
-### ✅ Ideal For Developers Who:
-
-*   Deploy Next.js or full-stack apps regularly.
-*   Run projects on VPS or bare metal and want more control.
-*   Prefer transparent tools over opaque "magic" platforms.
-*   Need strong security practices without a dedicated security team.
-*   Value simplicity and want to reduce moving parts.
+* Secrets injected at deploy/runtime
+* Fully encrypted + scoped (dev/staging/prod)
+* Update → restart → done
+* Works the same locally and in CI
 
 ---
 
-### 📍 Roadmap
+## 🧠 Philosophy
 
-*   ✅ Docker builds & SSH deploy
-*   ✅ Doppler secret injection
-*   ✅ Container metrics + logs
-*   ✅ `runimage` command for local testing
-*   🔄 GitHub webhook CI/CD automation
-*   ⏪ Rollbacks and release tracking
-*   🔌 Stack plugins (Rails, Go, Astro, Bun, etc.)
-*   🌐 Team dashboard and multitenant support(in the future)
+Other platforms abstract until you lose control.
+**NextDeploy flips that.** You own the pipeline. You see every step.
+
+No black boxes. No middleware. Just you and your server.
 
 ---
 
-### 🧱 Open Source & Community-Driven
+## ✅ Perfect For Developers Who
 
-NextDeploy is built for developers who value **autonomy, simplicity, and control**.
+* Deploy **Next.js** or full-stack apps to VPS/bare metal
+* Want **transparent, auditable DevOps**
+* Need strong **security practices** without complexity
+* Care about **simplicity over vendor lock-in**
+
+---
+
+## 🛠️ Roadmap
+
+* ✅ Docker builds & SSH deploy
+* ✅ Doppler integration
+* ✅ Logs + metrics
+* ✅ `runimage` for local testing
+* 🔄 CI/CD via GitHub webhooks
+* ⏪ Rollbacks & release tracking
+* 🔌 Stack plugins (Rails, Go, Bun, Astro…)
+* 🌐 Dashboard & multitenant support
+
+---
+
+## 🌐 Links
+
+* Website → [nextdeploy.one](https://nextdeploy.one)
+* GitHub → [github.com/aynaash/nextdeploy/cli](https://github.com/aynaash/nextdeploy/cli)
+* Twitter/X → [@nextdeploy](https://twitter.com/nextdeploy)
+
+---
+
+## 👥 Community
 
 We welcome contributors:
-*   📡 **Systems Engineers:** Help enhance the daemon.
-*   🛡️ **Security Reviewers:** Help us strengthen our security flows.
-*   🧠 **Product Contributors:** Developers who build and use their own tools.
 
-This is for devs, by devs.
-
----
-
-### 🌐 Links
-
-*   Website: [nextdeploy.one](https://nextdeploy.one)
-*   GitHub: [github.com/aynaash/nextdeploy/cli](https://github.com/aynaash/nextdeploy/cli)
-*   Twitter/X: [@nextdeploydev](https://twitter.com/nextdeploydev)
+* Systems engineers (daemon/logging)
+* Security reviewers
+* Product-minded devs
 
 ---
-
-## 🚀 NextDeploy — Transparent Deployment, Under Your Control
-
-Other platforms can lock you in and upsell you enterprise features. NextDeploy gives you root access to your stack and then gets out of your way.
-
-Run your infrastructure professionally. Deploy with modern best practices.
-**No magic. No middleware. Just you and your server.**
-
----
-# ⚡ NextDeploy
-
-NextDeploy is an **open-source CLI and daemon** for deploying and managing Next.js applications on your own infrastructure (VPS, cloud, or bare metal). It offers a simple, transparent alternative to closed-platform services.
-
+🔥 **NextDeploy — Transparent Deployment, Under Your Control.**
 ---
 
-## 🚀 Features
-- `nextdeploy` CLI – Generate configs, build, ship, and manage apps.
-- `nextdeployd` daemon – Handles logging, health checks, and deployment automation on the server.
-- Cross-platform binaries (Linux, macOS, Windows).
-- Built with Go for speed and portability.
-
----
-
-## 📦 Installation
-
-Download the latest binaries from the [Releases](https://github.com/aynaash/nextdeploy/releases) page.
-
-**Example for Linux:**
-
-```bash
-# Download and install the CLI
-curl -L -o nextdeploy https://github.com/aynaash/nextdeploy/releases/download/v0.1.0/nextdeploy-linux-amd64
-chmod +x nextdeploy
-sudo mv nextdeploy /usr/local/bin/
-
-# Download and install the daemon
-curl -L -o nextdeployd https://github.com/aynaash/nextdeploy/releases/download/v0.1.0/nextdeployd-linux-amd64
-chmod +x nextdeployd
-sudo mv nextdeployd /usr/local/bin/
-```
