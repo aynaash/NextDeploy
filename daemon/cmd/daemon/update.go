@@ -1,42 +1,132 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 )
 
-func UpdateDaemon() {
-	owner := "aynaash"
-	repo := "NextDeploy"
-	latestURL := fmt.Sprintf("https://github.com/%s/%s/releases/latest/download/nextdeployd-%s-%s", owner, repo, runtime.GOOS, runtime.GOARCH)
+type UpdateInfo struct {
+	Updated    bool
+	NewVersion string
+	UpdateFrom string
+}
 
-	fmt.Println("Fetching latest daemon release from:", latestURL)
+func UpdateDaemon() (UpdateInfo, error) {
+	const (
+		owner = "aynaash"
+		repo  = "NextDeploy"
+	)
 
-	cmd := exec.Command("curl", "-L", latestURL, "-o", "/usr/local/bin/nextdeployd")
+	// Get current version
+	currentVersion, err := getCurrentVersion()
+	if err != nil {
+		return UpdateInfo{}, fmt.Errorf("failed to get current version: %w", err)
+	}
+
+	// Get latest release info
+	latestTag, err := getLatestReleaseTag(owner, repo)
+	if err != nil {
+		return UpdateInfo{}, fmt.Errorf("failed to get latest release: %w", err)
+	}
+
+	// Check if update is needed
+	if currentVersion == latestTag {
+		return UpdateInfo{
+			Updated:    false,
+			NewVersion: latestTag,
+			UpdateFrom: currentVersion,
+		}, nil
+	}
+
+	// Download new version
+	downloadURL := fmt.Sprintf(
+		"https://github.com/%s/%s/releases/latest/download/nextdeployd-%s-%s",
+		owner, repo, runtime.GOOS, runtime.GOARCH,
+	)
+
+	if err := downloadBinary(downloadURL, "/tmp/nextdeployd-new"); err != nil {
+		return UpdateInfo{}, fmt.Errorf("download failed: %w", err)
+	}
+
+	// Replace binary
+	if err := replaceBinary("/tmp/nextdeployd-new", "/usr/local/bin/nextdeployd"); err != nil {
+		return UpdateInfo{}, fmt.Errorf("binary replacement failed: %w", err)
+	}
+
+	// Restart service
+	if err := restartService("nextdeployd"); err != nil {
+		return UpdateInfo{
+			Updated:    true,
+			NewVersion: latestTag,
+			UpdateFrom: currentVersion,
+		}, fmt.Errorf("failed to restart service: %w", err)
+	}
+
+	return UpdateInfo{
+		Updated:    true,
+		NewVersion: latestTag,
+		UpdateFrom: currentVersion,
+	}, nil
+}
+
+func getCurrentVersion() (string, error) {
+	cmd := exec.Command("/usr/local/bin/nextdeployd", "--version")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func getLatestReleaseTag(owner, repo string) (string, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", owner, repo)
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var release struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return "", err
+	}
+	return release.TagName, nil
+}
+
+func downloadBinary(url, path string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	outFile, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer outFile.Close()
+
+	if _, err := io.Copy(outFile, resp.Body); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0755)
+}
+
+func replaceBinary(source, destination string) error {
+	return os.Rename(source, destination)
+}
+
+func restartService(serviceName string) error {
+	cmd := exec.Command("systemctl", "restart", serviceName)
 	cmd.Stdout = os.Stdout
-
 	cmd.Stderr = os.Stderr
-
-	err := cmd.Run()
-	if err != nil {
-		fmt.Println("Error downloading the latest daemon version:", err)
-		return
-	}
-
-	exec.Command("chmod", "+x", "/usr/local/bin/nextdeployd").Run()
-	fmt.Println("NextDeploy Daemon has been updated to the latest version!")
-
-	restart := exec.Command("sudo", "systemctl", "restart", "nextdeployd")
-	restart.Stdout = os.Stdout
-	restart.Stderr = os.Stderr
-	err = restart.Run()
-
-	if err != nil {
-		fmt.Println("Error restarting the NextDeploy Daemon:", err)
-		return
-	}
-	fmt.Println("NextDeploy Daemon has been restarted successfully!")
-
+	return cmd.Run()
 }

@@ -3,11 +3,18 @@ package client
 import (
 	"encoding/json"
 	"fmt"
-	"nextdeploy/daemon/internal/client"
-	"nextdeploy/daemon/internal/types"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
+	"time"
+
+	"nextdeploy/daemon/internal/client"
+	"nextdeploy/daemon/internal/types"
+)
+
+var (
+	socketPath = "/var/run/nextdeployd.sock"
 )
 
 func truncate(s string, maxLen int) string {
@@ -22,49 +29,118 @@ func truncate(s string, maxLen int) string {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("NextDeploy Daemon - Docker Container Management")
-		fmt.Println("\nUsage:")
-		fmt.Println("  Start daemon: nextdeployd daemon [--config=/path/to/config.json]")
-		fmt.Println("\nContainer Commands:")
-		fmt.Println("  nextdeployd listcontainers [--all=true]")
-		fmt.Println("  nextdeployd deploy --image=nginx:latest --name=web-server --ports=80:8080")
-		fmt.Println("  nextdeployd start --container=web-server")
-		fmt.Println("  nextdeployd stop --container=web-server")
-		fmt.Println("  nextdeployd restart --container=web-server")
-		fmt.Println("  nextdeployd remove --container=web-server [--force=true]")
-		fmt.Println("  nextdeployd logs --container=web-server [--lines=50]")
-		fmt.Println("  nextdeployd inspect --container=web-server")
-		fmt.Println("\nDeployment Commands:")
-		fmt.Println("  nextdeployd swapcontainers --from=app-v1 --to=app-v2")
-		fmt.Println("  nextdeployd rollback --container=web-server")
-		fmt.Println("  nextdeployd pull --image=nginx:latest")
-		fmt.Println("\nHealth & Status:")
-		fmt.Println("  nextdeployd status")
-		fmt.Println("  nextdeployd health [--container=web-server]")
+		PrintUsage()
 		os.Exit(1)
 	}
 
 	command := os.Args[1]
-	socketPath := "/var/run/nextdeployd.sock"
 
+	// Handle daemon command separately
 	if command == "daemon" {
-		fmt.Println("Use the 'nextdeployd' command to manage containers. This client does not start the daemon.")
+		handleDaemonCommand()
+		return
+	}
+
+	// For all other commands, check if daemon is running first
+	if !isDaemonRunning() {
+		fmt.Printf("❌ NextDeploy daemon is not running\n")
+		fmt.Printf("   Start it with: nextdeployd daemon\n")
+		fmt.Printf("   Or run: sudo systemctl start nextdeployd\n")
 		os.Exit(1)
 	}
 
-	// client mode - send command to running daemon
+	// Parse and send command to running daemon
+	sendCommandToDaemon(command)
+}
 
-	var cmd types.Command
+func isDaemonRunning() bool {
+	// Check if socket exists and is accessible
+	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
+		return false
+	}
+
+	// Try to connect to the socket
+	conn, err := client.SendCommand(socketPath, types.Command{
+		Type: "status",
+		Args: map[string]interface{}{},
+	})
+
+	return err == nil && conn != nil
+}
+
+func handleDaemonCommand() {
+	configPath := "/etc/nextdeployd/config.json"
+	foreground := false
+
+	// Parse daemon-specific flags
+	for _, arg := range os.Args[2:] {
+		if strings.HasPrefix(arg, "--config=") {
+			configPath = strings.TrimPrefix(arg, "--config=")
+		} else if arg == "--foreground" {
+			foreground = true
+		}
+	}
+
+	if foreground {
+		// Run in foreground (for debugging)
+		runDaemonDirectly(configPath)
+	} else {
+		// Daemonize
+		startDaemonProcess(configPath)
+	}
+}
+
+func runDaemonDirectly(configPath string) {
+	fmt.Println("Starting NextDeploy daemon in foreground...")
+
+	// This would typically exec the daemon binary
+	cmd := exec.Command("nextdeploy-daemon", "--foreground=true", "--config="+configPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("Failed to start daemon: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func startDaemonProcess(configPath string) {
+	// Check if daemon is already running
+	if isDaemonRunning() {
+		fmt.Println("✅ NextDeploy daemon is already running")
+		return
+	}
+
+	fmt.Println("🚀 Starting NextDeploy daemon...")
+
+	cmd := exec.Command("nextdeploy-daemon", "--config="+configPath)
+
+	// Start detached
+	if err := cmd.Start(); err != nil {
+		fmt.Printf("❌ Failed to start daemon: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Wait a bit for daemon to start
+	time.Sleep(1 * time.Second)
+
+	if isDaemonRunning() {
+		fmt.Printf("✅ Daemon started successfully with PID %d\n", cmd.Process.Pid)
+	} else {
+		fmt.Println("❌ Daemon started but may not be responding")
+		fmt.Println("   Check logs: /var/log/nextdeployd/daemon.out")
+	}
+}
+
+func sendCommandToDaemon(command string) {
 	args := make(map[string]interface{})
 
 	// Parse command-line arguments
-	// In the main function, update the argument parsing section:
 	for i := 2; i < len(os.Args); i++ {
 		arg := os.Args[i]
 		if strings.HasPrefix(arg, "--") {
 			parts := strings.SplitN(arg[2:], "=", 2)
 			if len(parts) == 2 {
-				// Enhanced parsing for different types
 				key := parts[0]
 				value := parts[1]
 
@@ -74,7 +150,6 @@ func main() {
 				case "false":
 					args[key] = false
 				default:
-					// Try to parse as number, otherwise keep as string
 					if intVal, err := strconv.Atoi(value); err == nil {
 						args[key] = intVal
 					} else {
@@ -82,31 +157,36 @@ func main() {
 					}
 				}
 			} else if len(parts) == 1 {
-				// Handle boolean flags without =value
 				args[parts[0]] = true
 			}
 		}
 	}
 
-	cmd.Type = command
-	cmd.Args = args
+	cmd := types.Command{
+		Type: command,
+		Args: args,
+	}
 
-	// send command to daemon
+	// Send command to daemon
 	response, err := client.SendCommand(socketPath, cmd)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		fmt.Printf("❌ Error: %v\n", err)
 
-		// check if daemon is running
-		if strings.Contains(err.Error(), "connect: no such file or directory") || strings.Contains(err.Error(), "connect: connection refused") {
-			fmt.Println("Is the daemon running? Start it with 'nextdeployd daemon --config=/path/to/config.json'")
-			fmt.Println("If the daemon is not running, this client cannot connect to it.")
+		// Provide helpful error messages
+		if strings.Contains(err.Error(), "connect") {
+			fmt.Println("   The daemon may not be running or is not responding")
+			fmt.Println("   Start it with: nextdeployd daemon")
 		}
 		os.Exit(1)
 	}
 
-	// Display response based on command type
+	// Display response
+	displayResponse(response)
+}
+
+func displayResponse(response *types.Response) {
 	if response.Success {
-		fmt.Printf("Success: %s\n", response.Message)
+		fmt.Printf("✅ Success: %s\n", response.Message)
 		if response.Data != nil {
 			switch data := response.Data.(type) {
 			case []interface{}:
@@ -151,7 +231,7 @@ func main() {
 			}
 		}
 	} else {
-		fmt.Printf("Error: %s\n", response.Message)
+		fmt.Printf("❌ Error: %s\n", response.Message)
 		os.Exit(1)
 	}
 }

@@ -26,6 +26,7 @@ type DaemonConfig struct {
 	LogDir          string `json:"log_dir"`
 	LogMaxSize      int    `json:"log_max_size"`
 	LogMaxBackups   int    `json:"log_max_backups"`
+	ConfigPath      string `json:"config_path"`
 }
 
 type LoggerConfig struct {

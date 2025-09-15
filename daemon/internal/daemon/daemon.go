@@ -34,7 +34,7 @@ func NewNextDeployDaemon(socketPath string) (*NextDeployDaemon, error) {
 	logConfig := types.LoggerConfig{
 		LogDir:      cfg.LogDir,
 		LogFileName: "nextdeployd.log",
-		MaxFileSize: 10 * 1024 * 1024, // 10 MB
+		MaxFileSize: 10 * 1024 * 1024,
 		MaxBackups:  5,
 	}
 

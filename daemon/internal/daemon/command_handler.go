@@ -15,14 +15,123 @@ import (
 )
 
 type CommandHandler struct {
-	dockerClient *DockerClient
-	config       *types.DaemonConfig
+	dockerClient  *DockerClient
+	config        *types.DaemonConfig
+	healthMonitor *HealthMonitor
 }
 
 func NewCommandHandler(dockerClient *DockerClient, config *types.DaemonConfig) *CommandHandler {
 	return &CommandHandler{
 		dockerClient: dockerClient,
 		config:       config,
+	}
+}
+func (ch *CommandHandler) startApp(args map[string]interface{}) types.Response {
+	name, _ := args["name"].(string)
+
+	// Deploy container with monitoring
+	response := ch.deployContainer(args)
+	if response.Success {
+		// Add to monitoring
+		app := &MonitoredApp{
+			ContainerName: name,
+			DesiredState:  "running",
+			RestartPolicy: "always",
+			MaxRestarts:   -1, // unlimited
+		}
+		ch.healthMonitor.monitoredApps[name] = app
+	}
+	return response
+}
+
+func (ch *CommandHandler) stopApp(args map[string]interface{}) types.Response {
+	name, _ := args["name"].(string)
+
+	// Stop container and remove from monitoring
+	if app, exists := ch.healthMonitor.monitoredApps[name]; exists {
+		app.DesiredState = "stopped"
+	}
+
+	return ch.stopContainer(args)
+}
+
+func (ch *CommandHandler) restartApp(args map[string]interface{}) types.Response {
+	name, _ := args["name"].(string)
+
+	if app, exists := ch.healthMonitor.monitoredApps[name]; exists {
+		app.RestartCount = 0
+	}
+
+	return ch.restartContainer(args)
+}
+func (ch *CommandHandler) getAppLogs(name string, lines int) ([]string, error) {
+	cmd := exec.Command("docker", "logs", "--tail", fmt.Sprintf("%d", lines), name)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	logLines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	return logLines, nil
+}
+func (ch *CommandHandler) removeApp(args map[string]interface{}) types.Response {
+	name, _ := args["name"].(string)
+
+	// Stop container and remove from monitoring
+	if app, exists := ch.healthMonitor.monitoredApps[name]; exists {
+		app.DesiredState = "removed"
+		delete(ch.healthMonitor.monitoredApps, name)
+	}
+
+	return ch.removeContainer(args)
+}
+
+func (ch *CommandHandler) listApps(args map[string]interface{}) types.Response {
+	apps := []map[string]interface{}{}
+
+	for name, app := range ch.healthMonitor.monitoredApps {
+		status, _ := ch.dockerClient.getContainerStatus(name)
+
+		apps = append(apps, map[string]interface{}{
+			"name":          name,
+			"status":        status,
+			"restarts":      app.RestartCount,
+			"desired_state": app.DesiredState,
+			"policy":        app.RestartPolicy,
+		})
+	}
+
+	return types.Response{
+		Success: true,
+		Message: fmt.Sprintf("Monitoring %d applications", len(apps)),
+		Data:    apps,
+	}
+}
+
+func (ch *CommandHandler) appStatus(args map[string]interface{}) types.Response {
+	name, _ := args["name"].(string)
+
+	if app, exists := ch.healthMonitor.monitoredApps[name]; exists {
+		status, _ := ch.dockerClient.getContainerStatus(name)
+		logs, _ := ch.getAppLogs(name, 10)
+
+		return types.Response{
+			Success: true,
+			Message: fmt.Sprintf("Application %s status: %s", name, status),
+			Data: map[string]interface{}{
+				"name":          name,
+				"status":        status,
+				"restarts":      app.RestartCount,
+				"desired_state": app.DesiredState,
+				"policy":        app.RestartPolicy,
+				"logs":          logs,
+			},
+		}
+	}
+
+	return types.Response{
+		Success: false,
+		Message: fmt.Sprintf("Application %s not found in monitoring", name),
 	}
 }
 
@@ -56,6 +165,10 @@ func (ch *CommandHandler) HandleCommand(cmd types.Command) types.Response {
 		return ch.rollbackContainer(cmd.Args)
 	case "setupCaddy":
 		return ch.setUpCaddy(cmd.Args)
+	case "stopdaemon":
+		return ch.stopDaemon(cmd.Args)
+	case "restartDaemon":
+		return ch.restartDaemon(cmd.Args)
 	default:
 		return types.Response{
 			Success: false,
@@ -64,6 +177,54 @@ func (ch *CommandHandler) HandleCommand(cmd types.Command) types.Response {
 	}
 }
 
+func (ch *CommandHandler) stopDaemon(args map[string]interface{}) types.Response {
+	fmt.Println("Stopping daemon...")
+	ch.Shutdown()
+	return types.Response{
+		Success: true,
+		Message: "Daemon stopped successfully",
+	}
+}
+func (ch *CommandHandler) restartDaemon(args map[string]interface{}) types.Response {
+	fmt.Println("Restarting daemon...")
+	ch.Shutdown()
+	time.Sleep(2 * time.Second) // wait for shutdown
+	// restart the process
+	execPath, err := os.Executable()
+	if err != nil {
+		return types.Response{
+			Success: false,
+			Message: fmt.Sprintf("Failed to get executable path: %v", err),
+		}
+	}
+	cmd := exec.Command(execPath, "--foreground=true", "--config="+ch.config.ConfigPath)
+	err = cmd.Start()
+	if err != nil {
+		return types.Response{
+			Success: false,
+			Message: fmt.Sprintf("Failed to restart daemon: %v", err),
+		}
+	}
+	return types.Response{
+		Success: true,
+		Message: "Daemon restarted successfully",
+	}
+}
+func (ch *CommandHandler) Shutdown() {
+	// Perform any necessary cleanup here
+	log.Println("Shutting down daemon...")
+	cmd, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		log.Printf("Error finding process: %v", err)
+		return
+	}
+	err = cmd.Signal(os.Interrupt)
+	if err != nil {
+		log.Printf("Error sending interrupt signal: %v", err)
+		return
+	}
+	log.Println("Daemon shutdown complete.")
+}
 func (ch *CommandHandler) ValidateCommand(cmd types.Command) error {
 	allowedCommands := []string{
 		"swapcontainers", "listcontainers", "deploy", "status",
@@ -548,7 +709,7 @@ func (ch *CommandHandler) switchContainers(args map[string]interface{}) types.Re
 	// Handle standard deployment
 	if response := ch.handleStandardSwitch(currentContainer, newContainer, newApp); !response.Success {
 		return response
-		}
+	}
 
 	return types.Response{
 		Success: true,

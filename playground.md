@@ -1,35 +1,261 @@
 
-# Security and quality checks
-security-scan:
-  name: Security Scan
-  runs-on: ubuntu-latest
-  steps:
-    - name: Harden Runner
-      uses: step-security/harden-runner@v2
-      with:
-        egress-policy: audit
+package main
 
-    - name: Checkout
-      uses: actions/checkout@v4
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"time"
 
-    - name: Setup Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
-        check-latest: true
+	"nextdeploy/daemon/internal/client"
+	"nextdeploy/daemon/internal/types"
+)
 
-    # Run gosec directly (no dead action wrapper)
-    - name: Install and Run Gosec
-      run: |
-        go install github.com/securego/gosec/v2/cmd/gosec@latest
-        $(go env GOPATH)/bin/gosec -fmt sarif -out gosec.sarif ./...
+var (
+	socketPath = "/var/run/nextdeployd.sock"
+)
 
-    - name: Upload SARIF file
-      uses: github/codeql-action/upload-sarif@v3
-      with:
-        sarif_file: gosec.sarif
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
+}
 
-    - name: Run govulncheck
-      run: |
-        go install golang.org/x/vuln/cmd/govulncheck@latest
-        $(go env GOPATH)/bin/govulncheck ./...
+func printUsage() {
+	fmt.Println("NextDeploy Daemon - Docker Container Management")
+	fmt.Println("\nUsage:")
+	fmt.Println("  Start daemon: nextdeployd daemon [--config=/path/to/config.json]")
+	fmt.Println("\nContainer Commands:")
+	fmt.Println("  nextdeployd listcontainers [--all=true]")
+	fmt.Println("  nextdeployd deploy --image=nginx:latest --name=web-server --ports=80:8080")
+	fmt.Println("  nextdeployd start --contai fbner=web-server")
+	fmt.Println("  nextdeployd stop --container=web-server")
+	fmt.Println("  nextdeployd restart --container=web-server")
+	fmt.Println("  nextdeployd remove --container=web-server [--force=true]")
+	fmt.Println("  nextdeployd logs --container=web-server [--lines=50]")
+	fmt.Println("  nextdeployd inspect --container=web-server")
+	fmt.Println("\nDeployment Commands:")
+	fmt.Println("  nextdeployd swapcontainers --from=app-v1 --to=app-v2")
+	fmt.Println("  nextdeployd rollback --container=web-server")
+	fmt.Println("  nextdeployd pull --image=nginx:latest")
+	fmt.Println("\nHealth & Status:")
+	fmt.Println("  nextdeployd status")
+	fmt.Println("  nextdeployd health [--container=web-server]")
+}
+
+func main() {
+	if len(os.Args) < 2 {
+		printUsage()
+		os.Exit(1)
+	}
+
+	command := os.Args[1]
+
+	// Handle daemon command separately
+	if command == "daemon" {
+		handleDaemonCommand()
+		return
+	}
+
+	// For all other commands, check if daemon is running first
+	if !isDaemonRunning() {
+		fmt.Printf("❌ NextDeploy daemon is not running\n")
+		fmt.Printf("   Start it with: nextdeployd daemon\n")
+		fmt.Printf("   Or run: sudo systemctl start nextdeployd\n")
+		os.Exit(1)
+	}
+
+	// Parse and send command to running daemon
+	sendCommandToDaemon(command)
+}
+
+func isDaemonRunning() bool {
+	// Check if socket exists and is accessible
+	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
+		return false
+	}
+
+	// Try to connect to the socket
+	conn, err := client.SendCommand(socketPath, types.Command{
+		Type: "status",
+		Args: map[string]interface{}{},
+	})
+	
+	return err == nil && conn != nil
+}
+
+func handleDaemonCommand() {
+	configPath := "/etc/nextdeployd/config.json"
+	foreground := false
+
+	// Parse daemon-specific flags
+	for _, arg := range os.Args[2:] {
+		if strings.HasPrefix(arg, "--config=") {
+			configPath = strings.TrimPrefix(arg, "--config=")
+		} else if arg == "--foreground" {
+			foreground = true
+		}
+	}
+
+	if foreground {
+		// Run in foreground (for debugging)
+		runDaemonDirectly(configPath)
+	} else {
+		// Daemonize
+		startDaemonProcess(configPath)
+	}
+}
+
+func runDaemonDirectly(configPath string) {
+	fmt.Println("Starting NextDeploy daemon in foreground...")
+	
+	// This would typically exec the daemon binary
+	cmd := exec.Command("nextdeploy-daemon", "--foreground=true", "--config="+configPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("Failed to start daemon: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func startDaemonProcess(configPath string) {
+	// Check if daemon is already running
+	if isDaemonRunning() {
+		fmt.Println("✅ NextDeploy daemon is already running")
+		return
+	}
+
+	fmt.Println("🚀 Starting NextDeploy daemon...")
+	
+	cmd := exec.Command("nextdeploy-daemon", "--config="+configPath)
+	
+	// Start detached
+	if err := cmd.Start(); err != nil {
+		fmt.Printf("❌ Failed to start daemon: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Wait a bit for daemon to start
+	time.Sleep(1 * time.Second)
+	
+	if isDaemonRunning() {
+		fmt.Printf("✅ Daemon started successfully with PID %d\n", cmd.Process.Pid)
+	} else {
+		fmt.Println("❌ Daemon started but may not be responding")
+		fmt.Println("   Check logs: /var/log/nextdeployd/daemon.out")
+	}
+}
+
+func sendCommandToDaemon(command string) {
+	args := make(map[string]interface{})
+
+	// Parse command-line arguments
+	for i := 2; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		if strings.HasPrefix(arg, "--") {
+			parts := strings.SplitN(arg[2:], "=", 2)
+			if len(parts) == 2 {
+				key := parts[0]
+				value := parts[1]
+				
+				switch value {
+				case "true":
+					args[key] = true
+				case "false":
+					args[key] = false
+				default:
+					if intVal, err := strconv.Atoi(value); err == nil {
+						args[key] = intVal
+					} else {
+						args[key] = value
+					}
+				}
+			} else if len(parts) == 1 {
+				args[parts[0]] = true
+			}
+		}
+	}
+
+	cmd := types.Command{
+		Type: command,
+		Args: args,
+	}
+
+	// Send command to daemon
+	response, err := client.SendCommand(socketPath, cmd)
+	if err != nil {
+		fmt.Printf("❌ Error: %v\n", err)
+		
+		// Provide helpful error messages
+		if strings.Contains(err.Error(), "connect") {
+			fmt.Println("   The daemon may not be running or is not responding")
+			fmt.Println("   Start it with: nextdeployd daemon")
+		}
+		os.Exit(1)
+	}
+
+	// Display response
+	displayResponse(response)
+}
+
+func displayResponse(response *types.Response) {
+	if response.Success {
+		fmt.Printf("✅ Success: %s\n", response.Message)
+		if response.Data != nil {
+			switch data := response.Data.(type) {
+			case []interface{}:
+				for _, item := range data {
+					if itemMap, ok := item.(map[string]interface{}); ok {
+						// format container list nicely
+						for key, value := range itemMap {
+							fmt.Printf("%s: %v\t", key, value)
+						}
+						fmt.Println()
+					} else {
+						fmt.Printf("%v\n", item)
+					}
+				}
+			case map[string]interface{}:
+				for key, value := range data {
+					fmt.Printf("%s: %v\n", key, value)
+				}
+			case []map[string]string:
+				// handle container list format
+				if len(data) > 0 {
+					fmt.Printf("\n%-12s %-20s %-30s %-15s %-20s\n", "ID", "NAME", "IMAGE", "STATUS", "PORTS")
+					fmt.Println(strings.Repeat("-", 100))
+					for _, container := range data {
+						fmt.Printf("%-12s %-20s %-30s %-15s %-20s\n",
+							truncate(container["id"], 12),
+							truncate(container["name"], 20),
+							truncate(container["image"], 30),
+							container["status"],
+							truncate(container["ports"], 20))
+					}
+				}
+
+			case string:
+				fmt.Printf(" %s\n", data)
+			default:
+				if jsonData, err := json.MarshalIndent(data, "", "  "); err == nil {
+					fmt.Printf("Data: %s\n", string(jsonData))
+				} else {
+					fmt.Printf("Data: %v\n", data)
+				}
+			}
+		}
+	} else {
+		fmt.Printf("❌ Error: %s\n", response.Message)
+		os.Exit(1)
+	}
+}
