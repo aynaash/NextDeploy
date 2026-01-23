@@ -94,6 +94,8 @@ Other platforms abstract until you lose control.
 
 No black boxes. No middleware. Just you and your server.
 
+**Inspired by**: [Kamal](https://kamal-deploy.org/) - We loved their approach to self-hosted deployments and specialized it for Next.js.
+
 ---
 
 ## ✅ Perfect For Developers Who
