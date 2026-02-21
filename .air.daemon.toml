@@ -1,0 +1,26 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "make build-daemon"
+  bin = "./bin/nextdeployd"
+  full_bin = "./bin/nextdeployd"
+  include_ext = ["go", "toml", "yml"]
+  exclude_dir = ["assets", "tmp", "vendor", "cli", "docs"]
+  include_dir = ["daemon", "shared"]
+  exclude_regex = ["_test.go"]
+  delay = 1000
+  stop_on_error = true
+  log = "air-daemon.log"
+
+[log]
+  time = false
+
+[color]
+  main = "magenta"
+  watcher = "cyan"
+  build = "yellow"
+  runner = "green"
+
+[misc]
+  clean_on_exit = true

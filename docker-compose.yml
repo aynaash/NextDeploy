@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  # This container simulates a remote Ubuntu VPS so you can test
+  # `nextdeploy provision` and `nextdeploy ship` locally via SSH.
+  ubuntu-vps:
+    image: ubuntu:22.04
+    container_name: nextdeploy-vps
+    privileged: true # needed if trying to run Docker-in-Docker or systemd
+    ports:
+      - "2222:22"   # SSH port mapping
+      - "8080:80"   # HTTP port mapping
+      - "8443:443"  # HTTPS port mapping
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+    command: >
+      bash -c "apt-get update && apt-get install -y openssh-server sudo curl iptables iproute2 && 
+      mkdir -p /var/run/sshd && 
+      echo 'root:root' | chpasswd && 
+      sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && 
+      /usr/sbin/sshd -D"

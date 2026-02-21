@@ -1,7 +1,0 @@
-[build]
-[build]
-  cmd = "go install ."  # Installs into $GOPATH/bin
-  bin = ""  # Leave empty to prevent auto-running
-  delay = 1000
-  exclude_dir = ["vendor", "tmp"]
-  include_ext = ["go", "mod", "sum"]

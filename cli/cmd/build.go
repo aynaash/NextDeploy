@@ -170,18 +170,18 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 		cmd.Println("Cache disabled (production build)")
 	}
 
-	// Execute build
+	// Execute build locally without deploying
 	ctx := context.Background()
-	if err := dm.BuildAndDeploy(ctx, opts); err != nil {
+	if err := dm.BuildImageLocal(ctx, opts); err != nil {
 		buildlogger.Error("Build failed: %v", err)
 		return fmt.Errorf("build failed: %w", err)
 	}
 
-	cmd.Printf("Successfully built: %s\n", opts.ImageName)
+	cmd.Printf("\n✅ Successfully built image: %s\n", opts.ImageName)
 
 	// Handle push if configured
 	if cfg.Docker.Push {
-		cmd.Println("Pushing image to registry...")
+		cmd.Printf("Pushing image out to registry: %s...\n", cfg.Docker.Registry)
 		if err := dm.PushImage(ctx, opts.ImageName, opts.ProvisionEcrUser, opts.Fresh); err != nil {
 			return fmt.Errorf("push failed: %w", err)
 		}

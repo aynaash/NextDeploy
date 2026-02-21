@@ -147,6 +147,14 @@ install: build ## Install binaries to system PATH
 	@echo "✅ Binaries installed to /usr/local/bin/"
 
 # Development workflow
+dev-cli: ## Watch CLI code and rebuild binary on changes
+	@command -v air >/dev/null 2>&1 || { echo "Installing air..."; go install github.com/air-verse/air@latest; }
+	@air -c .air.cli.toml
+
+dev-daemon: ## Watch daemon code, rebuild and restart on changes 
+	@command -v air >/dev/null 2>&1 || { echo "Installing air..."; go install github.com/air-verse/air@latest; }
+	@air -c .air.daemon.toml
+
 dev-check: deps lint test security-scan ## Run all development checks
 
 # Release preparation

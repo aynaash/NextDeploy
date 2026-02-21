@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/docker/docker/api/types/build"
 	"io"
 	"nextdeploy/shared"
 	"nextdeploy/shared/config"
@@ -20,6 +19,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/docker/docker/api/types/build"
 
 	"encoding/json"
 
@@ -280,6 +281,112 @@ func (dm *DockerManager) BuildAndDeploy(ctx context.Context, opts BuildOptions) 
 	fmt.Printf("Container started successfully: %s\n", containerID)
 
 	return nil
+}
+
+// BuildImageLocal performs a local docker build streaming output to terminal
+// but DOES NOT deploy/start the container. Designed for CLI use.
+func (dm *DockerManager) BuildImageLocal(ctx context.Context, opts BuildOptions) error {
+	meta, err := nextcore.GenerateMetadata()
+	if err != nil {
+		dlog.Error("Error generating metadata: %v", err)
+		return fmt.Errorf("error generating metadata: %w", err)
+	}
+	dlog.Info("Generated metadata: %+v", meta)
+
+	file, err := os.ReadFile(".nextdeploy/metadata.json")
+	if err != nil {
+		dlog.Error("Error loading metadata: %v", err)
+		return fmt.Errorf("error loading metadata: %w", err)
+	}
+
+	var payload nextcore.NextCorePayload
+	if err := json.Unmarshal(file, &payload); err != nil {
+		dlog.Error("Error parsing metadata: %v", err)
+		return fmt.Errorf("error parsing metadata: %w", err)
+	}
+
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		dlog.Error("Error creating Docker client: %v", err)
+		return err
+	}
+
+	// Use consistent image naming with git commit hash or opts.ImageName
+	imageName := opts.ImageName
+	if imageName == "" {
+		imageName = fmt.Sprintf("%s:%s", strings.ToLower(payload.Config.App.Name), payload.GitCommit)
+		if payload.GitCommit == "" {
+			imageName = fmt.Sprintf("%s:latest", strings.ToLower(payload.Config.App.Name))
+		}
+	}
+	dlog.Debug("Using image name: %s", imageName)
+
+	// Step 1: Create tar stream
+	tarBuf, err := createTarContext(&payload)
+	if err != nil {
+		dlog.Error("Error creating tar context: %v", err)
+		return err
+	}
+
+	// Step 2: Build image
+	buildOptions := build.ImageBuildOptions{
+		Tags:       []string{imageName},
+		Remove:     true,
+		Dockerfile: "Dockerfile",
+		BuildArgs:  make(map[string]*string),
+	}
+
+	// convert map[string]string to map[string]*string for docker SDK
+	for k, v := range opts.BuildArgs {
+		val := v
+		buildOptions.BuildArgs[k] = &val
+	}
+
+	buildResp, err := cli.ImageBuild(ctx, tarBuf, buildOptions)
+	if err != nil {
+		dlog.Error("Error building image: %v", err)
+		return err
+	}
+	defer buildResp.Body.Close()
+
+	// Stream build output and check for errors
+	scanner := bufio.NewScanner(buildResp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Attempt to parse docker JSON stream format if applicable
+		var message struct {
+			Stream string `json:"stream"`
+			Error  string `json:"error"`
+			Status string `json:"status"`
+			Id     string `json:"id"`
+		}
+
+		if err := json.Unmarshal([]byte(line), &message); err == nil {
+			if message.Error != "" {
+				dlog.Error("Build error: %s", message.Error)
+				return fmt.Errorf("build error: %s", message.Error)
+			}
+			if message.Stream != "" {
+				fmt.Print(message.Stream)
+			} else if message.Status != "" {
+				if message.Id != "" {
+					fmt.Printf("%s: %s\n", message.Id, message.Status)
+				} else {
+					fmt.Println(message.Status)
+				}
+			}
+		} else {
+			// Fallback to raw line printing
+			fmt.Println(line)
+			if strings.Contains(strings.ToLower(line), "error") {
+				dlog.Error("Build error detected: %s", line)
+				return fmt.Errorf("build error detected: %s", line)
+			}
+		}
+	}
+
+	return scanner.Err()
 }
 
 func createTarContext(meta *nextcore.NextCorePayload) (io.Reader, error) {
