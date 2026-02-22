@@ -3,34 +3,45 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"nextdeploy/daemon/internal/types"
 	"nextdeploy/shared/config"
 	"os"
+
+	"gopkg.in/yaml.v3"
 )
 
 func LoadConfig(filePath string) (*types.DaemonConfig, error) {
+	socketPath := "/var/run/nextdeployd.sock"
+	logDir := "/var/log/nextdeploy"
+
+	if os.Geteuid() != 0 {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			socketPath = home + "/.nextdeploy/daemon.sock"
+			logDir = home + "/.nextdeploy/log"
+		}
+	}
+
 	config := &types.DaemonConfig{
-		SocketPath:      "/var/run/nextdeployd.sock",
+		SocketPath:      socketPath,
 		SocketMode:      "0666",
 		DockerSocket:    "/var/run/docker.sock",
 		ContainerPrefix: "nextdeploy_",
 		LogLevel:        "info",
-		LogDir:          "/var/log/nextdeploy",
+		LogDir:          logDir,
 		LogMaxSize:      10,
 		LogMaxBackups:   5,
 	}
 
-	if filePath == "" {
+	if filePath != "" {
 		file, err := os.Open(filePath)
-		if err != nil {
-			return nil, err
-		}
-		defer file.Close()
-
-		decoder := json.NewDecoder(file)
-
-		if err := decoder.Decode(config); err != nil {
+		if err == nil {
+			defer file.Close()
+			decoder := json.NewDecoder(file)
+			if err := decoder.Decode(config); err != nil {
+				return nil, err
+			}
+		} else if !os.IsNotExist(err) {
 			return nil, err
 		}
 	}

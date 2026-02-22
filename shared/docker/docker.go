@@ -151,12 +151,19 @@ func (dm *DockerManager) CreateTarContext(meta *nextcore.NextCorePayload) (io.Re
 				return err
 			}
 
-			// Skip directories and unwanted files
+			// Skip directories and unwanted files entirely, we're relying on pre-built assets
 			if info.IsDir() ||
 				strings.Contains(path, "node_modules") ||
-				strings.Contains(path, ".next") ||
-				strings.Contains(path, ".git") {
+				strings.Contains(path, ".git") ||
+				strings.HasPrefix(path, filepath.Join(meta.RootDir, ".nextdeploy")) {
 				return nil
+			}
+
+			// We explicitly ONLY want the following .next subdirectories (not the whole thing)
+			if strings.Contains(path, ".next") {
+				if !strings.Contains(path, ".next/standalone") && !strings.Contains(path, ".next/static") {
+					return nil
+				}
 			}
 
 			relPath := strings.TrimPrefix(path, meta.RootDir+string(filepath.Separator))
@@ -422,12 +429,19 @@ func createTarContext(meta *nextcore.NextCorePayload) (io.Reader, error) {
 				return err
 			}
 
-			// Skip directories and unwanted files
+			// Skip directories and unwanted files entirely, we're relying on pre-built assets
 			if info.IsDir() ||
 				strings.Contains(path, "node_modules") ||
-				strings.Contains(path, ".next") ||
-				strings.Contains(path, ".git") {
+				strings.Contains(path, ".git") ||
+				strings.HasPrefix(path, filepath.Join(meta.RootDir, ".nextdeploy")) {
 				return nil
+			}
+
+			// We explicitly ONLY want the following .next subdirectories (not the whole thing)
+			if strings.Contains(path, ".next") {
+				if !strings.Contains(path, ".next/standalone") && !strings.Contains(path, ".next/static") {
+					return nil
+				}
 			}
 
 			relPath := strings.TrimPrefix(path, meta.RootDir+string(filepath.Separator))
@@ -491,7 +505,7 @@ func (dm *DockerManager) buildDockerImage(ctx context.Context, metadata *nextcor
 		return "", fmt.Errorf("build failed: %w", err)
 	}
 
-	dlog.Success("✅ Successfully built image: %s", imageName)
+	dlog.Success("Successfully built image: %s", imageName)
 	return imageName, nil
 }
 
@@ -676,13 +690,15 @@ func (dm DockerManager) addAppFiles(tw *tar.Writer) error {
 	}
 
 	// Add source directories
-	dirs := []string{"pages", "app", "components", "public", "src"}
+	dirs := []string{".next/standalone", ".next/static", "public"}
 	for _, dir := range dirs {
 		if _, err := os.Stat(dir); err == nil {
 			if err := addDirectoryToTar(tw, dir, dir); err != nil {
 				dlog.Error("Failed to add directory %s: %v", dir, err)
 				return fmt.Errorf("failed to add directory %s: %w", dir, err)
 			}
+		} else {
+			dlog.Warn("Directory %s missing, skipping", dir)
 		}
 	}
 
@@ -859,18 +875,13 @@ func (dm *DockerManager) WriteDockerfile(dir, content string) error {
 func (dm *DockerManager) GenerateDockerfileContent(pkgManager string) (string, error) {
 	// Predefined templates for different package managers
 	templates := map[string]string{
-		"yarn": `# ---------- STAGE 1: Build ----------
-FROM node:18-alpine AS base
+		"yarn": `# ---------- STAGE 1: Dependencies ----------
+FROM node:20-alpine AS deps
 WORKDIR /app
+COPY package.json yarn.lock ./
 
 # Install dependencies needed by some node modules
 RUN apk add --no-cache libc6-compat
-
-# ---------- STAGE 2: Dependencies ----------
-FROM base AS deps
-
-# Copy package files first
-COPY package.json yarn.lock ./
 
 # Configure Yarn to use node_modules instead of PnP
 RUN echo "nodeLinker: node-modules" > .yarnrc.yml
@@ -879,24 +890,9 @@ RUN echo "nodeLinker: node-modules" > .yarnrc.yml
 RUN corepack enable && \
     yarn set version stable && \
     yarn install --immutable
-# ---------- STAGE 3: Builder ----------
-FROM base AS builder
 
-# First copy only the files needed for dependency installation
-COPY --from=deps /app/ ./
-
-# Then copy all other files
-COPY . .
-RUN corepack enable 
-# set yarn version to stable 
-RUN yarn set version stable 
-# Install production dependencies
-# Build the Next.js application 
-# Build the application
-RUN yarn build
-
-# ---------- STAGE 4: Runner ----------
-FROM base AS runner
+# ---------- STAGE 2: Runtime ----------
+FROM node:20-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV production
@@ -908,39 +904,30 @@ RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
 # Copy necessary files from builder
-COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY public ./public
+COPY --chown=nextjs:nodejs .next/standalone ./
+COPY --chown=nextjs:nodejs .next/static ./.next/static
+COPY --from=deps /app/node_modules ./node_modules
 
 USER nextjs
-
 EXPOSE 3000
-
 CMD ["node", "server.js"]
 `,
 
-		"pnpm": `# ---------- STAGE 1: Build ----------
-FROM node:%s AS builder
-
+		"pnpm": `# ---------- STAGE 1: Dependencies ----------
+FROM node:%s AS deps
 WORKDIR /app
-
-COPY package.json ./
-COPY pnpm-lock.yaml ./
-
-RUN pnpm install --frozen-lockfile
-
-COPY . .
-
-RUN pnpm run build
+COPY package.json pnpm-lock.yaml ./
+RUN corepack enable pnpm && pnpm install --prod --frozen-lockfile
 
 # ---------- STAGE 2: Runtime ----------
 FROM node:%s
-
 WORKDIR /app
 
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
+COPY public ./public
+COPY .next/standalone ./
+COPY .next/static ./.next/static
+COPY --from=deps /app/node_modules ./node_modules
 
 RUN adduser -D nextjs && chown -R nextjs:nextjs /app
 USER nextjs
@@ -1039,16 +1026,19 @@ func (dm *DockerManager) PushImage(ctx context.Context, imageName string, Provis
 		dlog.Error("Invalid Docker image name: %s", imageName)
 		return fmt.Errorf("%w: %s", ErrInvalidImageName, err)
 	}
+
 	err = dm.CheckDockerInstalled()
 	if err != nil {
 		dlog.Error("Docker is not installed or not functioning: %v", err)
 		return fmt.Errorf("%w: %s", ErrDockerNotInstalled, err)
 	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		dlog.Error("Failed to load configuration: %v", err)
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
+
 	if cfg.Docker.Registry == "ecr" {
 		dlog.Info("Preparing ECR context for image push")
 		ecrContext := registry.ECRContext{
@@ -1089,6 +1079,7 @@ func (dm *DockerManager) PushImage(ctx context.Context, imageName string, Provis
 			return fmt.Errorf("failed to prepare ECR push context: %w", err)
 		}
 	}
+
 	if strings.Contains(cfg.Docker.Registry, "digitalocean") {
 		dlog.Info("Preparing DigitalOcean context for image push")
 		if err := registry.DigitalOceanRegistry(ctx); err != nil {
@@ -1096,25 +1087,69 @@ func (dm *DockerManager) PushImage(ctx context.Context, imageName string, Provis
 			return fmt.Errorf("failed to prepare DigitalOcean push context: %w", err)
 		}
 	}
-	// Push the image using 'docker push' command  if default which docker hub
-	dockerhub := strings.Contains(cfg.Docker.Registry, "docker")
+
+	// Handle Docker Hub push
+	dockerhub := strings.Contains(cfg.Docker.Registry, "docker") || cfg.Docker.Registry == ""
 	if dockerhub {
-		dlog.Info("Pushing Docker image: %s", imageName)
+		dlog.Info("Attempting to push Docker image: %s", imageName)
+
+		// First, try to push without logging in (in case already authenticated)
 		cmd := exec.CommandContext(ctx, "docker", "push", imageName)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
 		err = cmd.Run()
 		if err != nil {
-			dlog.Error("Failed to push Docker image: %v", err)
-			return fmt.Errorf("%w: %s", ErrPushFailed, err)
+			// Check if error is authentication related
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "authentication required") ||
+				strings.Contains(errMsg, "denied") ||
+				strings.Contains(errMsg, "unauthorized") ||
+				strings.Contains(errMsg, "no basic auth credentials") {
+
+				dlog.Info("Authentication required for Docker Hub")
+
+				// Check if we have credentials in config
+				if cfg.Docker.Username != "" && cfg.Docker.Password != "" {
+					dlog.Info("Authenticating with Docker Hub as %s...", cfg.Docker.Username)
+
+					// Attempt login
+					loginCmd := exec.CommandContext(ctx, "docker", "login", "-u", cfg.Docker.Username, "--password-stdin")
+					loginCmd.Stdin = strings.NewReader(cfg.Docker.Password)
+					loginCmd.Stdout = os.Stdout
+					loginCmd.Stderr = os.Stderr
+
+					if err := loginCmd.Run(); err != nil {
+						dlog.Error("Failed to authenticate with Docker Hub: %v", err)
+						return fmt.Errorf("failed to authenticate with Docker Hub: %w", err)
+					}
+					dlog.Success("Successfully authenticated with Docker Hub")
+
+					// Retry push after successful login
+					dlog.Info("Retrying push for image: %s", imageName)
+					cmd = exec.CommandContext(ctx, "docker", "push", imageName)
+					cmd.Stdout = os.Stdout
+					cmd.Stderr = os.Stderr
+					err = cmd.Run()
+				} else {
+					dlog.Error("Authentication required but no Docker Hub credentials found in config")
+					return fmt.Errorf("authentication required for Docker Hub but no credentials provided")
+				}
+			}
+
+			// If there's still an error after login attempt (or error wasn't auth-related)
+			if err != nil {
+				dlog.Error("Failed to push Docker image: %v", err)
+				return fmt.Errorf("%w: %s", ErrPushFailed, err)
+			}
 		}
+
+		// If we get here, push was successful
 		dlog.Success("Image pushed successfully: %s", imageName)
 	}
 
 	return nil
 }
-
 func HandleDockerfileSetup(cmd *cobra.Command, dm *DockerManager, reader *bufio.Reader) error {
 	if skipPrompts || config.PromptYesNo(reader, "Set up Dockerfile for your project?") {
 		exists, err := dm.DockerfileExists(".")
@@ -1156,22 +1191,22 @@ func HandleDockerfileSetup(cmd *cobra.Command, dm *DockerManager, reader *bufio.
 		if skipPrompts || config.PromptYesNo(reader, "Create .dockerignore file?") {
 			if err := createDockerignore(); err != nil {
 
-				dlog.Error("⚠️ Couldn't create .dockerignore: %v\n", err)
+				dlog.Error("Couldn't create .dockerignore: %v\n", err)
 			} else {
-				dlog.Success("✅ Created .dockerignore")
-				cmd.Println("✅ Created .dockerignore")
+				dlog.Success("Created .dockerignore")
+				cmd.Println("Created .dockerignore")
 			}
 		} else {
-			dlog.Info("ℹ️ Skipping .dockerignore creation")
+			dlog.Info("Skipping .dockerignore creation")
 		}
 
 		if skipPrompts || config.PromptYesNo(reader, "Add .env and node_modules to .gitignore?") {
 			if err := updateGitignore(); err != nil {
-				dlog.Error("⚠️ Couldn't update .gitignore: %v\n", err)
-				cmd.Printf("⚠️ Couldn't update .gitignore: %v\n", err)
+				dlog.Error(" Couldn't update .gitignore: %v\n", err)
+				cmd.Printf("Couldn't update .gitignore: %v\n", err)
 			} else {
-				dlog.Success("✅ Updated .gitignore")
-				cmd.Println("✅ Updated .gitignore")
+				dlog.Success("Updated .gitignore")
+				cmd.Println("Updated .gitignore")
 			}
 		}
 	}

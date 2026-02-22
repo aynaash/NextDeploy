@@ -11,7 +11,6 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
 	"nextdeploy/shared"
 	"nextdeploy/shared/failfast"
 	"nextdeploy/shared/git"
@@ -20,6 +19,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/spf13/cobra"
 )
 
 type Config struct {
@@ -29,6 +30,8 @@ type Config struct {
 var (
 	runLogger = shared.PackageLogger("RunImage::", "🚀 Run Image::")
 )
+
+var noSecrets bool
 
 var runimageCmd = &cobra.Command{
 	Use:   "runimage",
@@ -41,6 +44,7 @@ and runs the Docker container with environment variables from Doppler.`,
 }
 
 func init() {
+	runimageCmd.Flags().BoolVar(&noSecrets, "no-secrets", false, "Ignore dropping/downloading secrets or using an .env file")
 	rootCmd.AddCommand(runimageCmd)
 }
 
@@ -51,32 +55,51 @@ func runImage() {
 
 	imageTag, err := git.GetCommitHash()
 	failfast.Failfast(err, failfast.Error, "Failed to get git commit hash")
-	sm, err := secrets.NewSecretManager()
-	failfast.Failfast(err, failfast.Error, "Failed to initialize SecretManager")
-	runLogger.Debug("SecretManager initialized successfully")
-	if sm.IsDopplerEnabled() {
-		runLogger.Info("Doppler is enabled, downloading secrets...")
-		failfast.Failfast(err, failfast.Error, "Failed to download Doppler secrets")
+
+	if !noSecrets {
+		sm, err := secrets.NewSecretManager()
+		failfast.Failfast(err, failfast.Error, "Failed to initialize SecretManager")
+		runLogger.Debug("SecretManager initialized successfully")
+		if sm.IsDopplerEnabled() {
+			runLogger.Info("Doppler is enabled, downloading secrets...")
+			failfast.Failfast(err, failfast.Error, "Failed to download Doppler secrets")
+		} else {
+			runLogger.Warn("Doppler is not enabled, skipping secrets download.")
+		}
 	} else {
-		runLogger.Warn("Doppler is not enabled, skipping secrets download.")
+		runLogger.Info("Skipping secrets initialization (--no-secrets flag used)")
 	}
 	// Load secrets
 
 	// Run Docker container
 	fullImage := fmt.Sprintf("%s:%s", config.Docker.Image, imageTag)
 	runLogger.Debug("Full Docker image to run: %s", fullImage)
-	err = runDockerContainer(fullImage)
+	err = runDockerContainer(fullImage, noSecrets)
 	failfast.Failfast(err, failfast.Error, "Failed to run Docker container")
 
 	fmt.Println("Docker container started successfully")
 }
 
-func runDockerContainer(image string) error {
+func runDockerContainer(image string, ignoreSecrets bool) error {
 	absPath, err := filepath.Abs(".env")
-	runLogger.Debug("Absolute path for .env file: %s", absPath)
 	failfast.Failfast(err, failfast.Error, "Failed to get absolute path for .env file")
+	runLogger.Debug("Absolute path for .env file: %s", absPath)
 
-	cmd := exec.Command("docker", "run", "-p", "3000:3000", "--env-file", absPath, image)
+	dockerArgs := []string{"run", "-p", "3000:3000"}
+
+	if !ignoreSecrets {
+		if _, err := os.Stat(absPath); err == nil {
+			dockerArgs = append(dockerArgs, "--env-file", absPath)
+			runLogger.Debug("Using .env file at %s", absPath)
+		} else {
+			runLogger.Warn(".env file not found, skipping --env-file flag")
+		}
+	} else {
+		runLogger.Info("Skipping .env file usage (--no-secrets flag used)")
+	}
+	dockerArgs = append(dockerArgs, image)
+
+	cmd := exec.Command("docker", dockerArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 

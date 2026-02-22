@@ -2,9 +2,9 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  cmd = "make build-daemon"
-  bin = "./bin/nextdeployd"
-  full_bin = "./bin/nextdeployd"
+  cmd = "make build-daemon-dev"
+  bin = "~/.nextdeploy/bin/nextdeployd"
+  full_bin = "~/.nextdeploy/bin/nextdeployd --foreground=true"
   include_ext = ["go", "toml", "yml"]
   exclude_dir = ["assets", "tmp", "vendor", "cli", "docs"]
   include_dir = ["daemon", "shared"]

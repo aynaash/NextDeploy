@@ -9,6 +9,7 @@ BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 BUILDER ?= $(shell whoami)@$(shell hostname)
 
 # Go build flags
+export PATH := $(PATH):$(shell go env GOPATH)/bin
 GOFLAGS := -trimpath
 LDFLAGS := -s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${BUILD_DATE} -X main.builder=${BUILDER}
 
@@ -80,6 +81,16 @@ build-cli: ## Build CLI binary for current platform
 	@go build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/nextdeploy ./cli
 	@echo "✅ CLI built: $(BIN_DIR)/nextdeploy"
 
+build-cli-dev: ## Build CLI binary directly into ~/.nextdeploy/bin for local development
+	@echo "🔨 Building CLI for local dev environment..."
+	@mkdir -p $(HOME)/.nextdeploy/bin
+	@go build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(HOME)/.nextdeploy/bin/nextdeploy ./cli
+	@if ! grep -q '$(HOME)/.nextdeploy/bin' $(HOME)/.bashrc 2>/dev/null; then \
+		echo 'export PATH="$$HOME/.nextdeploy/bin:$$PATH"' >> $(HOME)/.bashrc; \
+		echo "⚠️  Added ~/.nextdeploy/bin to your ~/.bashrc. Please run 'source ~/.bashrc' or restart your terminal."; \
+	fi
+	@echo "✅ Dev CLI built: $(HOME)/.nextdeploy/bin/nextdeploy"
+
 # Build single daemon binary (Linux only)
 build-daemon: ## Build daemon binary for current platform (Linux)
 	@echo "🔨 Building daemon for current platform..."
@@ -91,6 +102,12 @@ build-daemon: ## Build daemon binary for current platform (Linux)
 		go build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/nextdeployd ./daemon/cmd/daemon; \
 	fi
 	@echo "✅ Daemon built: $(BIN_DIR)/nextdeployd"
+
+build-daemon-dev: ## Build daemon directly into ~/.nextdeploy/bin for local development
+	@echo "🔨 Building daemon for local dev environment..."
+	@mkdir -p $(HOME)/.nextdeploy/bin
+	@go build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o $(HOME)/.nextdeploy/bin/nextdeployd ./daemon/cmd/daemon
+	@echo "✅ Dev Daemon built: $(HOME)/.nextdeploy/bin/nextdeployd"
 
 # Build both binaries
 build: build-cli build-daemon ## Build both CLI and daemon

@@ -17,6 +17,15 @@ var (
 	socketPath = "/var/run/nextdeployd.sock"
 )
 
+func init() {
+	if os.Geteuid() != 0 {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			socketPath = home + "/.nextdeploy/daemon.sock"
+		}
+	}
+}
+
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
@@ -70,6 +79,12 @@ func isDaemonRunning() bool {
 
 func handleDaemonCommand() {
 	configPath := "/etc/nextdeployd/config.json"
+	if os.Geteuid() != 0 {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			configPath = home + "/.nextdeploy/config.json"
+		}
+	}
 	foreground := false
 
 	// Parse daemon-specific flags

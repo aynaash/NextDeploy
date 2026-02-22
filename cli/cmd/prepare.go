@@ -95,7 +95,7 @@ func runPrepare(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	PrepLogs.Success("✅ Server %s prepared successfully!", serverName)
+	PrepLogs.Success("Server %s prepared successfully!", serverName)
 }
 
 func selectTargetServer(ctx context.Context, serverMgr *server.ServerStruct) (string, error) {
@@ -389,7 +389,7 @@ func CreateAppDirectory(ctx context.Context, serverMgr *server.ServerStruct, ser
 		return fmt.Errorf("directory verification failed: %w (output: %s)", err, output)
 	}
 
-	PrepLogs.Success("✅ Application directory ready at %s", appDir)
+	PrepLogs.Success("Application directory ready at %s", appDir)
 	return nil
 }
 

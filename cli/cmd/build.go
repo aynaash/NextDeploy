@@ -61,7 +61,7 @@ Examples:
 type DockerConfig struct {
 	Image    string
 	Registry string
-	Strategy string // "commit-hash", "branch-commit", or "simple"
+	Strategy string
 }
 
 func GenerateImageName(config DockerConfig, gitInfo *git.RepositoryInfo, env string) string {
@@ -114,6 +114,7 @@ func init() {
 func buildCmdFunction(cmd *cobra.Command, args []string) error {
 	// Load configuration
 	cfg, err := config.Load()
+	fmt.Printf("cfg is:%v\n", cfg)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
@@ -177,7 +178,7 @@ func buildCmdFunction(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("build failed: %w", err)
 	}
 
-	cmd.Printf("\n✅ Successfully built image: %s\n", opts.ImageName)
+	cmd.Printf("\nSuccessfully built image: %s\n", opts.ImageName)
 
 	// Handle push if configured
 	if cfg.Docker.Push {

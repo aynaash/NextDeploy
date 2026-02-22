@@ -8,7 +8,7 @@
 //   nextdeploy init        # Scaffold a Dockerfile and config
 //   nextdeploy ship    # Build and deploy app to server
 //
-// Author: Yussuf Hersi <dev@hersi.dev>
+// Author: Yussuf Hersi <yussuf@hersi.dev>
 // License: MIT
 // Source: https://github.com/aynaash/nextdeploy
 //

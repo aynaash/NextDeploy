@@ -14,8 +14,16 @@ import (
 )
 
 func main() {
+	defaultConfig := "/etc/nextdeployd/config.json"
+	if os.Geteuid() != 0 {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			defaultConfig = home + "/.nextdeploy/config.json"
+		}
+	}
+
 	version := flag.Bool("version", false, "Show version info")
-	configPath := flag.String("config", "/etc/nextdeployd/config.json", "Path to config file")
+	configPath := flag.String("config", defaultConfig, "Path to config file")
 	foreground := flag.Bool("foreground", false, "Run in foreground")
 	flag.Parse()
 
@@ -69,6 +77,12 @@ func daemonize() {
 	}
 	// redirect output to log file
 	logDir := "/var/log/nextdeployd"
+	if os.Geteuid() != 0 {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			logDir = home + "/.nextdeploy/log"
+		}
+	}
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		log.Fatalf("Error creating log directory: %v", err)
 	}

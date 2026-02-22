@@ -2,8 +2,8 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  cmd = "make build-cli"
-  bin = "./bin/nextdeploy"
+  cmd = "make build-cli-dev"
+  bin = "/home/hersi/.nextdeploy/bin/nextdeploy"
   full_bin = ""
   include_ext = ["go", "toml"]
   exclude_dir = ["assets", "tmp", "vendor", "daemon", "docs"]
