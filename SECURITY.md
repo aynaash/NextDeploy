@@ -15,7 +15,7 @@ The following versions of NextDeploy are currently receiving security updates:
 
 If you discover a security vulnerability in NextDeploy, please report it responsibly:
 
-1. **Email**: Send details to the maintainers via a [GitHub private security advisory](https://github.com/aynaash/NextDeploy/security/advisories/new)
+1. **Email**: [yussuf@hersi.dev](mailto:yussuf@hersi.dev) or open a [GitHub private security advisory](https://github.com/aynaash/NextDeploy/security/advisories/new)
 2. **Include** as much of the following as possible:
    - Type of vulnerability (e.g. remote code execution, credential leak, SSRF)
    - Full path of the affected source file(s)
