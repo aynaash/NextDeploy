@@ -147,7 +147,15 @@ func createTarball(sourceDir, targetTar string, outputMode nextcore.OutputMode) 
 			}
 		}
 
-		header, err := tar.FileInfoHeader(info, info.Name())
+		var link string
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, err = os.Readlink(path)
+			if err != nil {
+				return err
+			}
+		}
+
+		header, err := tar.FileInfoHeader(info, link)
 		if err != nil {
 			return err
 		}
@@ -167,7 +175,7 @@ func createTarball(sourceDir, targetTar string, outputMode nextcore.OutputMode) 
 			return err
 		}
 
-		if !info.IsDir() {
+		if info.Mode().IsRegular() {
 			file, err := os.Open(path)
 			if err != nil {
 				return err

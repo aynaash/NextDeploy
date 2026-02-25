@@ -26,7 +26,7 @@ func CollectBuildMetadata() (*NextBuildMetadata, error) {
 	if err := os.MkdirAll(".nextdeploy", 0755); err != nil {
 		return nil, fmt.Errorf("failed to create .nextdeploy directory: %w", err)
 	}
-	cmd := exec.Command("sh", "-c", buildCommand.String())
+	cmd := exec.Command("sh", "-c", buildCommand)
 	cmd.Dir = projectDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stdout

@@ -149,7 +149,7 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 			Port:        cfg.App.Port,
 			Environment: cfg.App.Environment,
 		},
-		BuildCommand:     buildCommand.String(),
+		BuildCommand:     buildCommand,
 		StartCommand:     startCommand,
 		Entrypoint:       deriveEntrypoint(buildMeta.OutputMode, "."),
 		HasImageAssets:   HasImageAssets,
@@ -896,12 +896,14 @@ func startCommand(PackageManager string) (string, error) {
 		return "yarn start", nil
 	case "pnpm":
 		return "pnpm start", nil
+	case "bun":
+		return "bun start", nil
 	default:
 		return "npm start", fmt.Errorf("unsupported package manager: %s", PackageManager)
 
 	}
 }
-func buildCommand(PackageManager string) (PackageManager, error) {
+func buildCommand(PackageManager string) (string, error) {
 
 	if PackageManager == "" {
 		PackageManager = "npm" // default to npm if not specified
@@ -914,6 +916,8 @@ func buildCommand(PackageManager string) (PackageManager, error) {
 		return "yarn build", nil
 	case "pnpm":
 		return "pnpm run build", nil
+	case "bun":
+		return "bun run build", nil
 	default:
 		return "npm run build", fmt.Errorf("unsupported package manager: %s", PackageManager)
 	}

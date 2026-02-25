@@ -20,6 +20,7 @@ const (
 	NPM     PackageManager = "npm"
 	Yarn    PackageManager = "yarn"
 	PNPM    PackageManager = "pnpm"
+	BUN     PackageManager = "bun"
 	Unknown PackageManager = "unknown"
 )
 
@@ -37,9 +38,12 @@ func DetectPackageManager(projectPath string) (PackageManager, error) {
 		"pnpm-lock.yaml":      {PNPM, 100},
 		"yarn.lock":           {Yarn, 100},
 		"package-lock.json":   {NPM, 100},
+		"bun.lockb":           {BUN, 100},
+		"bun.lock":            {BUN, 100},
 		".npmrc":              {NPM, 40},
 		".yarnrc":             {Yarn, 40},
 		"pnpm-workspace.yaml": {PNPM, 40},
+		"bunfig.toml":         {BUN, 40},
 		".yarn":               {Yarn, 30},
 		".pnpm-store":         {PNPM, 30},
 		"node_modules/.yarn":  {Yarn, 30},
@@ -62,11 +66,17 @@ func DetectPackageManager(projectPath string) (PackageManager, error) {
 	pkgJson, err := os.ReadFile(pkgPath)
 	if err == nil {
 		content := string(pkgJson)
+		if strings.Contains(content, "bun") {
+			scores[BUN] += 20
+		}
 		if strings.Contains(content, "pnpm") {
 			scores[PNPM] += 20
 		}
 		if strings.Contains(content, "yarn") {
 			scores[Yarn] += 20
+		}
+		if strings.Contains(content, `"bun"`) {
+			scores[BUN] += 50
 		}
 		if strings.Contains(content, `"pnpm"`) {
 			scores[PNPM] += 50
@@ -76,6 +86,9 @@ func DetectPackageManager(projectPath string) (PackageManager, error) {
 		}
 	}
 
+	if os.Getenv("BUN_INSTALL") != "" {
+		scores[BUN] += 30
+	}
 	if os.Getenv("PNPM_HOME") != "" {
 		scores[PNPM] += 30
 	}
@@ -94,6 +107,9 @@ func DetectPackageManager(projectPath string) (PackageManager, error) {
 
 	if maxScore == 0 {
 		plog.Debug("No clear package manager detected, checking binaries")
+		if _, err := os.Stat(filepath.Join(projectPath, "node_modules", ".bin", "bun")); err == nil {
+			return BUN, nil
+		}
 		if _, err := os.Stat(filepath.Join(projectPath, "node_modules", ".bin", "pnpm")); err == nil {
 			return PNPM, nil
 		}
