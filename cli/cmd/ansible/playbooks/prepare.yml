@@ -1,0 +1,496 @@
+---
+# nextdeploy prepare playbook
+# Provisions a fresh Linux server with everything NextDeploy needs:
+#   Node.js (webi, 3-tier glibc fallback)
+#   Bun     (webi)
+#   Caddy   (apt repo OR yum COPR + static binary fallback)
+#   Doppler CLI
+#   nextdeployd daemon
+#   /opt/nextjs-app directory
+
+- name: NextDeploy – Prepare server
+  hosts: target
+  gather_facts: true
+  become: false
+
+  vars:
+    node22_version: "22.22.0"
+    app_dir: /opt/nextjs-app
+    caddy_fallback_version: "2.8.4"
+
+  # ── Phase 1: prerequisites ──────────────────────────────────────────────────
+  tasks:
+    - name: "Phase 1 | System information"
+      ansible.builtin.command: uname -a
+      register: uname_out
+      changed_when: false
+
+    - name: "Phase 1 | Disk space"
+      ansible.builtin.command: df -h /
+      register: df_out
+      changed_when: false
+
+    - name: "Phase 1 | Memory"
+      ansible.builtin.command: free -m
+      register: mem_out
+      changed_when: false
+
+    - name: "Phase 1 | Uptime"
+      ansible.builtin.command: uptime
+      register: uptime_out
+      changed_when: false
+
+    - name: "Phase 1 | Print system summary"
+      ansible.builtin.debug:
+        msg:
+          - "uname  : {{ uname_out.stdout }}"
+          - "disk   : {{ df_out.stdout_lines[1] | default('n/a') }}"
+          - "memory : {{ mem_out.stdout_lines[1] | default('n/a') }}"
+          - "uptime : {{ uptime_out.stdout }}"
+
+    # ── Phase 2: base packages ──────────────────────────────────────────────────
+
+    # ---------- apt ------------------------------------------------------------
+    - name: "Phase 2 | apt – update cache"
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      become: true
+      when: ansible_pkg_mgr == "apt"
+
+    - name: "Phase 2 | apt – install base packages"
+      ansible.builtin.apt:
+        name:
+          - curl
+          - git
+          - make
+          - gcc
+          - build-essential
+          - ca-certificates
+        state: present
+      become: true
+      when: ansible_pkg_mgr == "apt"
+
+    # ---------- yum ------------------------------------------------------------
+    - name: "Phase 2 | yum – clean cache"
+      ansible.builtin.command: yum clean all -q
+      become: true
+      changed_when: false
+      when: ansible_pkg_mgr == "yum"
+
+    - name: "Phase 2 | yum – install base packages"
+      ansible.builtin.yum:
+        name:
+          - curl
+          - git
+          - make
+          - gcc
+          - glibc-static
+          - ca-certificates
+          - yum-utils
+        state: present
+      become: true
+      when: ansible_pkg_mgr == "yum"
+
+    # ── Phase 2: Node.js (webi, 3-tier glibc fallback) ─────────────────────────
+
+    - name: "Phase 2 | Node.js – check if functional"
+      ansible.builtin.shell: >
+        env -i HOME="$HOME"
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        node --version
+      register: node_pre
+      failed_when: false
+      changed_when: false
+
+    # Attempt 1 – latest stable (glibc 2.28+)
+    - name: "Phase 2 | Node.js – install via webi (latest)"
+      ansible.builtin.shell: |
+        curl -sS https://webi.sh/node | sh
+        NODE_DIR="${HOME}/.local/opt/node/bin"
+        [ -f "${NODE_DIR}/node" ] && sudo ln -sf "${NODE_DIR}/node" /usr/local/bin/node || true
+        [ -f "${NODE_DIR}/npm"  ] && sudo ln -sf "${NODE_DIR}/npm"  /usr/local/bin/npm  || true
+        [ -f "${NODE_DIR}/npx"  ] && sudo ln -sf "${NODE_DIR}/npx"  /usr/local/bin/npx  || true
+      when: node_pre.rc != 0
+
+    - name: "Phase 2 | Node.js – re-check after webi latest"
+      ansible.builtin.shell: >
+        env -i HOME="$HOME"
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        node --version
+      register: node_after_latest
+      failed_when: false
+      changed_when: false
+      when: node_pre.rc != 0
+
+    # Attempt 2 – Node 18 (glibc 2.27+, Ubuntu 18.04 / Debian Buster)
+    - name: "Phase 2 | Node.js – install via webi@18 (glibc 2.27 fallback)"
+      ansible.builtin.shell: |
+        curl -sS https://webi.sh/node@18 | sh
+        NODE_DIR="${HOME}/.local/opt/node/bin"
+        [ -f "${NODE_DIR}/node" ] && sudo ln -sf "${NODE_DIR}/node" /usr/local/bin/node || true
+        [ -f "${NODE_DIR}/npm"  ] && sudo ln -sf "${NODE_DIR}/npm"  /usr/local/bin/npm  || true
+        [ -f "${NODE_DIR}/npx"  ] && sudo ln -sf "${NODE_DIR}/npx"  /usr/local/bin/npx  || true
+      when:
+        - node_pre.rc != 0
+        - node_after_latest is defined
+        - node_after_latest.rc != 0
+
+    - name: "Phase 2 | Node.js – re-check after webi@18"
+      ansible.builtin.shell: >
+        env -i HOME="$HOME"
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        node --version
+      register: node_after_18
+      failed_when: false
+      changed_when: false
+      when:
+        - node_pre.rc != 0
+        - node_after_latest is defined
+        - node_after_latest.rc != 0
+
+    # Attempt 3 – Node 22 unofficial glibc-217 build (glibc 2.17+, covers AL2)
+    - name: "Phase 2 | Node.js – install Node 22 glibc-217 build (ultimate fallback)"
+      ansible.builtin.shell: |
+        sudo mkdir -p /opt/node22
+        curl -fsSL \
+          "https://unofficial-builds.nodejs.org/download/release/v{{ node22_version }}/node-v{{ node22_version }}-linux-x64-glibc-217.tar.gz" \
+          | sudo tar -xzf - -C /opt/node22 --strip-components=1
+        sudo ln -sf /opt/node22/bin/node /usr/local/bin/node
+        sudo ln -sf /opt/node22/bin/npm  /usr/local/bin/npm
+        sudo ln -sf /opt/node22/bin/npx  /usr/local/bin/npx
+      when:
+        - node_pre.rc != 0
+        - node_after_latest is defined
+        - node_after_latest.rc != 0
+        - node_after_18 is defined
+        - node_after_18.rc != 0
+
+    - name: "Phase 2 | Node.js – final functional check"
+      ansible.builtin.shell: >
+        env -i HOME="$HOME"
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        node --version
+      register: node_final
+      changed_when: false
+
+    - name: "Phase 2 | Node.js – assert runnable"
+      ansible.builtin.assert:
+        that: node_final.rc == 0
+        fail_msg: >-
+          node is not runnable after all install attempts —
+          glibc on this system may be too old even for the glibc-217 build.
+
+    # ── Phase 2: Bun (webi) ────────────────────────────────────────────────────
+
+    - name: "Phase 2 | Bun – check if installed"
+      ansible.builtin.shell: >
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        sh -c 'command -v bun >/dev/null 2>&1 && echo installed || echo missing'
+      register: bun_check
+      changed_when: false
+
+    - name: "Phase 2 | Bun – install via webi"
+      ansible.builtin.shell: |
+        curl -sS https://webi.sh/bun | sh
+        BUN_BIN="${HOME}/.local/opt/bun/bin/bun"
+        [ -f "${BUN_BIN}" ] && sudo ln -sf "${BUN_BIN}" /usr/local/bin/bun || true
+      when: "'installed' not in bun_check.stdout"
+
+    - name: "Phase 2 | Bun – verify"
+      ansible.builtin.shell: >
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        sh -c 'command -v bun >/dev/null 2>&1 && echo installed || echo missing'
+      register: bun_verify
+      changed_when: false
+      when: "'installed' not in bun_check.stdout"
+
+    - name: "Phase 2 | Bun – assert installed"
+      ansible.builtin.assert:
+        that: >-
+          'installed' in bun_check.stdout or
+          (bun_verify is defined and 'installed' in bun_verify.stdout)
+        fail_msg: "bun webi install appeared to succeed but bun is not in PATH"
+
+    # ── Phase 2: Doppler CLI ───────────────────────────────────────────────────
+
+    - name: "Phase 2 | Doppler – check if installed"
+      ansible.builtin.shell: >
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        sh -c 'command -v doppler >/dev/null 2>&1 && echo installed || echo missing'
+      register: doppler_check
+      changed_when: false
+
+    - name: "Phase 2 | Doppler – install CLI"
+      ansible.builtin.shell: >
+        (curl -Ls --tlsv1.2 --proto "=https" --retry 3 https://cli.doppler.com/install.sh
+        || wget -t 3 -qO- https://cli.doppler.com/install.sh) | sudo sh
+      when: "'installed' not in doppler_check.stdout"
+
+    # ── Phase 2: Caddy (apt) ───────────────────────────────────────────────────
+
+    - name: "Phase 2 | Caddy – check if installed"
+      ansible.builtin.shell: >
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        sh -c 'command -v caddy >/dev/null 2>&1 && echo installed || echo missing'
+      register: caddy_check
+      changed_when: false
+
+    - name: "Phase 2 | Caddy (apt) – install apt transport prerequisites"
+      ansible.builtin.apt:
+        name:
+          - debian-keyring
+          - debian-archive-keyring
+          - apt-transport-https
+        state: present
+      become: true
+      when:
+        - ansible_pkg_mgr == "apt"
+        - "'installed' not in caddy_check.stdout"
+
+    - name: "Phase 2 | Caddy (apt) – add GPG key"
+      ansible.builtin.shell: >
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key'
+        | sudo gpg --batch --yes --dearmor
+        -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+      become: true
+      when:
+        - ansible_pkg_mgr == "apt"
+        - "'installed' not in caddy_check.stdout"
+
+    - name: "Phase 2 | Caddy (apt) – add repository"
+      ansible.builtin.shell: >
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt'
+        | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+      become: true
+      when:
+        - ansible_pkg_mgr == "apt"
+        - "'installed' not in caddy_check.stdout"
+
+    - name: "Phase 2 | Caddy (apt) – install"
+      ansible.builtin.apt:
+        name: caddy
+        update_cache: true
+        state: present
+      become: true
+      when:
+        - ansible_pkg_mgr == "apt"
+        - "'installed' not in caddy_check.stdout"
+
+    - name: "Phase 2 | Caddy (apt) – enable and start service"
+      ansible.builtin.systemd:
+        name: caddy
+        enabled: true
+        state: started
+      become: true
+      when: ansible_pkg_mgr == "apt"
+
+    # ── Phase 2: Caddy (yum – COPR then static binary fallback) ───────────────
+
+    - name: "Phase 2 | Caddy (yum) – install yum-plugin-copr"
+      ansible.builtin.yum:
+        name: yum-plugin-copr
+        state: present
+      become: true
+      ignore_errors: true
+      register: copr_plugin
+      when:
+        - ansible_pkg_mgr == "yum"
+        - "'installed' not in caddy_check.stdout"
+
+    - name: "Phase 2 | Caddy (yum) – enable COPR repo"
+      ansible.builtin.command: yum copr enable -y @caddy/caddy
+      become: true
+      ignore_errors: true
+      register: copr_enable
+      when:
+        - ansible_pkg_mgr == "yum"
+        - "'installed' not in caddy_check.stdout"
+        - copr_plugin is not failed
+
+    - name: "Phase 2 | Caddy (yum) – install via COPR"
+      ansible.builtin.yum:
+        name: caddy
+        state: present
+      become: true
+      ignore_errors: true
+      register: caddy_copr
+      when:
+        - ansible_pkg_mgr == "yum"
+        - "'installed' not in caddy_check.stdout"
+        - copr_enable is not failed
+
+    # Binary fallback for systems where COPR is unavailable (e.g. old glibc AL2)
+    - name: "Phase 2 | Caddy (yum) – static binary fallback"
+      ansible.builtin.shell: |
+        CADDY_VERSION=$(curl -fsSL --retry 3 --retry-delay 2 \
+          https://api.github.com/repos/caddyserver/caddy/releases/latest 2>/dev/null \
+          | grep '"tag_name"' | head -1 | sed 's/.*"v\([^"]*\)".*/\1/')
+        [ -z "$CADDY_VERSION" ] && CADDY_VERSION="{{ caddy_fallback_version }}"
+        curl -fsSL --retry 3 --retry-delay 2 \
+          "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_amd64.tar.gz" \
+          -o /tmp/caddy.tar.gz
+        tar -xzf /tmp/caddy.tar.gz --no-same-owner -C /tmp caddy
+        mv /tmp/caddy /usr/local/bin/caddy
+        chmod +x /usr/local/bin/caddy
+        rm -f /tmp/caddy.tar.gz
+      become: true
+      when:
+        - ansible_pkg_mgr == "yum"
+        - "'installed' not in caddy_check.stdout"
+        - caddy_copr is failed or caddy_copr is skipped
+
+    - name: "Phase 2 | Caddy (yum) – write systemd unit"
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/caddy.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Caddy web server
+          After=network.target
+
+          [Service]
+          User=root
+          ExecStart=/usr/local/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+          Restart=on-failure
+          LimitNOFILE=1048576
+
+          [Install]
+          WantedBy=multi-user.target
+      become: true
+      when:
+        - ansible_pkg_mgr == "yum"
+        - "'installed' not in caddy_check.stdout"
+
+    - name: "Phase 2 | Caddy (yum) – create config directory"
+      ansible.builtin.file:
+        path: /etc/caddy
+        state: directory
+        mode: "0755"
+      become: true
+      when:
+        - ansible_pkg_mgr == "yum"
+        - "'installed' not in caddy_check.stdout"
+
+    - name: "Phase 2 | Caddy (yum) – default Caddyfile"
+      ansible.builtin.copy:
+        dest: /etc/caddy/Caddyfile
+        content: ':80 { respond "OK" }'
+        force: false
+        mode: "0644"
+      become: true
+      when:
+        - ansible_pkg_mgr == "yum"
+        - "'installed' not in caddy_check.stdout"
+
+    - name: "Phase 2 | Caddy (yum) – reload daemon, enable and start"
+      ansible.builtin.systemd:
+        name: caddy
+        daemon_reload: true
+        enabled: true
+        state: started
+      become: true
+      when:
+        - ansible_pkg_mgr == "yum"
+        - "'installed' not in caddy_check.stdout"
+
+    - name: "Phase 2 | Caddy – assert installed"
+      ansible.builtin.shell: >
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        sh -c 'command -v caddy >/dev/null 2>&1 && echo installed || echo missing'
+      register: caddy_final
+      changed_when: false
+
+    - name: "Phase 2 | Caddy – verify presence"
+      ansible.builtin.assert:
+        that: "'installed' in caddy_final.stdout"
+        fail_msg: "caddy installation appeared to succeed but binary is not in PATH"
+
+    # ── Phase 3: nextdeployd daemon ────────────────────────────────────────────
+
+    - name: "Phase 3 | Daemon – check if nextdeployd is already installed"
+      ansible.builtin.shell: >
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        sh -c 'command -v nextdeployd >/dev/null 2>&1 && echo installed || echo missing'
+      register: daemon_check
+      changed_when: false
+
+    - name: "Phase 3 | Daemon – install nextdeployd control plane"
+      ansible.builtin.shell: >
+        curl -sL
+        https://raw.githubusercontent.com/aynaash/NextDeploy/main/scripts/install-daemon.sh
+        | sudo bash
+      ignore_errors: true # non-fatal — script may not exist yet during active development
+      register: daemon_install
+      when: "'installed' not in daemon_check.stdout"
+
+    - name: "Phase 3 | Daemon – warn on non-fatal failure"
+      ansible.builtin.debug:
+        msg: "⚠ daemon install had a non-fatal error (continuing): {{ daemon_install.stderr | default('') }}"
+      when:
+        - daemon_install is not skipped
+        - daemon_install is failed
+
+    # ── Phase 4: verify ────────────────────────────────────────────────────────
+
+    - name: "Phase 4 | Verify Node.js"
+      ansible.builtin.shell: >
+        env -i HOME="$HOME"
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        node --version
+      register: v_node
+      changed_when: false
+
+    - name: "Phase 4 | Verify npm"
+      ansible.builtin.shell: >
+        env -i HOME="$HOME"
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        npm --version
+      register: v_npm
+      changed_when: false
+
+    - name: "Phase 4 | Verify Bun"
+      ansible.builtin.shell: >
+        env -i HOME="$HOME"
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        bun --version
+      register: v_bun
+      changed_when: false
+
+    - name: "Phase 4 | Verify Caddy"
+      ansible.builtin.shell: >
+        env -i HOME="$HOME"
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        caddy version
+      register: v_caddy
+      changed_when: false
+
+    - name: "Phase 4 | Verify Doppler"
+      ansible.builtin.shell: >
+        env -i HOME="$HOME"
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        doppler --version
+      register: v_doppler
+      changed_when: false
+
+    # ── Phase 4: app directory ─────────────────────────────────────────────────
+
+    - name: "Phase 4 | Create application directory {{ app_dir }}"
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ ansible_user_id }}"
+        mode: "0755"
+      become: true
+
+    # ── Phase 4: summary ───────────────────────────────────────────────────────
+
+    - name: "Phase 4 | Installation summary"
+      ansible.builtin.debug:
+        msg:
+          - "✓ Node.js : {{ v_node.stdout }}"
+          - "✓ npm     : {{ v_npm.stdout }}"
+          - "✓ Bun     : {{ v_bun.stdout }}"
+          - "✓ Caddy   : {{ v_caddy.stdout }}"
+          - "✓ Doppler : {{ v_doppler.stdout }}"
+          - "✓ App dir : {{ app_dir }}"
