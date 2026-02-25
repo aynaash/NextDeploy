@@ -1,3 +1,4 @@
+// TODO: decouple this
 package nextcore
 
 import (
@@ -55,20 +56,27 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		return NextCorePayload{}, err
 	}
 	// add config data to the metadata also
-	config, err := config.Load()
-	if err != nil {
-		NextCoreLogger.Error("Failed to load configuration: %v", err)
-		return NextCorePayload{}, err
-	}
+	// Note: config logic was loading twice but checking err from previous. Fixed.
 	// static_routes := []string{}
 	routeInfo, err := getRoutesFromManifests(buildMeta)
 	if err != nil {
 		return NextCorePayload{}, err
 	}
 	cwd, err := os.Getwd()
+	if err != nil {
+		NextCoreLogger.Error("Error getting current working directory")
+		return NextCorePayload{}, err
+	}
 	packageManager, err := DetectPackageManager(cwd)
+	if err != nil {
+		NextCoreLogger.Error("Failed to detect package manager: %v", err)
+		return NextCorePayload{}, err
+	}
 	buildCommand, err := buildCommand(packageManager.String())
-
+	if err != nil {
+		NextCoreLogger.Error("Failed to get build command: %v", err)
+		return NextCorePayload{}, err
+	}
 	startCommand, err := startCommand(packageManager.String())
 	if err != nil {
 		NextCoreLogger.Error("Failed to get start command: %v", err)
@@ -86,7 +94,7 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		HasImageAssets = true
 	}
 
-	domainName := config.App.Domain
+	domainName := cfg.App.Domain
 	middlewareConfig, err := ParseMiddleware(cwd)
 
 	if err != nil {
@@ -110,8 +118,20 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 	gitDiry := git.IsDirty()
 
 	PayloadPath, err := filepath.Abs(filepath.Join(cwd, MetadataFileName))
+	if err != nil {
+		NextCoreLogger.Error("Failed to get payload path: %v", err)
+		return NextCorePayload{}, err
+	}
 	buildLockPath, err := filepath.Abs(filepath.Join(cwd, BuildLockFileName))
+	if err != nil {
+		NextCoreLogger.Error("Failed to get build lock path: %v", err)
+		return NextCorePayload{}, err
+	}
 	AssetsOutputDir, err := filepath.Abs(filepath.Join(cwd, AssetsOutputDir))
+	if err != nil {
+		NextCoreLogger.Error("Failed to get assets output directory: %v", err)
+		return NextCorePayload{}, err
+	}
 	// 4. Copy static assets
 	if err := copyStaticAssets(); err != nil {
 		NextCoreLogger.Error("Failed to copy static assets: %v", err)
@@ -123,23 +143,29 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		AppName:           AppName,
 		NextVersion:       NextJsVersion,
 		NextBuildMetadata: *buildMeta,
-		Config:            config,
-		BuildCommand:      buildCommand.String(),
-		StartCommand:      startCommand,
-		HasImageAssets:    HasImageAssets,
-		CDNEnabled:        false,
-		Domain:            domainName,
-		RouteInfo:         *routeInfo,
-		Middleware:        middlewareConfig,
-		StaticAssets:      StaticAssets,
-		GitCommit:         gitCommt,
-		GitDirty:          gitDiry,
-		GeneratedAt:       time.Now().Format(time.RFC3339),
-		MetadataFilePath:  PayloadPath,
-		BuildLockFile:     buildLockPath,
-		AssetsOutputDir:   AssetsOutputDir,
-		PackageManager:    packageManager.String(),
-		RootDir:           cwd,
+		Config: config.SafeConfig{
+			AppName:     cfg.App.Name,
+			Domain:      cfg.App.Domain,
+			Port:        cfg.App.Port,
+			Environment: cfg.App.Environment,
+		},
+		BuildCommand:     buildCommand.String(),
+		StartCommand:     startCommand,
+		Entrypoint:       deriveEntrypoint(buildMeta.OutputMode, "."),
+		HasImageAssets:   HasImageAssets,
+		CDNEnabled:       false,
+		Domain:           domainName,
+		RouteInfo:        *routeInfo,
+		Middleware:       middlewareConfig,
+		StaticAssets:     StaticAssets,
+		GitCommit:        gitCommt,
+		GitDirty:         gitDiry,
+		GeneratedAt:      time.Now().Format(time.RFC3339),
+		MetadataFilePath: PayloadPath,
+		BuildLockFile:    buildLockPath,
+		AssetsOutputDir:  AssetsOutputDir,
+		PackageManager:   packageManager.String(),
+		RootDir:          cwd,
 	}
 
 	if err := createBuildLock(&metadata); err != nil {
@@ -148,6 +174,19 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 	}
 
 	return metadata, nil
+}
+
+func deriveEntrypoint(outputMode OutputMode, releaseDir string) string {
+	switch outputMode {
+	case OutputModeStandalone:
+		return filepath.Join(releaseDir, "server.js")
+	case OutputModeDefault:
+		return filepath.Join(releaseDir, "node_modules", ".bin", "next start")
+	case OutputModeExport:
+		return "" // no process entrypoint - Caddy serves files directly
+	default:
+		return ""
+	}
 }
 
 func copyStaticAssets() error {
@@ -224,7 +263,14 @@ func createBuildLock(metadata *NextCorePayload) error {
 	// Write metadata to json file
 	fileName := ".nextdeploy/metadata.json"
 	marshalledData, err := json.MarshalIndent(metadata, "", "  ")
-	os.WriteFile(fileName, marshalledData, 0644)
+	if err != nil {
+		NextCoreLogger.Error("Failed to marshal metadata: %v", err)
+		return err
+	}
+	if err := os.WriteFile(fileName, marshalledData, 0644); err != nil {
+		NextCoreLogger.Error("Failed to write metadata json: %v", err)
+		return err
+	}
 
 	buildLock := BuildLock{
 		GitCommit:   commitHash,
@@ -277,8 +323,8 @@ func ValidateBuildState() error {
 		return fmt.Errorf("failed to get current git commit: %w", err)
 	}
 	//TODO: use this data to avoid unnecessary builds
-	dlog.Info("Current git commit: %s", currentCommit)
-	dlog.Info("Expected git commit: %s", lock.GitCommit)
+	NextCoreLogger.Info("Current git commit: %s", currentCommit)
+	NextCoreLogger.Info("Expected git commit: %s", lock.GitCommit)
 	if currentCommit != lock.GitCommit {
 		NextCoreLogger.Error("Git commit mismatch: expected %s, got %s", lock.GitCommit, currentCommit)
 		return fmt.Errorf("git commit mismatch: expected %s, got %s", lock.GitCommit, currentCommit)

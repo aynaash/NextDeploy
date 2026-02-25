@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -15,12 +16,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pkg/sftp"
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/knownhosts"
 	"nextdeploy/shared/envstore"
 	"nextdeploy/shared/git"
 	"nextdeploy/shared/registry"
+
+	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 var (
@@ -209,12 +211,6 @@ func connectSSH(cfg config.ServerConfig) (*SSHClient, error) {
 	if cfg.Port == 0 {
 		cfg.Port = 22
 	}
-	ip := cfg.Host
-	err := AddHostToKnownHosts(ip, "")
-	if err != nil {
-		serverlogger.Error("Failed to add host %s to known_hosts: %v", ip, err)
-		return nil, fmt.Errorf("failed to add host %s to known_hosts: %w", ip, err)
-	}
 	authMethods, err := getAuthMethods(cfg)
 	if err != nil {
 		return nil, err
@@ -316,12 +312,45 @@ func getHostKeyCallback() (ssh.HostKeyCallback, error) {
 	}
 
 	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
-	hostKeyCallback, err := knownhosts.New(knownHostsPath)
+
+	// Create file if it doesn't exist
+	if err := os.MkdirAll(filepath.Dir(knownHostsPath), 0700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(knownHostsPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return nil, err
+	}
+	f.Close()
+
+	initialCallback, err := knownhosts.New(knownHostsPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create known hosts callback: %w", err)
 	}
 
-	return hostKeyCallback, nil
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		err := initialCallback(hostname, remote, key)
+		if err != nil {
+			var keyErr *knownhosts.KeyError
+			if errors.As(err, &keyErr) && len(keyErr.Want) == 0 {
+				// Key is unknown. Trust on first use.
+				serverlogger.Info("Adding unknown host %s to known_hosts automatically", hostname)
+				f, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_WRONLY, 0600)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				knownHostsLine := knownhosts.Line([]string{hostname}, key)
+				if _, err := f.WriteString(knownHostsLine + "\n"); err != nil {
+					return err
+				}
+				return nil
+			}
+			serverlogger.Error("Host key verification failed for %s: %v", hostname, err)
+			return err
+		}
+		return nil
+	}, nil
 }
 
 func (s *ServerStruct) BasicCaddySetup(ctx context.Context, serverName string, stream io.Writer) error {

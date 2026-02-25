@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 )
 
 type NextDeployDaemon struct {
@@ -19,7 +18,6 @@ type NextDeployDaemon struct {
 	socketPath     string
 	config         *types.DaemonConfig
 	socketServer   *SocketServer
-	dockerClient   *DockerClient
 	commandHandler *CommandHandler
 	logger         *log.Logger
 }
@@ -39,11 +37,7 @@ func NewNextDeployDaemon(socketPath string) (*NextDeployDaemon, error) {
 	}
 
 	logger := logging.SetupLogger(logConfig)
-
-	dockerClient := NewDockerClient(cfg)
-
-	commandHandler := NewCommandHandler(dockerClient, cfg)
-
+	commandHandler := NewCommandHandler(cfg)
 	socketServer := NewSocketServer(cfg.SocketPath, commandHandler)
 
 	return &NextDeployDaemon{
@@ -52,7 +46,6 @@ func NewNextDeployDaemon(socketPath string) (*NextDeployDaemon, error) {
 		socketPath:     socketPath,
 		config:         cfg,
 		socketServer:   socketServer,
-		dockerClient:   dockerClient,
 		commandHandler: commandHandler,
 		logger:         logger,
 	}, nil
@@ -60,40 +53,13 @@ func NewNextDeployDaemon(socketPath string) (*NextDeployDaemon, error) {
 }
 
 func (d *NextDeployDaemon) Start() error {
-	if err := d.dockerClient.CheckDockerAccess(); err != nil {
-		return fmt.Errorf("docker access check failed: %w", err)
-	}
-
 	if err := d.socketServer.Start(); err != nil {
 		return fmt.Errorf("failed to start socket server: %w", err)
 	}
 	go d.socketServer.AcceptConnections()
 	d.logger.Println("NextDeploy Daemon started successfully")
-	go d.observerLoop()
 
 	return d.handleSignals()
-}
-
-func (d *NextDeployDaemon) observerLoop() {
-	ticker := time.NewTimer(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			d.checkDockerHealth()
-		case <-d.ctx.Done():
-			return
-		}
-	}
-}
-
-func (d *NextDeployDaemon) checkDockerHealth() {
-	if err := d.dockerClient.CheckDockerAccess(); err != nil {
-		d.logger.Printf("Docker access check failed: %v", err)
-	} else {
-		d.logger.Println("Docker is accessible")
-	}
 }
 
 func (d *NextDeployDaemon) handleSignals() error {
@@ -105,9 +71,9 @@ func (d *NextDeployDaemon) handleSignals() error {
 		case sig := <-sigChan:
 			switch sig {
 			case syscall.SIGHUP:
-				d.logger.Println("Received SIGINT, shutting down...")
+				d.logger.Println("Received SIGHUP, ignoring...")
 			case syscall.SIGTERM, syscall.SIGINT:
-				d.logger.Println("Received SIGTERM, shutting down...")
+				d.logger.Println("Received interrupt signal, shutting down...")
 				d.Shutdown()
 				return nil
 			}

@@ -10,10 +10,12 @@ import (
 // NextDeployConfig represents the complete deployment configuration
 type NextDeployConfig struct {
 	Version       string               `yaml:"version"`
+	TargetType    string               `yaml:"target_type"` // e.g., "vps", "serverless"
 	App           AppConfig            `yaml:"app"`
 	Repository    Repository           `yaml:"repository"`
 	Docker        DockerConfig         `yaml:"docker"`
 	Deployment    Deployment           `yaml:"deployment"`
+	Serverless    *ServerlessConfig    `yaml:"serverless,omitempty"`
 	Database      *Database            `yaml:"database,omitempty"`
 	Monitoring    *Monitoring          `yaml:"monitoring,omitempty"`
 	Secrets       SecretsConfig        `yaml:"secrets"`
@@ -25,6 +27,22 @@ type NextDeployConfig struct {
 	Servers       []ServerConfig       `yaml:"servers"`
 	SSLConfig     *SSLConfig           `yaml:"ssl_config,omitempty"`
 	CloudProvider *CloudProviderStruct `yaml:"cloud_provider,omitempty"`
+}
+
+// SafeConfig contains no credentials (only app name, domain, port, environment)
+type SafeConfig struct {
+	AppName     string `json:"app_name"`
+	Domain      string `json:"domain"`
+	Port        int    `json:"port"`
+	Environment string `json:"environment"`
+}
+
+// ServerlessConfig defines AWS/Serverless settings
+type ServerlessConfig struct {
+	Provider     string `yaml:"provider"` // e.g., "aws"
+	Region       string `yaml:"region"`
+	S3Bucket     string `yaml:"s3_bucket,omitempty"`
+	CloudFrontId string `yaml:"cloudfront_id,omitempty"`
 }
 
 type WebServer struct {

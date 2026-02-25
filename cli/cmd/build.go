@@ -1,246 +1,183 @@
 package cmd
 
 import (
-	"context"
+	"archive/tar"
+	"compress/gzip"
 	"fmt"
+	"io"
 	"nextdeploy/shared"
-	"nextdeploy/shared/config"
-	"nextdeploy/shared/docker"
-	"nextdeploy/shared/git"
+	"nextdeploy/shared/nextcore"
 	"os"
-	"regexp"
+	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 )
 
-var (
-	buildlogger      = shared.PackageLogger("BUILD", "🧱 BUILD")
-	ProvisionEcrUser bool
-	fresh            = false // delete current exisiting user start a fresh
-)
-
 var buildCmd = &cobra.Command{
 	Use:   "build",
-	Short: "Build Docker image from the Dockerfile using metadata from nextcore collected by nextdeploy",
-	Long: `
-	Builds a Docker image with smart defaults and configuration data 
-	collected by nextcore engine. 
-	Our system that enables developer to use next all features in container 
-	Envirenment built for cloud in a cloud agnostic way.
-	.
+	Short: "Build the Next.js app and prepare a deployable tarball",
+	Run: func(cmd *cobra.Command, args []string) {
+		log := shared.PackageLogger("build", "🔨 BUILD")
+		log.Info("Starting NextDeploy build process...")
 
-The command automatically:
-- Detects your Git repository state
-- Uses appropriate naming conventions
-- Applies environment-specific settings
-- Handles caching appropriately
-- 
+		// 1. Generate Metadata (this also runs the Next.js build)
+		payload, err := nextcore.GenerateMetadata()
+		if err != nil {
+			log.Error("Failed to generate metadata: %v", err)
+			os.Exit(1)
+		}
 
-Configuration:
-  Create a 'nextdeploy.yml' file to customize behavior:
+		log.Info("Build mode detected as: %s", payload.OutputMode)
 
-  docker:
-    image: "my-app"             # Base image name
-    registry: "ghcr.io/myorg"   # Container registry
-    strategy: "branch-commit"   # Naming strategy
-    alwaysPull: true            # Always pull base images
-    platform: "linux/amd64"     # Target platform
+		// 2. Prepare the release directory based on output mode
+		releaseDir := ""
+		if payload.OutputMode == nextcore.OutputModeStandalone {
+			releaseDir = filepath.Join(".next", "standalone")
+			log.Info("Copying public/ to standalone/public/...")
+			copyDir("public", filepath.Join(releaseDir, "public"))
+			log.Info("Copying .next/static/ to standalone/.next/static/...")
+			copyDir(filepath.Join(".next", "static"), filepath.Join(releaseDir, ".next", "static"))
 
-Examples:
-  # Basic build (auto-detects everything)
-  nextdeploy build
+			log.Info("Copying deployment metadata...")
+			copyFile(".nextdeploy/metadata.json", filepath.Join(releaseDir, "metadata.json"))
 
-  # Build for production (uses different defaults)
-`,
-	PreRunE: checkBuildConditionsMet,
-	RunE:    buildCmdFunction,
-}
+		} else if payload.OutputMode == nextcore.OutputModeExport {
+			releaseDir = "out"
+			copyFile(".nextdeploy/metadata.json", filepath.Join(releaseDir, "metadata.json"))
+		} else {
+			// Default mode
+			releaseDir = "."
+		}
 
-type DockerConfig struct {
-	Image    string
-	Registry string
-	Strategy string
-}
+		// 3. Create app.tar.gz
+		tarballName := "app.tar.gz"
+		log.Info("Creating deployment tarball: %s", tarballName)
+		err = createTarball(releaseDir, tarballName, payload.OutputMode)
+		if err != nil {
+			log.Error("Failed to create tarball: %v", err)
+			os.Exit(1)
+		}
 
-func GenerateImageName(config DockerConfig, gitInfo *git.RepositoryInfo, env string) string {
-	// Start with registry if provided
-	var parts []string
-	if config.Registry != "" {
-		parts = append(parts, config.Registry)
-	}
-
-	// Add image name or default
-	imageName := config.Image
-	if imageName == "" {
-		imageName = "app"
-	}
-	parts = append(parts, imageName)
-
-	// Generate tag based on strategy
-	tag := ""
-	switch config.Strategy {
-	case "branch-commit":
-		sanitizedBranch := strings.ReplaceAll(gitInfo.BranchName, "/", "-")
-		tag = fmt.Sprintf("%s-%s", sanitizedBranch, gitInfo.CommitHash)
-	case "simple":
-		tag = "latest"
-	default: // "commit-hash" or fallback
-		tag = gitInfo.CommitHash
-	}
-
-	// Add timestamp for production builds
-	if env == "production" {
-		tag = fmt.Sprintf("%s-%s", tag, time.Now().Format("20060102-150405"))
-	}
-
-	// Append tag
-	if tag != "" {
-		parts = append(parts, tag)
-	}
-
-	return strings.Join(parts, ":")
+		log.Info("Build complete! Deployment artifact ready: %s", tarballName)
+	},
 }
 
 func init() {
-	// No flags needed - everything comes from config or auto-detection
 	rootCmd.AddCommand(buildCmd)
-	// provision-ecr-user --fresh
-	buildCmd.Flags().BoolVarP(&fresh, "fresh", "f", false, "Delete current existing user and start fresh")
-	buildCmd.Flags().BoolVarP(&ProvisionEcrUser, "provision-ecr-user", "p", false, "Provision ECR user for pushing images")
 }
 
-func buildCmdFunction(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	fmt.Printf("cfg is:%v\n", cfg)
+func copyFile(src, dst string) error {
+	sourceFileStat, err := os.Stat(src)
 	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
+	if !sourceFileStat.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", src)
+	}
+	source, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
 
-	// Initialize components
-	dm, err := docker.NewDockerClient(buildlogger)
+	os.MkdirAll(filepath.Dir(dst), 0755)
+	destination, err := os.Create(dst)
 	if err != nil {
-		return fmt.Errorf("failed to create Docker client: %w", err)
+		return err
 	}
-	// Determine environment (dev/prod)
-	env := os.Getenv("NODE_ENV")
-	if env == "" {
-		env = "production"
+	defer destination.Close()
+	_, err = io.Copy(destination, source)
+	return err
+}
+
+func copyDir(src, dst string) error {
+	if _, err := os.Stat(src); os.IsNotExist(err) {
+		return nil // directory doesn't exist, safely ignore
 	}
-	var buildArgs map[string]string
-	buildArgs = make(map[string]string)
-	for k, v := range dm.GetBuildArgs() {
-		// Check if the pointer is nil before dereferencing
-		if v != nil {
-			// log out the build args
-			buildlogger.Info("Build arg: %s=%s\n", k, *v)
-			// Skip empty values
-			if *v != "" {
-				buildArgs[k] = *v
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		dstPath := filepath.Join(dst, relPath)
+		if info.IsDir() {
+			return os.MkdirAll(dstPath, info.Mode())
+		}
+		return copyFile(path, dstPath)
+	})
+}
+
+func createTarball(sourceDir, targetTar string, outputMode nextcore.OutputMode) error {
+	tarfile, err := os.Create(targetTar)
+	if err != nil {
+		return err
+	}
+	defer tarfile.Close()
+
+	gzw := gzip.NewWriter(tarfile)
+	defer gzw.Close()
+
+	tw := tar.NewWriter(gzw)
+	defer tw.Close()
+
+	return filepath.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip the tarball itself
+		if path == targetTar || filepath.Base(path) == targetTar {
+			return nil
+		}
+
+		// Exclusions for default mode
+		if outputMode == nextcore.OutputModeDefault {
+			if strings.Contains(path, "node_modules") || strings.Contains(path, ".git") || strings.HasPrefix(path, ".nextdeploy") {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
 			}
-		} else {
-			buildlogger.Warn("Build arg %s is nil, skipping", k)
 		}
-	}
-	tag, _ := git.GetCommitHash()
-	//Validate the tag
-	if !ValidateDockerTag(tag) {
-		buildlogger.Debug("Invalid Docker tag format: %s", tag)
-		return fmt.Errorf("invalid Docker tag format: %s", tag)
-	}
 
-	imagename := cfg.Docker.Image + ":" + tag
-	// Auto-configure build options based on environment
-	opts := docker.BuildOptions{
-		ImageName:        imagename,
-		NoCache:          env == "production", // No cache in production
-		Pull:             cfg.Docker.AlwaysPull || env == "production",
-		Target:           cfg.Docker.Target,
-		Platform:         cfg.Docker.Platform,
-		BuildArgs:        buildArgs,
-		ProvisionEcrUser: ProvisionEcrUser,
-		Fresh:            fresh,
-	}
-
-	// Build options for image are
-	// Log what we're doing
-	cmd.Printf("Building %s image for %s environment\n", opts.ImageName, env)
-	if opts.NoCache {
-		cmd.Println("Cache disabled (production build)")
-	}
-
-	// Execute build locally without deploying
-	ctx := context.Background()
-	if err := dm.BuildImageLocal(ctx, opts); err != nil {
-		buildlogger.Error("Build failed: %v", err)
-		return fmt.Errorf("build failed: %w", err)
-	}
-
-	cmd.Printf("\nSuccessfully built image: %s\n", opts.ImageName)
-
-	// Handle push if configured
-	if cfg.Docker.Push {
-		cmd.Printf("Pushing image out to registry: %s...\n", cfg.Docker.Registry)
-		if err := dm.PushImage(ctx, opts.ImageName, opts.ProvisionEcrUser, opts.Fresh); err != nil {
-			return fmt.Errorf("push failed: %w", err)
+		header, err := tar.FileInfoHeader(info, info.Name())
+		if err != nil {
+			return err
 		}
-		cmd.Println("Image pushed successfully")
-	}
 
-	return nil
-}
+		relPath, err := filepath.Rel(sourceDir, path)
+		if err != nil {
+			return err
+		}
+		if relPath == "." {
+			return nil
+		}
 
-func checkBuildConditionsMet(cmd *cobra.Command, args []string) error {
-	dm, err := docker.NewDockerClient(buildlogger)
-	if err != nil {
-		return fmt.Errorf("failed to create Docker client: %w", err)
-	}
+		// To prevent Windows path separators
+		header.Name = filepath.ToSlash(relPath)
 
-	// Validate Docker installation
-	if err := dm.CheckDockerInstalled(); err != nil {
-		return fmt.Errorf("docker is not installed or not functioning: %w", err)
-	}
-	// Check for Dockerfile
-	// FIX::: we should generate the metdata need and use that to build the image
-	if exists, err := dm.DockerfileExists("."); err != nil {
-		return fmt.Errorf("failed to check for Dockerfile: %w", err)
-	} else if !exists {
-		return fmt.Errorf("no Dockerfile found in current directory")
-	}
+		if err := tw.WriteHeader(header); err != nil {
+			return err
+		}
 
-	// Check for uncommitted changes (warning only)
-	if git.IsDirty() {
-		cmd.Printf("Warning: Building with uncommitted changes\n")
-	}
-
-	return nil
-}
-func isGitCommitHash(tag string) bool {
-	if len(tag) < 7 || len(tag) > 40 {
-		return false
-	}
-	matched, _ := regexp.MatchString(`^[a-f0-9]+$`, tag)
-	return matched
-}
-func ValidateDockerTag(tag string) bool {
-	// Check for simple git hash (7-40 hex chars)
-	if isGitCommitHash(tag) {
-		return true
-	}
-
-	// Check for git hash with suffix (separated by - or _)
-	hashWithSuffix := regexp.MustCompile(`^[a-f0-9]{7,40}[-_][a-z0-9][a-z0-9._-]{0,126}$`)
-	if hashWithSuffix.MatchString(tag) {
-		return true
-	}
-
-	// Check for semantic version (v1.0.0)
-	semVer := regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
-	if semVer.MatchString(tag) {
-		return true
-	}
-
-	return false
+		if !info.IsDir() {
+			file, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer file.Close()
+			_, err = io.Copy(tw, file)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

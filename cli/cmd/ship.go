@@ -2,149 +2,123 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"io"
 	"nextdeploy/cli/internal/server"
-	"nextdeploy/cli/internal/ship"
+	"nextdeploy/cli/internal/serverless"
 	"nextdeploy/shared"
-	"nextdeploy/shared/registry"
+	"nextdeploy/shared/config"
+	"nextdeploy/shared/nextcore"
 	"os"
-	"os/signal"
+	"time"
 
 	"github.com/spf13/cobra"
 )
 
-var (
-	ShipLogs    = shared.PackageLogger("ship::", "🚢::")
-	dryRun      bool
-	credentials bool
-	newapp      bool
-	bluegreen   bool
-	serve       bool
-)
-
 var shipCmd = &cobra.Command{
-	Use:   "ship",
-	Short: "Deploy a containerized application to target VPS",
-	Long: `The ship command handles the complete deployment lifecycle:
-- Verifies server connectivity
-- Transfers necessary files
-- Pulls the specified Docker image
-- Deploys containers with proper configuration
-- Verifies deployment success`,
-	Run: Ship,
+	Use:     "ship",
+	Aliases: []string{"deploy"},
+	Short:   "Upload the deployment artifact to the remote server and start it",
+	Long:    "Ships the tarball to the target server defined in your configuration and tells the daemon to execute the deployment. CI/CD friendly.",
+	Run: func(cmd *cobra.Command, args []string) {
+		log := shared.PackageLogger("ship", "🚀 SHIP")
+		log.Info("Starting NextDeploy ship process...")
+
+		// Load config
+		cfg, err := config.Load()
+		if err != nil {
+			log.Error("Failed to load config: %v", err)
+			os.Exit(1)
+		}
+
+		// Read and print local metadata configuration as a RoutePlan
+		var meta nextcore.NextCorePayload
+		metadataBytes, err := os.ReadFile(".nextdeploy/metadata.json")
+		if err == nil {
+			if err := json.Unmarshal(metadataBytes, &meta); err == nil {
+				log.Info("\nPlanning...")
+				log.Info("  What NextDeploy will do:")
+				log.Info("  ──────────────────────────────────────────────────")
+				log.Info("  /_next/static/*    file_server  immutable cache")
+				log.Info("  /                  file_server  from pre-built HTML")
+				if len(meta.StaticRoutes) > 0 {
+					log.Info("  %d static routes    file_server  from pre-built HTML", len(meta.StaticRoutes))
+				}
+				if len(meta.Dynamic) > 0 {
+					log.Info("  %d dynamic routes   reverse_proxy", len(meta.Dynamic))
+				}
+				if meta.Middleware != nil {
+					log.Info("  middleware         reverse_proxy")
+				}
+				log.Info("  %s API           reverse_proxy  ", meta.AppName)
+				log.Info("  ──────────────────────────────────────────────────\n")
+			}
+		}
+
+		// Route based on TargetType
+		if cfg.TargetType == "serverless" {
+			log.Info("Deployment Target: SERVERLESS (No VPS or Daemon required)")
+			if cfg.Serverless == nil {
+				log.Error("TargetType is 'serverless' but 'serverless' config block is missing.")
+				os.Exit(1)
+			}
+
+			// Note: We ignore the standard app.tar.gz since serverless handles its own packaging
+			if err := serverless.Deploy(context.Background(), cfg, &meta); err != nil {
+				log.Error("Serverless deployment failed: %v", err)
+				os.Exit(1)
+			}
+			return
+		}
+
+		log.Info("Deployment Target: VPS (Daemon execution)")
+
+		// Initialize server connection
+		srv, err := server.New(server.WithConfig(), server.WithSSH())
+		if err != nil {
+			log.Error("Failed to initialize server connection: %v", err)
+			os.Exit(1)
+		}
+		defer srv.CloseSSHConnection()
+
+		deploymentServer, err := srv.GetDeploymentServer()
+		if err != nil {
+			log.Error("Failed to get deployment server: %v", err)
+			os.Exit(1)
+		}
+
+		tarballName := "app.tar.gz"
+		if _, err := os.Stat(tarballName); os.IsNotExist(err) {
+			log.Error("Deployment artifact %s not found. Did you run 'nextdeploy build'?", tarballName)
+			os.Exit(1)
+		}
+
+		remotePath := fmt.Sprintf("/tmp/nextdeploy_%s_%d.tar.gz", cfg.App.Name, time.Now().Unix())
+
+		log.Info("Uploading %s to %s on %s...", tarballName, remotePath, deploymentServer)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+
+		err = srv.UploadFile(ctx, deploymentServer, tarballName, remotePath)
+		if err != nil {
+			log.Error("Failed to upload tarball: %v", err)
+			os.Exit(1)
+		}
+
+		log.Info("Upload complete. Triggering daemon to process deployment...")
+
+		// Intentionally use nextdeployd client CLI which automatically parses --tarball=... into socket arguments
+		daemonCmd := fmt.Sprintf("nextdeployd ship --tarball=\"%s\"", remotePath)
+		output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, os.Stdout)
+		if err != nil {
+			log.Error("Failed to trigger daemon (ensure nextdeployd is in PATH): %v\nOutput: %s", err, output)
+			os.Exit(1)
+		}
+
+		log.Info("Ship successful! Deployment instructions have been successfully relayed to the daemon.")
+	},
 }
 
 func init() {
-	shipCmd.Flags().BoolVarP(&serve, "serve", "s", false, "Perform new caddy setup")
-	shipCmd.Flags().BoolVarP(&credentials, "credentials", "c", false, "Use credentials for deployment")
-	shipCmd.Flags().BoolVarP(&dryRun, "dry-run", "d", false, "Simulate deployment without making changes")
-	shipCmd.Flags().BoolVarP(&newapp, "new", "n", false, "Indicate this is a new application deployment")
-	shipCmd.Flags().BoolVarP(&bluegreen, "bluegreen", "b", false, "Use blue-green deployment strategy")
-
 	rootCmd.AddCommand(shipCmd)
-}
-
-func Ship(cmd *cobra.Command, args []string) {
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
-
-	go func() {
-		<-c
-		cancel()
-		ShipLogs.Debug("Received interrupt signal, cleaning up...")
-		os.Exit(1)
-	}()
-	ShipLogs.Debug("Starting deployment process...")
-
-	serverMgr, err := server.New(
-		server.WithConfig(),
-		server.WithSSH(),
-	)
-	if err != nil {
-		return
-	}
-	defer func() {
-		if err := serverMgr.CloseSSHConnection(); err != nil {
-			ShipLogs.Error("Error closing connections: %v\n", err)
-		}
-	}()
-
-	servers := serverMgr.ListServers()
-	if len(servers) == 0 {
-		ShipLogs.Debug("No servers configured for deployment")
-		os.Exit(1)
-	}
-	var stream = io.Discard
-
-	if err := runDeployment(ctx, serverMgr, servers, stream); err != nil {
-		ShipLogs.Error("Deployment failed: %v", err)
-		return
-	}
-
-	ShipLogs.Success("\n🎉 Deployment completed successfully! 🎉")
-}
-
-func runDeployment(ctx context.Context, serverMgr *server.ServerStruct, servers []string, stream io.Writer) error {
-	ShipLogs.Info("=== PHASE 1: Pre-deployment checks ===")
-	if err := ship.VerifyServers(ctx, serverMgr, servers, stream); err != nil {
-		return fmt.Errorf("pre-deployment checks failed: %w", err)
-	}
-
-	ShipLogs.Info("=== PHASE 2: File transfers ===")
-	if err := ship.TransferRequiredFiles(ctx, serverMgr, stream, servers[0]); err != nil {
-		return fmt.Errorf("file transfer failed: %w", err)
-	}
-
-	if !dryRun {
-		ShipLogs.Info("=== PHASE 3: Container deployment ===")
-		if err := ship.DeployContainers(ctx, serverMgr, servers[0], credentials, stream); err != nil {
-			return fmt.Errorf("container deployment failed: %w", err)
-		}
-	}
-
-	ShipLogs.Info("=== PHASE 4: Post-deployment verification ===")
-	if err := ship.VerifyDeployment(ctx, serverMgr, servers[0], stream); err != nil {
-		return fmt.Errorf("post-deployment verification failed: %w", err)
-	}
-	// serverMgr execture nextdeployd pull --image=image --newapp --bluegreen
-	latestImageName := registry.GetLatestImageName()
-
-	ShipLogs.Info("Pulling latest image: %s", latestImageName)
-
-	output, err := serverMgr.ExecuteCommand(ctx, servers[0], fmt.Sprintf("nextdeployd pull --image=%s", latestImageName), stream)
-	if err != nil {
-		ShipLogs.Error("Error pulling latest image: %v", err)
-		return fmt.Errorf("failed to pull latest image: %w", err)
-	}
-	ShipLogs.Info("Pull output: %s", output)
-
-	currentContainer := registry.GetLatestImageName()
-	ShipLogs.Info("Current running container: %s", currentContainer)
-
-	// switch to new container
-	ShipLogs.Info("Switching to new container...")
-
-	switchResult, err := serverMgr.ExecuteCommand(ctx, servers[0], fmt.Sprintf("nextdeployd switch --current=%s --new=%s --newapp=%t --bluegreen=%t", currentContainer, latestImageName, newapp, bluegreen), stream)
-	if err != nil {
-		ShipLogs.Error("Error switching containers: %v", err)
-		return fmt.Errorf("failed to switch containers: %w", err)
-	}
-	ShipLogs.Info("Switch output: %s", switchResult)
-
-	if serve {
-		ShipLogs.Info("Setting up Caddy server...")
-		caddyOutput, err := serverMgr.ExecuteCommand(ctx, servers[0], "nextdeployd caddy --setup", stream)
-		if err != nil {
-			ShipLogs.Error("Error setting up Caddy: %v", err)
-			return fmt.Errorf("failed to setup Caddy: %w", err)
-		}
-		ShipLogs.Info("Caddy setup output: %s", caddyOutput)
-	}
-
-	return nil
 }

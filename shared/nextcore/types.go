@@ -4,34 +4,42 @@ import (
 	"nextdeploy/shared/config"
 )
 
+type OutputMode string
+
+const (
+	OutputModeDefault    OutputMode = "default"
+	OutputModeStandalone OutputMode = "standalone"
+	OutputModeExport     OutputMode = "export"
+)
+
 type NextCorePayload struct {
-	AppName           string                   `json:"app_name"`
-	NextVersion       string                   `json:"next_version"`
-	NextBuildMetadata NextBuildMetadata        `json:"nextbuildmetadata"`
-	StaticRoutes      []string                 `json:"static_routes"`
-	Dynamic           []string                 `json:"dymanic_routes"`
-	BuildCommand      string                   `json:"build_command"`
-	StartCommand      string                   `json:"start_command"`
-	HasImageAssets    bool                     `json:"has_image_assets"`
-	CDNEnabled        bool                     `json:"cdn_enabled"`
-	Domain            string                   `json:"domain"`
-	Middleware        *MiddlewareConfig        `json:"middleware"`
-	StaticAssets      *StaticAssets            `json:"static_assets"`
-	GitCommit         string                   `json:"git_commit,omitempty"`
-	GitDirty          bool                     `json:"git_dirty,omitempty"`
-	GeneratedAt       string                   `json:"generated_at,omitempty"`
-	BuildLockFile     string                   `json:"build_lock_file,omitempty"`
-	MetadataFilePath  string                   `json:"metadata_file_path,omitempty"`
-	AssetsOutputDir   string                   `json:"assets_output_dir,omitempty"`
-	Config            *config.NextDeployConfig `json:"config,omitempty"`
-	ImageAssets       ImageAssets              `json:"image_assets"`    // Detected image assets
-	RouteInfo         RouteInfo                `json:"route_info"`      // Information about routes
-	Output            string                   `json:"standalone"`      // "standalone", "export", etc.
-	NextBuild         NextBuild                `json:"next_build"`      // Full Next.js build structure
-	WorkingDir        string                   `json:"working_dir"`     // Working directory for the build
-	RootDir           string                   `json:"root_dir"`        // Root directory of the Next.js project
-	PackageManager    string                   `json:"package_manager"` // "npm", "yarn", "pnpm", etc.https://shadcn-nextjs-dashboard.vercel.app/dashboard
-	Entrypoint        string                   `json:"entrypoint"`      // Entrypoint for the application
+	AppName           string            `json:"app_name"`
+	NextVersion       string            `json:"next_version"`
+	NextBuildMetadata NextBuildMetadata `json:"nextbuildmetadata"`
+	StaticRoutes      []string          `json:"static_routes"`
+	Dynamic           []string          `json:"dymanic_routes"`
+	BuildCommand      string            `json:"build_command"`
+	StartCommand      string            `json:"start_command"`
+	HasImageAssets    bool              `json:"has_image_assets"`
+	CDNEnabled        bool              `json:"cdn_enabled"`
+	Domain            string            `json:"domain"`
+	Middleware        *MiddlewareConfig `json:"middleware"`
+	StaticAssets      *StaticAssets     `json:"static_assets"`
+	GitCommit         string            `json:"git_commit,omitempty"`
+	GitDirty          bool              `json:"git_dirty,omitempty"`
+	GeneratedAt       string            `json:"generated_at,omitempty"`
+	BuildLockFile     string            `json:"build_lock_file,omitempty"`
+	MetadataFilePath  string            `json:"metadata_file_path,omitempty"`
+	AssetsOutputDir   string            `json:"assets_output_dir,omitempty"`
+	Config            config.SafeConfig `json:"config,omitempty"`
+	ImageAssets       ImageAssets       `json:"image_assets"`    // Detected image assets
+	RouteInfo         RouteInfo         `json:"route_info"`      // Information about routes
+	OutputMode        OutputMode        `json:"output_mode"`     // "standalone", "export", etc.
+	NextBuild         NextBuild         `json:"next_build"`      // Full Next.js build structure
+	WorkingDir        string            `json:"working_dir"`     // Working directory for the build
+	RootDir           string            `json:"root_dir"`        // Root directory of the Next.js project
+	PackageManager    string            `json:"package_manager"` // "npm", "yarn", "pnpm", etc.https://shadcn-nextjs-dashboard.vercel.app/dashboard
+	Entrypoint        string            `json:"entrypoint"`      // Entrypoint for the application
 
 }
 
@@ -291,6 +299,8 @@ type NextBuildMetadata struct {
 	AppPathRoutesManifest interface{} `json:"appPathRoutesManifest"`
 	ReactLoadableManifest interface{} `json:"reactLoadableManifest"`
 	Diagnostics           []string    `json:"diagnostics"`
+	OutputMode            OutputMode  `json:"outputMode"`
+	HasAppRouter          bool        `json:"hasAppRouter"`
 }
 
 // NextBuild represents the core structure of a Next.js build output
@@ -399,10 +409,10 @@ type WebpackHotUpdate struct {
 
 // BuildMetadata contains build information
 type BuildMetadata struct {
-	NextVersion   string `json:"next_version"`
-	BuildTarget   string `json:"build_target"` // "server", "static", etc.
-	BuildID       string `json:"build_id"`
-	HasTypeScript bool   `json:"has_typescript"`
-	HasESLint     bool   `json:"has_eslint"`
-	OutputMode    string `json:"output_mode"` // "standalone", "export", etc.
+	NextVersion   string     `json:"next_version"`
+	BuildTarget   string     `json:"build_target"` // "server", "static", etc.
+	BuildID       string     `json:"build_id"`
+	HasTypeScript bool       `json:"has_typescript"`
+	HasESLint     bool       `json:"has_eslint"`
+	OutputMode    OutputMode `json:"output_mode"` // "standalone", "export", etc.
 }

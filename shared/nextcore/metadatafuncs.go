@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 func CollectBuildMetadata() (*NextBuildMetadata, error) {
@@ -37,7 +38,7 @@ func CollectBuildMetadata() (*NextBuildMetadata, error) {
 	nextDir := filepath.Join(projectDir, ".next")
 	buildID, err := os.ReadFile(filepath.Join(nextDir, "BUILD_ID"))
 	if err != nil {
-		return nil, fmt.Errorf("faileed to read BUILD_ID:%s", err)
+		return nil, fmt.Errorf("failed to read BUILD_ID: %w", err)
 	}
 	readJSON := func(filename string) (interface{}, error) {
 		data, err := os.ReadFile(filepath.Join(nextDir, filename))
@@ -61,10 +62,32 @@ func CollectBuildMetadata() (*NextBuildMetadata, error) {
 	reactLoadableManifest, _ := readJSON("react-loadable-manifest.json")
 	var diagnostics []string
 	diagnosticsDir := filepath.Join(nextDir, "diagnostics")
-	if files, err := os.ReadDir(diagnosticsDir); err != nil {
+	if files, err := os.ReadDir(diagnosticsDir); err == nil {
 		for _, file := range files {
 			diagnostics = append(diagnostics, file.Name())
 		}
+	}
+
+	outputMode := OutputModeDefault
+	if _, err := os.Stat(filepath.Join(nextDir, "standalone")); err == nil {
+		outputMode = OutputModeStandalone
+	} else if b, err := os.ReadFile(filepath.Join(projectDir, "next.config.js")); err == nil {
+		content := string(b)
+		if strings.Contains(content, "output: 'export'") || strings.Contains(content, "output: \"export\"") {
+			outputMode = OutputModeExport
+		}
+	} else if b, err := os.ReadFile(filepath.Join(projectDir, "next.config.mjs")); err == nil {
+		content := string(b)
+		if strings.Contains(content, "output: 'export'") || strings.Contains(content, "output: \"export\"") {
+			outputMode = OutputModeExport
+		}
+	}
+
+	hasAppRouter := appPathRoutesManifest != nil
+	if _, err := os.Stat(filepath.Join(projectDir, "app")); err == nil {
+		hasAppRouter = true
+	} else if _, err := os.Stat(filepath.Join(projectDir, "src", "app")); err == nil {
+		hasAppRouter = true
 	}
 
 	return &NextBuildMetadata{
@@ -77,6 +100,8 @@ func CollectBuildMetadata() (*NextBuildMetadata, error) {
 		AppPathRoutesManifest: appPathRoutesManifest,
 		ReactLoadableManifest: reactLoadableManifest,
 		Diagnostics:           diagnostics,
+		OutputMode:            outputMode,
+		HasAppRouter:          hasAppRouter,
 	}, nil
 
 }

@@ -31,11 +31,11 @@ var rootCmd = &cobra.Command{
 	Long: fmt.Sprintf(`%s %s
 
 %s
-Deploy your Next.js app to *any* VPS — with Docker, SSL, logs, and zero downtime.
+Deploy your Next.js app to *any* VPS — with SSL, logs, and zero downtime.
 
 %s
-%s Build Docker images with ease
-%s Push and deploy to remote servers in seconds
+%s Build Next.js applications seamlessly
+%s Deploy to remote servers in seconds
 %s Configure automatic SSL + monitoring
 %s Ship production-ready builds with full control
 
@@ -58,8 +58,8 @@ Deploy your Next.js app to *any* VPS — with Docker, SSL, logs, and zero downti
 		if len(args) == 0 {
 			fmt.Println(highlight("Quick Start:"))
 			fmt.Printf("  %s - Initialize a new project\n", command("nextdeploy init"))
-			fmt.Printf("  %s - Build the image for the app\n", command("nextdeploy build"))
-			fmt.Printf("  %s - Deploy your app on the VPS\n\n", command("nextdeploy ship"))
+			fmt.Printf("  %s - Prepare a target server\n", command("nextdeploy prepare"))
+			fmt.Printf("  %s - Deploy your app on the VPS\n\n", command("nextdeploy deploy"))
 
 			fmt.Printf("%s %s\n\n",
 				warning("Docs →"), command("https://nextdeploy.one/docs"),

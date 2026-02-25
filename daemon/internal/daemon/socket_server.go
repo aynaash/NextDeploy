@@ -8,18 +8,23 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 type SocketServer struct {
 	socketPath     string
 	listener       net.Listener
 	commandHandler *CommandHandler
+	limiter        *rate.Limiter
 }
 
 func NewSocketServer(socketPath string, commandHandler *CommandHandler) *SocketServer {
 	return &SocketServer{
 		socketPath:     socketPath,
 		commandHandler: commandHandler,
+		// Allow 10 requests per second, with a burst of 20
+		limiter: rate.NewLimiter(rate.Limit(10), 20),
 	}
 }
 
@@ -42,6 +47,15 @@ func (ss *SocketServer) handleConnection(conn net.Conn) {
 	conn.SetDeadline(time.Now().Add(30 * time.Second))
 	decoder := json.NewDecoder(conn)
 	encoder := json.NewEncoder(conn)
+
+	if !ss.limiter.Allow() {
+		resp := types.Response{
+			Success: false,
+			Message: "rate limit exceeded",
+		}
+		encoder.Encode(resp)
+		return
+	}
 
 	var cmd types.Command
 

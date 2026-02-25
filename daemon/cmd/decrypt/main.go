@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-func DecryptFiles() {
+func main() {
 	sm, err := secrets.NewSecretManager()
 	if err != nil {
 		fmt.Println("Failed to initialize SecretManager:", err)

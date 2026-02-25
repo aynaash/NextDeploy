@@ -6,7 +6,6 @@ import (
 	"io"
 	"nextdeploy/cli/internal/server"
 	"nextdeploy/shared"
-	"nextdeploy/shared/failfast"
 	"os"
 	"os/signal"
 	"strings"
@@ -16,6 +15,11 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
+
+// StreamWriter handles streaming output to different writers with color support
+type StreamWriter struct {
+	writers []io.Writer
+}
 
 var (
 	PrepLogs = shared.PackageLogger("prepare", "🔧 PREPARE")
@@ -39,15 +43,61 @@ This command will:
 }
 
 func init() {
-	// Add flags for the prepare command
+	prepareCmd.Flags().BoolVar(&verbose, "verbose", false, "enable verbose output")
+	prepareCmd.Flags().DurationVar(&timeout, "timeout", 3*time.Minute, "timeout for preparation")
+	prepareCmd.Flags().BoolVar(&streamMode, "stream", false, "stream output to stdout")
+
 	rootCmd.AddCommand(prepareCmd)
+}
+
+// StreamWriter methods
+func NewStreamWriter(writers ...io.Writer) *StreamWriter {
+	return &StreamWriter{
+		writers: writers,
+	}
+}
+
+func (s *StreamWriter) Write(p []byte) (n int, err error) {
+	for _, w := range s.writers {
+		n, err = w.Write(p)
+		if err != nil {
+			return n, err
+		}
+	}
+	return len(p), nil
+}
+
+func (s *StreamWriter) Println(attrs ...color.Attribute) func(w io.Writer, format string, a ...interface{}) {
+	c := color.New(attrs...)
+	return func(w io.Writer, format string, a ...interface{}) {
+		if s.hasWriter(w) {
+			c.Fprintf(w, format+"\n", a...)
+		}
+	}
+}
+
+func (s *StreamWriter) Printf(w io.Writer, attrs []color.Attribute, format string, a ...interface{}) {
+	if s.hasWriter(w) {
+		c := color.New(attrs...)
+		c.Fprintf(w, format, a...)
+	}
+}
+
+func (s *StreamWriter) hasWriter(target io.Writer) bool {
+	for _, w := range s.writers {
+		if w == target {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *StreamWriter) AddWriter(w io.Writer) {
+	s.writers = append(s.writers, w)
 }
 
 func runPrepare(cmd *cobra.Command, args []string) {
 	// Create context with timeout
-	if timeout == 0 {
-		timeout = 3 * time.Minute // Default timeout
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -60,10 +110,14 @@ func runPrepare(cmd *cobra.Command, args []string) {
 		PrepLogs.Warn("Received interrupt signal, cancelling preparation...")
 	}()
 
-	// Get the appropriate output writer
-	var stream io.Writer
+	// Initialize stream writer
+	stream := NewStreamWriter()
 	if streamMode {
-		stream = cmd.OutOrStdout()
+		stream.AddWriter(cmd.OutOrStdout())
+	}
+	if verbose {
+		// In verbose mode, also write to stderr
+		stream.AddWriter(cmd.ErrOrStderr())
 	}
 
 	// Initialize server manager
@@ -71,26 +125,31 @@ func runPrepare(cmd *cobra.Command, args []string) {
 		server.WithConfig(),
 		server.WithSSH(),
 	)
-	failfast.Failfast(err, failfast.Error, "Error setting up server")
+	if err != nil {
+		PrepLogs.Error("Failed to initialize server manager: %v", err)
+		return
+	}
 
+	// Ensure SSH connections are closed
 	defer func() {
-		err := serverMgr.CloseSSHConnection()
-		if err != nil {
+		if err := serverMgr.CloseSSHConnection(); err != nil {
 			PrepLogs.Error("Failed to close SSH connections: %v", err)
 		} else {
 			PrepLogs.Debug("SSH connections closed successfully")
 		}
 	}()
 
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgCyan}, "Starting server preparation\n")
+
 	// Determine target server
-	serverName, err := selectTargetServer(ctx, serverMgr)
+	serverName, err := selectTargetServer(ctx, serverMgr, cmd, stream)
 	if err != nil {
 		PrepLogs.Error("Failed to select target server: %v", err)
 		return
 	}
+
 	// Run preparation
-	err = executePreparation(ctx, serverMgr, serverName, stream)
-	if err != nil {
+	if err := executePreparation(ctx, serverMgr, serverName, cmd, stream); err != nil {
 		PrepLogs.Error("Preparation failed: %v", err)
 		return
 	}
@@ -98,82 +157,96 @@ func runPrepare(cmd *cobra.Command, args []string) {
 	PrepLogs.Success("Server %s prepared successfully!", serverName)
 }
 
-func selectTargetServer(ctx context.Context, serverMgr *server.ServerStruct) (string, error) {
-	// Check for deployment server first
-	if depServer, err := serverMgr.GetDeploymentServer(); err == nil {
-		PrepLogs.Debug("Using deployment server: %s", depServer)
-		return depServer, nil
-	}
+func selectTargetServer(ctx context.Context, serverMgr *server.ServerStruct, cmd *cobra.Command, stream *StreamWriter) (string, error) {
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	default:
+		// Check for deployment server first
+		if depServer, err := serverMgr.GetDeploymentServer(); err == nil {
+			PrepLogs.Debug("Using deployment server: %s", depServer)
+			stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "✓ Using deployment server: %s\n", depServer)
+			return depServer, nil
+		}
 
-	// Fall back to first available server
-	servers := serverMgr.ListServers()
-	if len(servers) == 0 {
-		return "", fmt.Errorf("no servers configured")
-	}
+		// Fall back to first available server
+		servers := serverMgr.ListServers()
+		if len(servers) == 0 {
+			return "", fmt.Errorf("no servers configured")
+		}
 
-	PrepLogs.Warn("No deployment server configured, using first server: %s", servers[0])
-	return servers[0], nil
+		PrepLogs.Warn("No deployment server configured, using first server: %s", servers[0])
+		stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "⚠ Using first available server: %s\n", servers[0])
+		return servers[0], nil
+	}
 }
 
-func executePreparation(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
+func executePreparation(ctx context.Context, serverMgr *server.ServerStruct, serverName string, cmd *cobra.Command, stream *StreamWriter) error {
 	PrepLogs.Info("Starting preparation of server %s", serverName)
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgCyan}, "\n📦 Preparing server: %s\n", serverName)
 
-	// Phase 1: Pre-check
-	err := verifyServerPrerequisites(ctx, serverMgr, serverName, stream)
-	if err != nil {
-		PrepLogs.Error("Server prerequisites verification failed: %v", err)
+	// Phase 1: Verify prerequisites
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgBlue}, "\n🔍 Phase 1: Verifying server prerequisites...\n")
+	if err := verifyServerPrerequisites(ctx, serverMgr, serverName, cmd, stream); err != nil {
 		return fmt.Errorf("server prerequisites verification failed: %w", err)
 	}
-	err = installRequiredPackages(ctx, serverMgr, serverName, stream)
-	if err != nil {
-		PrepLogs.Error("Failed to install required packages: %v", err)
+
+	// Phase 2: Install required packages
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgBlue}, "\n📥 Phase 2: Installing required packages...\n")
+	if err := installRequiredPackages(ctx, serverMgr, serverName, cmd, stream); err != nil {
 		return fmt.Errorf("failed to install required packages: %w", err)
 	}
-	// Phase 3: Verification
-	err = verifyInstallation(ctx, serverMgr, serverName, stream)
-	if err != nil {
-		PrepLogs.Error("Installation verification failed: %v", err)
+
+	// Phase 3: Install daemon control plane
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgBlue}, "\n🤖 Phase 3: Installing daemon control plane...\n")
+	if err := installDaemonControlPlane(ctx, serverMgr, serverName, cmd, stream); err != nil {
+		return fmt.Errorf("failed to install daemon control plane: %w", err)
+	}
+
+	// Phase 4: Verification
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgBlue}, "\n✅ Phase 4: Verifying installation...\n")
+	if err := verifyInstallation(ctx, serverMgr, serverName, cmd, stream); err != nil {
 		return fmt.Errorf("installation verification failed: %w", err)
 	}
+
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen, color.Bold}, "\n✨ Server %s prepared successfully!\n", serverName)
 	return nil
 }
 
-func verifyServerPrerequisites(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
-	PrepLogs.Info("Verifying server prerequisites...")
-
+func verifyServerPrerequisites(ctx context.Context, serverMgr *server.ServerStruct, serverName string, cmd *cobra.Command, stream *StreamWriter) error {
 	checks := []struct {
 		command string
 		message string
-		timeout time.Duration // Individual timeout for each check
+		timeout time.Duration
 	}{
-		{"uname -a", "Checking system information...", 5 * time.Second},
-		{"df -h", "Checking disk space...", 10 * time.Second},
-		{"free -m", "Checking memory...", 5 * time.Second},
+		{"uname -a", "System information", 5 * time.Second},
+		{"df -h /", "Disk space", 10 * time.Second},
+		{"free -m", "Memory", 5 * time.Second},
+		{"uptime", "System uptime", 5 * time.Second},
 	}
 
 	for _, check := range checks {
 		select {
 		case <-ctx.Done():
-			PrepLogs.Error("Prerequisite checks cancelled: %v", ctx.Err())
-			return fmt.Errorf("prerequisite checks cancelled: %w", ctx.Err())
+			return ctx.Err()
 		default:
-			if stream != nil {
-				PrepLogs.Debug("Running prerequisite check: %s", check.command)
-			}
+			stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "  • %s... ", check.message)
 
-			// Create a sub-context with individual timeout
 			checkCtx, cancel := context.WithTimeout(ctx, check.timeout)
 			defer cancel()
 
 			output, err := serverMgr.ExecuteCommand(checkCtx, serverName, check.command, stream)
 			if err != nil {
+				stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgRed}, "❌ failed\n")
 				PrepLogs.Error("Failed prerequisite check %q: %v", check.command, err)
 				return fmt.Errorf("failed prerequisite check %q: %w", check.command, err)
 			}
-			verbose = true
+
+			stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "✓\n")
 
 			if verbose {
 				PrepLogs.Debug("Check %q output:\n%s", check.command, output)
+				stream.Printf(cmd.ErrOrStderr(), []color.Attribute{color.FgHiBlack}, "     %s\n", strings.Split(strings.TrimSpace(output), "\n")[0])
 			}
 		}
 	}
@@ -181,58 +254,95 @@ func verifyServerPrerequisites(ctx context.Context, serverMgr *server.ServerStru
 	return nil
 }
 
-func installRequiredPackages(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
-	PrepLogs.Info("Installing required packages...")
+func installRequiredPackages(ctx context.Context, serverMgr *server.ServerStruct, serverName string, cmd *cobra.Command, stream *StreamWriter) error {
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "  • Detecting package manager... ")
 
-	// First determine package manager - trim any whitespace from output
-	pkgManager, err := serverMgr.ExecuteCommand(ctx, serverName, "command -v apt-get >/dev/null && echo apt || echo yum", stream)
+	// Determine package manager
+	pkgManager, err := serverMgr.ExecuteCommand(ctx, serverName, "command -v apt-get >/dev/null && echo apt || (command -v yum >/dev/null && echo yum || echo unknown)", stream)
 	if err != nil {
-		PrepLogs.Error("Failed to determine package manager: %v", err)
+		stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgRed}, "❌ failed\n")
 		return fmt.Errorf("failed to determine package manager: %w", err)
 	}
 
-	// Clean up the package manager string
 	pkgManager = strings.TrimSpace(pkgManager)
-	PrepLogs.Debug("Detected package manager: %s", pkgManager)
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "✓ (%s)\n", pkgManager)
 
-	// Execute appropriate installation commands
+	// Execute appropriate installation
 	switch pkgManager {
 	case "apt":
-		PrepLogs.Info("Detected APT package manager")
-		return installWithApt(ctx, serverMgr, serverName, stream)
-	case "yum", "dnf":
-		PrepLogs.Info("Detected YUM/DNF package manager")
-		return installWithYum(ctx, serverMgr, serverName, stream)
+		return installWithApt(ctx, serverMgr, serverName, cmd, stream)
+	case "yum":
+		return installWithYum(ctx, serverMgr, serverName, cmd, stream)
 	default:
 		return fmt.Errorf("unsupported package manager: %s", pkgManager)
 	}
 }
 
-func installWithApt(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
-	// Check and install base packages only if missing
+// install the daemon version nextdeployd
+func installDaemonControlPlane(ctx context.Context, serverMgr *server.ServerStruct, serverName string, cmd *cobra.Command, stream *StreamWriter) error {
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "  • Installing daemon control plane...\n")
+
+	daemonUrl := "https://raw.githubusercontent.com/aynaash/NextDeploy/main/scripts/install-daemon.sh"
+	installCmd := fmt.Sprintf("curl -sL %s | sudo bash", daemonUrl)
+
+	if _, err := serverMgr.ExecuteCommand(ctx, serverName, installCmd, stream); err != nil {
+		stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgRed}, "❌ failed\n")
+		PrepLogs.Warn("Failed to install daemon control plane: %v", err)
+		return nil // Non-fatal for now while developing
+	}
+
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "  ✓ Daemon installed and running\n")
+	return nil
+}
+
+func installWithApt(ctx context.Context, serverMgr *server.ServerStruct, serverName string, cmd *cobra.Command, stream *StreamWriter) error {
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "  • Updating package lists... ")
+
+	// Update package lists
+	if _, err := serverMgr.ExecuteCommand(ctx, serverName, "sudo apt update -qq", stream); err != nil {
+		stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgRed}, "❌ failed\n")
+		PrepLogs.Warn("Failed to update package lists: %v", err)
+	} else {
+		stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "✓\n")
+	}
+
+	// Install base packages
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "  • Installing base packages... ")
 	basePkgs := []string{"curl", "git", "make", "gcc", "build-essential"}
-	err := installIfMissing(ctx, serverMgr, serverName, basePkgs, stream)
-	if err != nil {
+	installCmd := fmt.Sprintf("sudo DEBIAN_FRONTEND=noninteractive apt install -y %s", strings.Join(basePkgs, " "))
+
+	if _, err := serverMgr.ExecuteCommand(ctx, serverName, installCmd, stream); err != nil {
+		stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgRed}, "❌ failed\n")
 		return fmt.Errorf("failed to install base packages: %w", err)
 	}
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "✓\n")
 
-	// Docker installation check
-	if !isInstalled(ctx, serverMgr, serverName, "docker", stream) {
-		dockerCmds := []string{
-			"curl -fsSL https://get.docker.com | sudo sh",
-			"sudo usermod -aG docker $USER",
-			"sudo systemctl enable docker",
-			"sudo systemctl start docker",
-		}
-		if err := executeCommands(ctx, serverMgr, serverName, dockerCmds, stream); err != nil {
-			return fmt.Errorf("docker installation failed: %w", err)
-		}
-	} else {
-		logToStream(stream, "✓ Docker already installed", color.FgGreen)
+	// Install Node.js
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "  • Installing Node.js 20... ")
+	nodeCmds := []string{
+		"curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -",
+		"sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs",
 	}
+	for _, cmdStr := range nodeCmds {
+		if _, err := serverMgr.ExecuteCommand(ctx, serverName, cmdStr, stream); err != nil {
+			return fmt.Errorf("Node.js installation failed at step %q: %w", cmdStr, err)
+		}
+	}
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "✓\n")
 
-	// Caddy installation check
+	// Install Doppler CLI
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "  • Installing Doppler CLI... ")
+	dopplerCmd := "(curl -Ls --tlsv1.2 --proto \"=https\" --retry 3 https://cli.doppler.com/install.sh || wget -t 3 -qO- https://cli.doppler.com/install.sh) | sudo sh"
+	if _, err := serverMgr.ExecuteCommand(ctx, serverName, dopplerCmd, stream); err != nil {
+		return fmt.Errorf("Doppler installation failed: %w", err)
+	}
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "✓\n")
+
+	// Install Caddy if missing
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "  • Checking Caddy... ")
 	if !isInstalled(ctx, serverMgr, serverName, "caddy", stream) {
+		stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "not found, installing...\n")
+
 		caddyCmds := []string{
 			"sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https",
 			"curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --batch --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg",
@@ -242,190 +352,155 @@ func installWithApt(ctx context.Context, serverMgr *server.ServerStruct, serverN
 			"sudo systemctl enable caddy",
 			"sudo systemctl start caddy",
 		}
-		err := executeCommands(ctx, serverMgr, serverName, caddyCmds, stream)
-		if err != nil {
-			return fmt.Errorf("caddy installation failed: %w", err)
+
+		for _, cmdStr := range caddyCmds {
+			if _, err := serverMgr.ExecuteCommand(ctx, serverName, cmdStr, stream); err != nil {
+				return fmt.Errorf("caddy installation failed at step %q: %w", cmdStr, err)
+			}
 		}
+		stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "  ✓ Caddy installed\n")
 	} else {
-		logToStream(stream, "✓ Caddy already installed", color.FgGreen)
+		stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "✓ already installed\n")
+	}
+
+	return nil
+}
+
+func installWithYum(ctx context.Context, serverMgr *server.ServerStruct, serverName string, cmd *cobra.Command, stream *StreamWriter) error {
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "  • Installing base packages... ")
+
+	// Base packages for RHEL/CentOS/Amazon Linux
+	basePkgs := []string{"curl", "git", "make", "gcc", "glibc-static", "ca-certificates", "yum-utils"}
+	installCmd := fmt.Sprintf("sudo yum install -y %s", strings.Join(basePkgs, " "))
+
+	if _, err := serverMgr.ExecuteCommand(ctx, serverName, installCmd, stream); err != nil {
+		stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgRed}, "❌ failed\n")
+		return fmt.Errorf("failed to install base packages: %w", err)
+	}
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "✓\n")
+
+	// Install Node.js
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "  • Installing Node.js 20... ")
+	nodeYumCmds := []string{
+		"curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -",
+		"sudo yum install -y nodejs",
+	}
+	for _, cmdStr := range nodeYumCmds {
+		if _, err := serverMgr.ExecuteCommand(ctx, serverName, cmdStr, stream); err != nil {
+			return fmt.Errorf("Node.js installation failed at step %q: %w", cmdStr, err)
+		}
+	}
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "✓\n")
+
+	// Install Doppler CLI
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "  • Installing Doppler CLI... ")
+	dopplerCmd := "(curl -Ls --tlsv1.2 --proto \"=https\" --retry 3 https://cli.doppler.com/install.sh || wget -t 3 -qO- https://cli.doppler.com/install.sh) | sudo sh"
+	if _, err := serverMgr.ExecuteCommand(ctx, serverName, dopplerCmd, stream); err != nil {
+		return fmt.Errorf("Doppler installation failed: %w", err)
+	}
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "✓\n")
+
+	// Install Caddy if missing
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "  • Checking Caddy... ")
+	if !isInstalled(ctx, serverMgr, serverName, "caddy", stream) {
+		stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "not found, installing...\n")
+
+		caddyCmds := []string{
+			"sudo yum install -y yum-plugin-copr",
+			"sudo yum copr enable -y @caddy/caddy",
+			"sudo yum install -y caddy",
+			"sudo systemctl enable caddy",
+			"sudo systemctl start caddy",
+		}
+
+		for _, cmdStr := range caddyCmds {
+			if _, err := serverMgr.ExecuteCommand(ctx, serverName, cmdStr, stream); err != nil {
+				return fmt.Errorf("caddy installation failed at step %q: %w", cmdStr, err)
+			}
+		}
+		stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "  ✓ Caddy installed\n")
+	} else {
+		stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "✓ already installed\n")
+	}
+
+	return nil
+}
+
+func verifyInstallation(ctx context.Context, serverMgr *server.ServerStruct, serverName string, cmd *cobra.Command, stream *StreamWriter) error {
+	checks := []struct {
+		command string
+		tool    string
+	}{
+		{"caddy version | head -1", "Caddy"},
+		{"node --version", "Node.js"},
+		{"doppler --version", "Doppler CLI"},
+	}
+
+	allGood := true
+	for _, check := range checks {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "  • Verifying %s... ", check.tool)
+
+			output, err := serverMgr.ExecuteCommand(ctx, serverName, check.command, stream)
+			if err != nil {
+				stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgRed}, "❌ not found\n")
+				PrepLogs.Error("Failed to verify %s installation: %v", check.tool, err)
+				allGood = false
+				continue
+			}
+
+			stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "✓\n")
+			if verbose {
+				stream.Printf(cmd.ErrOrStderr(), []color.Attribute{color.FgHiBlack}, "     %s\n", strings.TrimSpace(output))
+			}
+		}
+	}
+
+	if !allGood {
+		return fmt.Errorf("some installations failed verification")
 	}
 
 	return nil
 }
 
 // Helper functions
-func isInstalled(ctx context.Context, serverMgr *server.ServerStruct, serverName, command string, stream io.Writer) bool {
-	checkCmd := fmt.Sprintf("command -v %s >/dev/null 2>&1", command)
-	_, err := serverMgr.ExecuteCommand(ctx, serverName, checkCmd, stream)
-	return err == nil
-}
-
-func installIfMissing(ctx context.Context, serverMgr *server.ServerStruct, serverName string, packages []string, stream io.Writer) error {
-	var missingPkgs []string
-	for _, pkg := range packages {
-		if !isInstalled(ctx, serverMgr, serverName, pkg, stream) {
-			missingPkgs = append(missingPkgs, pkg)
-		}
-	}
-
-	if len(missingPkgs) == 0 {
-		logToStream(stream, "✓ All base packages already installed", color.FgGreen)
-		return nil
-	}
-
-	// Update package lists first
-	updateCmd := "sudo apt update"
-	if _, err := serverMgr.ExecuteCommand(ctx, serverName, updateCmd, stream); err != nil {
-		PrepLogs.Warn("Failed to update package lists: %v", err)
-	}
-
-	// Install with retries
-	installCmd := fmt.Sprintf("sudo DEBIAN_FRONTEND=noninteractive apt install -y %s", strings.Join(missingPkgs, " "))
-
-	maxRetries := 3
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		if attempt > 1 {
-			PrepLogs.Info("Retry attempt %d/%d for package installation", attempt, maxRetries)
-			time.Sleep(2 * time.Second) // Wait before retry
-		}
-
-		output, err := serverMgr.ExecuteCommand(ctx, serverName, installCmd, stream)
-		if err == nil {
-			logToStream(stream, fmt.Sprintf("✓ Installed missing packages: %s", strings.Join(missingPkgs, ", ")), color.FgGreen)
-			return nil
-		}
-
-		if attempt == maxRetries {
-			PrepLogs.Debug("Final installation attempt failed. Output: %s", output)
-			return fmt.Errorf("failed to install packages %s after %d attempts: %w",
-				strings.Join(missingPkgs, ", "), maxRetries, err)
-		}
-
-		PrepLogs.Warn("Installation attempt %d failed: %v", attempt, err)
-	}
-
-	return nil
-}
-func logToStream(stream io.Writer, message string, colorAttr color.Attribute) {
-	if stream != nil {
-		c := color.New(colorAttr)
-		c.Fprintln(stream, message)
-	}
-}
-
-func installWithYum(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
-	commands := []string{
-		"sudo yum install -y curl git make gcc glibc-static ca-certificates yum-utils device-mapper-persistent-data lvm2",
-		"curl -fsSL https://get.docker.com | sudo sh",
-		"sudo usermod -aG docker $USER",
-		"sudo systemctl enable docker",
-		"sudo systemctl start docker",
-		`sudo yum install -y yum-plugin-copr &&
-		 sudo yum copr enable -y @caddy/caddy &&
-		 sudo yum install -y caddy`,
-	}
-
-	return executeCommands(ctx, serverMgr, serverName, commands, stream)
-}
-
-func executeCommands(ctx context.Context, serverMgr *server.ServerStruct, serverName string, commands []string, stream io.Writer) error {
-	for _, cmd := range commands {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			if stream != nil {
-				color.New(color.FgYellow).Fprintf(stream, "▶ %s\n", cmd)
-			}
-
-			output, err := serverMgr.ExecuteCommand(ctx, serverName, cmd, stream)
-			if err != nil {
-				PrepLogs.Debug("Command failed: %s, Output: %s", cmd, output)
-				return fmt.Errorf("command failed: %s: %w", cmd, err)
-			}
-		}
-	}
-	return nil
-}
-func verifySudoAccess(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
-	PrepLogs.Info("Verifying sudo access...")
-
-	// Test if we can run sudo without password
-	testCmd := "sudo -n true 2>/dev/null && echo 'SUDO_OK' || echo 'SUDO_FAILED'"
-
-	output, err := serverMgr.ExecuteCommand(ctx, serverName, testCmd, stream)
+func isInstalled(ctx context.Context, serverMgr *server.ServerStruct, serverName, command string, stream *StreamWriter) bool {
+	checkCmd := fmt.Sprintf("command -v %s >/dev/null 2>&1 && echo 'installed' || echo 'missing'", command)
+	output, err := serverMgr.ExecuteCommand(ctx, serverName, checkCmd, stream)
 	if err != nil {
-		return fmt.Errorf("sudo test failed: %w", err)
+		return false
 	}
-
-	if strings.Contains(output, "SUDO_FAILED") {
-		return fmt.Errorf("passwordless sudo not working. Output: %s", output)
-	}
-
-	PrepLogs.Debug("Sudo access verified: %s", strings.TrimSpace(output))
-	return nil
+	return strings.Contains(output, "installed")
 }
 
 // CreateAppDirectory creates the minimal directory structure for containerized Next.js app
-func CreateAppDirectory(ctx context.Context, serverMgr *server.ServerStruct, serverName string) error {
-	const appDir = "/opt/nextjs-app" // Standard location for containerized apps
+func CreateAppDirectory(ctx context.Context, serverMgr *server.ServerStruct, serverName string, cmd *cobra.Command, stream *StreamWriter) error {
+	const appDir = "/opt/nextjs-app"
 
-	PrepLogs.Info("Creating application directory on %s at %s", serverName, appDir)
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgYellow}, "  • Creating application directory... ")
 
-	// Create the base directory with proper permissions
 	createCmd := fmt.Sprintf(
 		"sudo mkdir -p %s && sudo chown -R $(whoami): %s && sudo chmod 755 %s",
-		appDir,
-		appDir,
-		appDir,
+		appDir, appDir, appDir,
 	)
 
-	_, err := serverMgr.ExecuteCommand(ctx, serverName, createCmd, os.Stdout)
-	failfast.Failfast(err, failfast.Error, fmt.Sprintf("Failed to create application directory: %s", appDir))
+	if _, err := serverMgr.ExecuteCommand(ctx, serverName, createCmd, stream); err != nil {
+		stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgRed}, "❌ failed\n")
+		return fmt.Errorf("failed to create application directory: %w", err)
+	}
+
 	// Verify directory was created
 	verifyCmd := fmt.Sprintf("test -d %s && echo 'exists' || echo 'missing'", appDir)
-	output, err := serverMgr.ExecuteCommand(ctx, serverName, verifyCmd, nil)
+	output, err := serverMgr.ExecuteCommand(ctx, serverName, verifyCmd, stream)
 	if err != nil || !strings.Contains(output, "exists") {
-		return fmt.Errorf("directory verification failed: %w (output: %s)", err, output)
+		stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgRed}, "❌ verification failed\n")
+		return fmt.Errorf("directory verification failed: %w", err)
 	}
 
+	stream.Printf(cmd.OutOrStdout(), []color.Attribute{color.FgGreen}, "✓ (%s)\n", appDir)
 	PrepLogs.Success("Application directory ready at %s", appDir)
-	return nil
-}
-
-func verifyInstallation(ctx context.Context, serverMgr *server.ServerStruct, serverName string, stream io.Writer) error {
-	PrepLogs.Info("Verifying installations...")
-
-	checks := []struct {
-		command string
-		tool    string
-	}{
-		{"docker --version", "Docker"},
-		{"caddy version", "Caddy"},
-	}
-
-	for _, check := range checks {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			if stream != nil {
-				color.New(color.FgBlue).Fprintf(stream, "🔍 Checking %s installation...\n", check.tool)
-				PrepLogs.Debug("Running command: %s", check.command)
-
-			}
-
-			output, err := serverMgr.ExecuteCommand(ctx, serverName, check.command, stream)
-			if err != nil {
-				PrepLogs.Error("Failed to verify %s installation: %v", check.tool, err)
-				return fmt.Errorf("failed to verify %s installation: %w", check.tool, err)
-			}
-
-			if verbose {
-				PrepLogs.Debug("%s version: %s", check.tool, output)
-			}
-		}
-	}
-
 	return nil
 }
