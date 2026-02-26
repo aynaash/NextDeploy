@@ -386,16 +386,25 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 		return "", fmt.Errorf("failed to get stderr pipe: %w", err)
 	}
 
-	// Create a multi-writer to both capture output and stream it
+	// stdout is captured for the return value AND streamed to the caller.
+	// stderr is streamed to the caller only — it must NOT pollute the
+	// returned string, because many callers parse stdout for tokens like
+	// "apt", "yum", "installed", etc.  Shell startup noise (NVM messages,
+	// /etc/profile fragments) always arrives on stderr and previously
+	// caused false-negative parse failures.
 	output := &bytes.Buffer{}
-	var writers []io.Writer
 
+	var stdoutWriters []io.Writer
+	stdoutWriters = append(stdoutWriters, output) // always capture stdout
 	if stream != nil {
-		writers = append(writers, stream)
+		stdoutWriters = append(stdoutWriters, stream)
 	}
-	writers = append(writers, output)
+	stdoutMulti := io.MultiWriter(stdoutWriters...)
 
-	multiWriter := io.MultiWriter(writers...)
+	var stderrDst io.Writer = io.Discard
+	if stream != nil {
+		stderrDst = stream
+	}
 
 	// Start command
 	err = session.Start(command)
@@ -409,12 +418,12 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 
 	go func() {
 		defer wg.Done()
-		io.Copy(multiWriter, stdoutPipe)
+		io.Copy(stdoutMulti, stdoutPipe)
 	}()
 
 	go func() {
 		defer wg.Done()
-		io.Copy(multiWriter, stderrPipe)
+		io.Copy(stderrDst, stderrPipe)
 	}()
 
 	// Set up context cancellation

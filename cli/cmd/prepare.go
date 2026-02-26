@@ -238,7 +238,7 @@ func ensureAnsible(out io.Writer) error {
 	}
 
 	if _, err := exec.LookPath("ansible-playbook"); err != nil {
-		red.Fprintln(out, "❌  Ansible was installed but ansible-playbook is still not in PATH.")
+		red.Fprintln(out, "Ansible was installed but ansible-playbook is still not in PATH.")
 		yellow.Fprintln(out, "   Open a new terminal (or run: source ~/.bashrc) and try again.")
 		return fmt.Errorf("ansible-playbook not in PATH after install")
 	}

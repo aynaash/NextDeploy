@@ -78,7 +78,7 @@ func Execute() {
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Printf("\n%s %s\n\n",
-			errorMsg("❌ Error:"), err,
+			errorMsg("Error:"), err,
 		)
 		os.Exit(1)
 	}

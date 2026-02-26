@@ -11,8 +11,8 @@ var rollbackCmd = &cobra.Command{
 	Short: "Rollback to the previous deployment instantly",
 	Long:  "Swaps the active symlink to the previous release and restarts the application via the daemon.",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("🚀 NextDeploy Rollback")
-		fmt.Println("// TODO: Yusuf - Hook into the daemon's snapshot/symlink management to instantly revert process.")
+		fmt.Println("NextDeploy Rollback")
+		fmt.Println("// TODO: Hook into the daemon's snapshot/symlink management to instantly revert process.")
 	},
 }
 
