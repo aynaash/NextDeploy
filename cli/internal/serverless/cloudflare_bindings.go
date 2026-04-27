@@ -36,7 +36,14 @@ func noResolver(string, string) (string, bool) { return "", false }
 // `resolveRef` resolves `ref:` shortcuts on bindings (e.g. hyperdrive.ref) to
 // the CF UUID stashed by ProvisionResources. Pass noResolver if no IaC layer
 // has run yet — bindings using `ref:` will then error.
-func buildScriptMetadata(cf *config.CloudflareConfig, defaultBucket, entryName string, resolveRef refResolver) (workers.ScriptUpdateParamsMetadata, error) {
+//
+// `secrets` is the set of secret_text bindings to attach. Pass nil to leave
+// secrets untouched — but note: CF's binding metadata is replace-not-merge
+// at upload time, so omitting secrets on a re-deploy WILL strip every
+// previously-attached secret from the script. Callers that don't want that
+// must pass the full secret map (which is what the deploy orchestration
+// does — secrets are loaded pre-compute and threaded through here).
+func buildScriptMetadata(cf *config.CloudflareConfig, defaultBucket, entryName string, resolveRef refResolver, secrets map[string]string) (workers.ScriptUpdateParamsMetadata, error) {
 	compatDate := defaultCFCompatibilityDate
 	flags := defaultCFCompatibilityFlags
 	if cf != nil {
@@ -53,6 +60,14 @@ func buildScriptMetadata(cf *config.CloudflareConfig, defaultBucket, entryName s
 		return workers.ScriptUpdateParamsMetadata{}, err
 	}
 
+	for _, name := range sortedKeys(secrets) {
+		bindings = append(bindings, workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindSecretText{
+			Name: cloudflare.F(name),
+			Text: cloudflare.F(secrets[name]),
+			Type: cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindSecretTextTypeSecretText),
+		})
+	}
+
 	meta := workers.ScriptUpdateParamsMetadata{
 		MainModule:         cloudflare.F(entryName),
 		CompatibilityDate:  cloudflare.F(compatDate),
@@ -66,6 +81,25 @@ func buildScriptMetadata(cf *config.CloudflareConfig, defaultBucket, entryName s
 		)
 	}
 	return meta, nil
+}
+
+// sortedKeys returns m's keys in ascending order. Used so binding emission
+// (and resulting upload payloads) is deterministic — same secrets set
+// produces byte-identical metadata, which keeps content hashes stable.
+func sortedKeys(m map[string]string) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	for i := 1; i < len(keys); i++ {
+		for j := i; j > 0 && keys[j-1] > keys[j]; j-- {
+			keys[j-1], keys[j] = keys[j], keys[j-1]
+		}
+	}
+	return keys
 }
 
 func buildBindings(cf *config.CloudflareConfig, defaultBucket string, resolveRef refResolver) ([]workers.ScriptUpdateParamsMetadataBindingUnion, error) {

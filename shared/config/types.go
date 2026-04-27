@@ -386,6 +386,13 @@ type DopplerConfig struct {
 	Project string `yaml:"project"`
 	Config  string `yaml:"config"`
 	Token   string `yaml:"token,omitempty"`
+	// InjectEnv tells nextdeploy to harvest the process environment (after
+	// applying conservative deny-lists) and treat it as the secret set to
+	// push. Auto-enabled when `doppler run -- nextdeploy ship` is detected
+	// (DOPPLER_PROJECT/CONFIG/ENVIRONMENT in env). Set explicitly to true
+	// to harvest from a CI step that populated env via, e.g.,
+	// `doppler secrets download --no-file --format=env`.
+	InjectEnv bool `yaml:"inject_env,omitempty"`
 }
 
 type VaultConfig struct {

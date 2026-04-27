@@ -147,10 +147,14 @@ CloudProvider:
 
 # -----
 # SERVERLESS DEPLOYMENT (set target_type: serverless above to enable)
-# Requires: AWS credentials configured via environment or ~/.aws/credentials
 # -----
+#
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │ EXAMPLE A — AWS (Lambda + S3 + CloudFront)                          │
+# │ Requires AWS credentials in env or ~/.aws/credentials               │
+# └─────────────────────────────────────────────────────────────────────┘
 # serverless:
-#   provider: aws              # Only "aws" supported currently; cloudflare/gcp/azure coming soon
+#   provider: aws              # one of: aws | cloudflare
 #   region: us-east-1          # AWS region for all resources
 #   isrRevalidation: true      # Enable ISR cache listener Lambda via SQS
 #   imageOptimization: true    # Enable on-the-fly Image Resization Lambda via CloudFront
@@ -159,11 +163,150 @@ CloudProvider:
 #   cloudfront_id: EXXXXX      # CloudFront distribution ID — triggers cache invalidation after deploy
 #   lambda_function_name: my-app-handler  # Lambda function name (defaults to app name if omitted)
 #
-# How it works:
+# How it works (AWS):
 #   1. `nextdeploy build` packages .next/standalone + public/ into .nextdeploy/app.tar.gz
-#   2. `nextdeploy ship` (with target_type: serverless):
-#      a. Loads your local secrets via SecretManager and pushes them to AWS Secrets Manager
+#   2. `nextdeploy ship`:
+#      a. Loads local secrets via SecretManager and pushes them to AWS Secrets Manager
 #      b. Uploads public/ and _next/static/ to S3 with correct Content-Type and Cache-Control
 #      c. Zips .next/standalone/ and deploys it to Lambda via UpdateFunctionCode
 #      d. Injects ND_SECRETS_ARN into Lambda env vars so your app can fetch secrets at runtime
 #      e. Creates a CloudFront invalidation (/*) to clear stale cached assets
+#
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │ EXAMPLE B — Cloudflare (Workers + R2)                               │
+# │ Requires only CLOUDFLARE_API_TOKEN.  Account ID auto-discovers.     │
+# │ R2 keys are optional — left unset, the deploy uses the API token.   │
+# └─────────────────────────────────────────────────────────────────────┘
+# serverless:
+#   provider: cloudflare
+#   cloudflare:
+#     compatibility_date: "2025-04-01"
+#     compatibility_flags: [nodejs_compat_v2]
+#
+#     # Custom domains attached to the Worker. The zone must already exist
+#     # on your Cloudflare account (zone auto-creation is a roadmap item).
+#     custom_domains:
+#       - hostname: app.example.com
+#       # - hostname: api.example.com
+#
+#     # Worker route patterns (alternative to custom_domains, e.g. for
+#     # path-based routing onto a shared zone).
+#     # routes:
+#     #   - { zone: example.com, pattern: "example.com/*" }
+#
+#     # Cron triggers. NOTE: declared schedules are uploaded, but the
+#     # bundled shim must export a scheduled() handler — see CLOUDFLARE_PARITY.md A1.
+#     # triggers:
+#     #   crons: ["0 */6 * * *"]
+#
+#     # Bindings the Worker sees as `env.<name>` at runtime.
+#     bindings:
+#       # R2 binding — auto-injected if you omit this block.
+#       r2:
+#         - { name: ASSETS, bucket: my-app-assets-prod }
+#
+#       # Hyperdrive (pooled SQL). Either reference a resource declared
+#       # below by name, or paste an existing config id.
+#       # hyperdrive:
+#       #   - { name: DB, ref: primary }
+#       #   - { name: REPLICA, id: 00000000-0000-0000-0000-000000000000 }
+#
+#       # Queues. Producers go on this worker; consumers attach this
+#       # worker to a queue created elsewhere (or in resources below).
+#       # queues:
+#       #   producers:
+#       #     - { name: JOBS, queue: jobs-prod }
+#       #   consumers:
+#       #     - { queue: jobs-prod, max_batch_size: 10, max_retries: 3 }
+#
+#       # Vectorize, AI Gateway, KV, Durable Objects, plain env vars.
+#       # vectorize:    [{ name: VEC, index: prod-embeddings }]
+#       # ai:           [{ name: AI,  gateway: { id: my-gateway } }]
+#       # kv:           [{ name: KV,  namespace_id: <id> }]
+#       # durable_objects:
+#       #   - { name: COUNTER, class: Counter }
+#       # plain_text:   [{ name: APP_VERSION, value: "1.2.3" }]
+#
+#     # Standalone resources to provision/converge before the Worker upload.
+#     # Each block is idempotent: created on first run, updated on drift.
+#     resources:
+#       # hyperdrive:
+#       #   - name: primary
+#       #     origin_env: DATABASE_URL   # connection string read from secret
+#       #     # origin: postgres://user:pass@host:5432/db
+#       # queues:
+#       #   - name: jobs-prod
+#       # vectorize:
+#       #   - { name: prod-embeddings, dimensions: 1536, metric: cosine }
+#       # ai_gateway:
+#       #   - { slug: my-gateway }
+#
+#       # DNS records on a CF-managed zone. Useful for pointing apex /
+#       # www at the Worker, MX/TXT for email, etc.
+#       dns:
+#         - { zone: example.com, name: "@",  type: A,     content: 192.0.2.1, proxied: true }
+#         - { zone: example.com, name: www,  type: CNAME, content: example.com, proxied: true }
+#       # zone_settings:
+#       #   - { zone: example.com, min_ttl: 60 }
+#
+# How it works (Cloudflare):
+#   1. `nextdeploy build` produces .next/standalone (vanilla `next build` output).
+#   2. `nextdeploy ship`:
+#      a. Verifies CLOUDFLARE_API_TOKEN, auto-discovers account ID if unset.
+#      b. Provisions standalone resources (Hyperdrive / Queues / Vectorize / DNS).
+#      c. Uploads public/ and .next/static/ to an R2 bucket with correct Cache-Control.
+#      d. Adapts .next/standalone into a single ESM Worker bundle via nextcompile +
+#         esbuild (--conditions=workerd,worker,node), then uploads to Workers.
+#      e. Wires custom domains, routes, cron triggers, queue consumers.
+#      f. Pushes secrets to the Worker.
+#      g. Purges the zone cache.
+#
+# Credentials (Cloudflare):
+#   • CLOUDFLARE_API_TOKEN     — required. Covers everything except R2
+#                                 object PUTs (which need S3-protocol auth).
+#   • CLOUDFLARE_ACCOUNT_ID    — optional; auto-discovered if the token
+#                                 sees exactly one account.
+#
+# R2 object credentials — pick ONE of:
+#   (a) R2_ACCESS_KEY_ID + R2_SECRET_ACCESS_KEY  (long-lived, S3-compat).
+#   (b) R2_PARENT_ACCESS_KEY_ID  (just the access key id of a parent key —
+#       nextdeploy will mint scoped 1-hour child creds via the API token at
+#       deploy time. The parent's *secret* never leaves the dashboard).
+# Both can also live in the encrypted credstore at ~/.nextdeploy/credstore
+# (run `nextdeploy creds set --provider cloudflare`).
+#
+# Required token scopes — see `nextdeploy ship` error output, or:
+#   Account: Workers Scripts:Edit, Workers Routes:Edit, Workers R2 Storage:Edit,
+#            Account Settings:Read, plus per-resource scopes (Hyperdrive, D1,
+#            Vectorize, AI Gateway) only if you use them.
+#   Zone:    Zone:Read, DNS:Edit, Cache Purge:Purge (per zone you deploy to).
+
+# -----
+# SECRETS — Doppler workflow
+# -----
+#
+# The recommended pattern is `doppler run -- nextdeploy ship`. Doppler
+# injects every secret in your project/config as a process environment
+# variable; nextdeploy auto-detects it (via DOPPLER_PROJECT in env),
+# harvests SCREAMING_SNAKE_CASE keys (excluding tooling/credential
+# prefixes like CLOUDFLARE_, AWS_, DOPPLER_, etc.), and pushes them as
+# Worker secrets / Lambda secrets-manager entries.
+#
+# No nextdeploy.yml change is required for `doppler run -- ...`. Block
+# below is only needed when you populate env from a non-`doppler run`
+# source (CI step that wrote to $GITHUB_ENV, manual export, etc.) and
+# want nextdeploy to still harvest it.
+#
+# secrets:
+#   files:
+#     - { path: .env.production }   # extra dotenv files to merge
+#   doppler:
+#     project: my-app               # informational; doppler run sets these in env
+#     config:  prd
+#     inject_env: true              # force env harvesting even outside `doppler run`
+#
+# Precedence (lowest → highest), values from later sources override earlier:
+#   1. .env at project root
+#   2. files declared in secrets.files[]
+#   3. Doppler-injected process env (auto when DOPPLER_PROJECT is set)
+#   4. .nextdeploy/.env  (managed store; written by `nextdeploy secrets set`)

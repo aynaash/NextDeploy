@@ -65,20 +65,37 @@ import (
 type CloudflareProvider struct {
 	log         *shared.Logger
 	cf          *cloudflare.Client
-	r2s3        *s3.Client // S3-compat client for R2 objects
+	r2s3        *s3.Client // S3-compat client for R2 objects (lazy: built on first DeployStatic)
 	accountID   string
 	r2AccessKey string
 	r2SecretKey string
-	environment string       // populated in Initialize
-	provisioned *resourceMap // standalone resource name → CF UUID, populated by ProvisionResources
+	// r2ParentKeyID, when set, lets DeployStatic mint short-lived temp R2
+	// credentials via /accounts/:id/r2/temp-access-credentials instead of
+	// using a long-lived R2_SECRET_ACCESS_KEY. The parent key authorizes
+	// the scope; the temp creds expire in ~1 hour.
+	r2ParentKeyID string
+	environment   string       // populated in Initialize
+	provisioned   *resourceMap // standalone resource name → CF UUID, populated by ProvisionResources
+
+	// pendingSecrets holds secrets staged via UpdateSecrets() that have not
+	// yet been folded into a Worker upload. DeployCompute reads them, emits
+	// them as secret_text bindings in the script metadata, and clears them
+	// on success. This avoids the per-secret PUT loop (which is rate-
+	// limited to ~13 req/s by CF, error code 10013) — instead the entire
+	// secret set lands atomically in one Workers.Scripts.Update call.
+	//
+	// Standalone rotation paths (SetSecret/UnsetSecret) still use the
+	// per-secret API and bypass this stash.
+	pendingSecrets map[string]string
 }
 
 // cloudflareCreds is the resolved bag returned by loadCloudflareCreds.
 type cloudflareCreds struct {
-	apiToken    string
-	accountID   string
-	r2AccessKey string
-	r2SecretKey string
+	apiToken      string
+	accountID     string
+	r2AccessKey   string
+	r2SecretKey   string
+	r2ParentKeyID string // permanent R2 access key id used to mint short-lived temp creds
 }
 
 // loadCloudflareCreds resolves credentials in the documented precedence order
@@ -86,13 +103,14 @@ type cloudflareCreds struct {
 // via committed config get noticed.
 func loadCloudflareCreds(cfg *config.NextDeployConfig, log *shared.Logger) cloudflareCreds {
 	c := cloudflareCreds{
-		apiToken:    os.Getenv("CLOUDFLARE_API_TOKEN"),
-		accountID:   os.Getenv("CLOUDFLARE_ACCOUNT_ID"),
-		r2AccessKey: os.Getenv("R2_ACCESS_KEY_ID"),
-		r2SecretKey: os.Getenv("R2_SECRET_ACCESS_KEY"),
+		apiToken:      os.Getenv("CLOUDFLARE_API_TOKEN"),
+		accountID:     os.Getenv("CLOUDFLARE_ACCOUNT_ID"),
+		r2AccessKey:   os.Getenv("R2_ACCESS_KEY_ID"),
+		r2SecretKey:   os.Getenv("R2_SECRET_ACCESS_KEY"),
+		r2ParentKeyID: os.Getenv("R2_PARENT_ACCESS_KEY_ID"),
 	}
 
-	if c.apiToken == "" || c.accountID == "" || c.r2AccessKey == "" || c.r2SecretKey == "" {
+	if c.apiToken == "" || c.accountID == "" || c.r2AccessKey == "" || c.r2SecretKey == "" || c.r2ParentKeyID == "" {
 		stored, err := credstore.Load("cloudflare")
 		if err == nil {
 			if c.apiToken == "" {
@@ -106,6 +124,9 @@ func loadCloudflareCreds(cfg *config.NextDeployConfig, log *shared.Logger) cloud
 			}
 			if c.r2SecretKey == "" {
 				c.r2SecretKey = stored["r2_secret_key"]
+			}
+			if c.r2ParentKeyID == "" {
+				c.r2ParentKeyID = stored["r2_parent_access_key_id"]
 			}
 		}
 	}
@@ -150,6 +171,11 @@ func (p *CloudflareProvider) bucketNameFromApp(appName string) string {
 }
 
 // Initialize wires up the Cloudflare SDK client and verifies the API token.
+//
+// The deploy is designed around a single-token UX: the user sets
+// CLOUDFLARE_API_TOKEN and everything else (account ID, optionally R2
+// credentials) is derived. If they want explicit overrides, env or
+// credstore wins.
 func (p *CloudflareProvider) Initialize(ctx context.Context, cfg *config.NextDeployConfig) error {
 	p.log.Info("Initializing Cloudflare deployment session...")
 
@@ -159,42 +185,133 @@ func (p *CloudflareProvider) Initialize(ctx context.Context, cfg *config.NextDep
 	if creds.apiToken == "" {
 		return fmt.Errorf("cloudflare API token not found (set CLOUDFLARE_API_TOKEN env, run 'nextdeploy creds set --provider cloudflare', or set cloudprovider.access_key in nextdeploy.yml)")
 	}
-	if creds.accountID == "" {
-		return fmt.Errorf("cloudflare account ID not found (set CLOUDFLARE_ACCOUNT_ID env, run 'nextdeploy creds set --provider cloudflare', or set cloudprovider.account_id in nextdeploy.yml)")
-	}
 
-	sensitive.Register(creds.apiToken, creds.r2AccessKey, creds.r2SecretKey)
-	p.accountID = creds.accountID
+	sensitive.Register(creds.apiToken, creds.r2AccessKey, creds.r2SecretKey, creds.r2ParentKeyID)
 	p.r2AccessKey = creds.r2AccessKey
 	p.r2SecretKey = creds.r2SecretKey
+	p.r2ParentKeyID = creds.r2ParentKeyID
 
 	p.cf = cloudflare.NewClient(
 		option.WithAPIToken(creds.apiToken),
 		option.WithRequestTimeout(60*time.Second),
 	)
 
-	// Verify token. The SDK does not expose /user/tokens/verify directly,
-	// so we use the raw client. Returns 200 with a `success: true` envelope.
-	var verify struct {
-		Success bool `json:"success"`
-	}
-	if err := p.cf.Get(ctx, "/user/tokens/verify", nil, &verify); err != nil {
-		return fmt.Errorf("cloudflare token verification failed: %w", err)
-	}
-	if !verify.Success {
-		return fmt.Errorf("cloudflare API token is invalid")
+	if err := p.verifyToken(ctx); err != nil {
+		return err
 	}
 
-	p.r2s3 = newR2S3Client(p.accountID, p.r2AccessKey, p.r2SecretKey)
+	if creds.accountID == "" {
+		discovered, err := p.discoverAccountID(ctx)
+		if err != nil {
+			return fmt.Errorf("cloudflare account ID not provided and auto-discovery failed: %w (set CLOUDFLARE_ACCOUNT_ID env or cloudprovider.account_id in nextdeploy.yml)", err)
+		}
+		creds.accountID = discovered
+		p.log.Info("Auto-discovered account ID: %s", creds.accountID)
+	}
+	p.accountID = creds.accountID
+
+	// Long-lived R2 keys take precedence (preserves existing CI configs).
+	// Otherwise the s3 client is built lazily in DeployStatic, after we
+	// mint short-lived creds from the parent key.
+	if p.r2AccessKey != "" && p.r2SecretKey != "" {
+		p.r2s3 = newR2S3Client(p.accountID, p.r2AccessKey, p.r2SecretKey, "")
+	}
 
 	p.log.Info("Cloudflare session initialized (account: %s)", p.accountID)
 	return nil
 }
 
+// verifyToken hits /user/tokens/verify and returns a clear error if the token
+// is invalid or expired. The endpoint confirms the token is alive but does
+// not enumerate scopes — scope failures will surface as 403s on the first
+// API call that needs the missing permission. The error here lists the
+// scopes a typical end-to-end deploy needs so users can sanity-check
+// their token in the CF dashboard.
+func (p *CloudflareProvider) verifyToken(ctx context.Context) error {
+	var verify struct {
+		Success bool `json:"success"`
+		Result  struct {
+			Status    string `json:"status"`
+			ExpiresOn string `json:"expires_on"`
+		} `json:"result"`
+		Errors []struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := p.cf.Get(ctx, "/user/tokens/verify", nil, &verify); err != nil {
+		return fmt.Errorf("cloudflare token verification failed: %w\n\n%s", err, requiredScopesHint())
+	}
+	if !verify.Success {
+		msg := "cloudflare API token is invalid"
+		if len(verify.Errors) > 0 {
+			msg = fmt.Sprintf("%s: %s (code %d)", msg, verify.Errors[0].Message, verify.Errors[0].Code)
+		}
+		return fmt.Errorf("%s\n\n%s", msg, requiredScopesHint())
+	}
+	if verify.Result.Status != "" && verify.Result.Status != "active" {
+		return fmt.Errorf("cloudflare API token status is %q (need \"active\")", verify.Result.Status)
+	}
+	return nil
+}
+
+// requiredScopesHint lists the token permissions a full nextdeploy CF deploy
+// uses. Surfaced in error messages so users know what to check when a deep
+// API call fails 403.
+func requiredScopesHint() string {
+	return "Required token scopes (Account):\n" +
+		"  • Workers Scripts: Edit\n" +
+		"  • Workers Routes: Edit\n" +
+		"  • Workers KV Storage: Edit (if using KV)\n" +
+		"  • Workers R2 Storage: Edit\n" +
+		"  • Workers Tail: Read\n" +
+		"  • Account Settings: Read\n" +
+		"  • D1: Edit (if using D1)\n" +
+		"  • Hyperdrive: Edit (if using Hyperdrive)\n" +
+		"  • Vectorize: Edit (if using Vectorize)\n" +
+		"  • AI Gateway: Edit (if using AI Gateway)\n" +
+		"Required token scopes (Zone, on each zone you deploy to):\n" +
+		"  • Zone: Read\n" +
+		"  • DNS: Edit\n" +
+		"  • Cache Purge: Purge"
+}
+
+// discoverAccountID lists the accounts the API token can see. Returns the
+// account ID if exactly one is visible. If multiple are visible, returns an
+// error listing them so the user can pick one explicitly.
+func (p *CloudflareProvider) discoverAccountID(ctx context.Context) (string, error) {
+	var resp struct {
+		Success bool `json:"success"`
+		Result  []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"result"`
+	}
+	if err := p.cf.Get(ctx, "/accounts", nil, &resp); err != nil {
+		return "", err
+	}
+	if !resp.Success || len(resp.Result) == 0 {
+		return "", fmt.Errorf("no accounts visible to this token")
+	}
+	if len(resp.Result) == 1 {
+		return resp.Result[0].ID, nil
+	}
+	names := make([]string, 0, len(resp.Result))
+	for _, a := range resp.Result {
+		names = append(names, fmt.Sprintf("  %s  (%s)", a.ID, a.Name))
+	}
+	return "", fmt.Errorf("token sees %d accounts, cannot pick one — set CLOUDFLARE_ACCOUNT_ID explicitly:\n%s",
+		len(resp.Result), strings.Join(names, "\n"))
+}
+
 // newR2S3Client builds an S3 client configured against the R2 S3-compatible
 // endpoint. Returns nil if R2 credentials are not present; callers must check
 // before issuing object PUTs.
-func newR2S3Client(accountID, akid, secret string) *s3.Client {
+//
+// sessionToken is the third element of an STS-style triple, set when the
+// (akid, secret) pair was minted via /r2/temp-access-credentials. Pass ""
+// for permanent R2 access keys.
+func newR2S3Client(accountID, akid, secret, sessionToken string) *s3.Client {
 	if akid == "" || secret == "" {
 		return nil
 	}
@@ -202,22 +319,113 @@ func newR2S3Client(accountID, akid, secret string) *s3.Client {
 	return s3.New(s3.Options{
 		Region:       "auto",
 		BaseEndpoint: awsv2.String(endpoint),
-		Credentials:  credentials.NewStaticCredentialsProvider(akid, secret, ""),
+		Credentials:  credentials.NewStaticCredentialsProvider(akid, secret, sessionToken),
 		UsePathStyle: false,
 	})
+}
+
+// r2TempCreds is the body returned by /accounts/:id/r2/temp-access-credentials.
+// CF wraps it in the standard {"success": bool, "result": {...}} envelope.
+type r2TempCreds struct {
+	AccessKeyID     string `json:"accessKeyId"`
+	SecretAccessKey string `json:"secretAccessKey"`
+	SessionToken    string `json:"sessionToken"`
+}
+
+// mintR2TempCreds asks Cloudflare for a short-lived R2 credential triple
+// scoped to a single bucket. The returned creds are good for ttl seconds
+// (clamped to [60, 36*3600] by the API; we ask for one hour).
+//
+// The endpoint is authenticated via the API token (Bearer) — the parent
+// access key id is the *authority* for the temp creds, but the call itself
+// rides the API token. So callers don't need the parent key's *secret*,
+// only the id.
+//
+// permission is one of:
+//
+//	"object-read-only", "object-read-write",
+//	"admin-read-only", "admin-read-write",
+//	"admin-object-only-read-only", "admin-object-only-read-write".
+//
+// We use "object-read-write" — uploads but no bucket-level admin.
+func (p *CloudflareProvider) mintR2TempCreds(ctx context.Context, bucket string) (r2TempCreds, error) {
+	if p.r2ParentKeyID == "" {
+		return r2TempCreds{}, fmt.Errorf("R2_PARENT_ACCESS_KEY_ID not set")
+	}
+	body := map[string]any{
+		"bucket":            bucket,
+		"parentAccessKeyId": p.r2ParentKeyID,
+		"permission":        "object-read-write",
+		"ttlSeconds":        3600,
+	}
+	var resp struct {
+		Success bool        `json:"success"`
+		Result  r2TempCreds `json:"result"`
+		Errors  []struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	path := fmt.Sprintf("/accounts/%s/r2/temp-access-credentials", p.accountID)
+	if err := p.cf.Post(ctx, path, body, &resp); err != nil {
+		return r2TempCreds{}, fmt.Errorf("mint r2 temp creds: %w", err)
+	}
+	if !resp.Success {
+		msg := "mint r2 temp creds: api returned success=false"
+		if len(resp.Errors) > 0 {
+			msg = fmt.Sprintf("%s (%s, code %d)", msg, resp.Errors[0].Message, resp.Errors[0].Code)
+		}
+		return r2TempCreds{}, fmt.Errorf("%s", msg)
+	}
+	if resp.Result.AccessKeyID == "" || resp.Result.SecretAccessKey == "" {
+		return r2TempCreds{}, fmt.Errorf("mint r2 temp creds: empty creds in response")
+	}
+	sensitive.Register(resp.Result.AccessKeyID, resp.Result.SecretAccessKey, resp.Result.SessionToken)
+	return resp.Result, nil
 }
 
 // DeployStatic uploads the package's static assets to an R2 bucket via the
 // S3-compatible endpoint. R2 management (bucket creation) goes through the
 // official SDK.
+//
+// R2 object PUTs are S3-protocol — cloudflare-go doesn't expose them. Three
+// credential paths, in order of preference:
+//
+//  1. Long-lived (R2_ACCESS_KEY_ID + R2_SECRET_ACCESS_KEY in env/credstore).
+//     Used as-is. Fastest, no extra API call.
+//  2. Short-lived from a parent (R2_PARENT_ACCESS_KEY_ID set). At deploy
+//     time, mint a 1-hour scoped triple (akid, secret, sessionToken) via
+//     POST /accounts/:id/r2/temp-access-credentials. No long-lived secret
+//     ever lives on the deploy host.
+//  3. Neither — fail loud with dashboard URL and roadmap pointer.
 func (p *CloudflareProvider) DeployStatic(ctx context.Context, pkg *packaging.PackageResult, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) error {
-	if p.r2s3 == nil {
-		return fmt.Errorf("R2 object uploads require R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY env vars")
-	}
-
 	bucketName := p.getBucketName(cfg)
+
 	if err := p.ensureR2BucketExists(ctx, bucketName); err != nil {
 		return fmt.Errorf("failed to ensure R2 bucket: %w", err)
+	}
+
+	if p.r2s3 == nil {
+		if p.r2ParentKeyID == "" {
+			return fmt.Errorf(
+				"R2 object uploads need either:\n" +
+					"  • R2_ACCESS_KEY_ID + R2_SECRET_ACCESS_KEY (long-lived), or\n" +
+					"  • R2_PARENT_ACCESS_KEY_ID (we mint 1-hour temp creds via the API token).\n\n" +
+					"Generate a key pair: https://dash.cloudflare.com/?to=/:account/r2/api-tokens\n" +
+					"  (R2 → Manage R2 API Tokens → Create API token → Permissions: Object Read & Write)\n" +
+					"Then either export both halves in env, or export only the access key id as\n" +
+					"R2_PARENT_ACCESS_KEY_ID and let nextdeploy mint short-lived child creds.",
+			)
+		}
+		p.log.Info("Minting short-lived R2 creds for bucket %s (parent: %s…)", bucketName, p.r2ParentKeyID[:min(8, len(p.r2ParentKeyID))])
+		creds, err := p.mintR2TempCreds(ctx, bucketName)
+		if err != nil {
+			return fmt.Errorf("R2 temp credential minting failed: %w", err)
+		}
+		p.r2s3 = newR2S3Client(p.accountID, creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken)
+		if p.r2s3 == nil {
+			return fmt.Errorf("R2 temp credential minting returned an empty triple")
+		}
 	}
 
 	p.log.Info("Uploading %d static assets to R2 bucket %s...", len(pkg.S3Assets), bucketName)
@@ -353,9 +561,12 @@ func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.P
 	if p.provisioned != nil {
 		resolve = p.provisioned.get
 	}
-	scriptMeta, err := buildScriptMetadata(cfBlock, bucketName, entryName, resolve)
+	scriptMeta, err := buildScriptMetadata(cfBlock, bucketName, entryName, resolve, p.pendingSecrets)
 	if err != nil {
 		return fmt.Errorf("build script metadata: %w", err)
+	}
+	if len(p.pendingSecrets) > 0 {
+		p.log.Info("Folding %d secret_text bindings into Worker upload", len(p.pendingSecrets))
 	}
 
 	params := workers.ScriptUpdateParams{
@@ -368,6 +579,11 @@ func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.P
 		return fmt.Errorf("worker upload failed: %w", err)
 	}
 	p.log.Info("Worker deployed: %s", workerName)
+	// Folded secrets landed atomically in the upload above; drop the stash
+	// so a follow-up DeployCompute (e.g. a redeploy without new secrets)
+	// doesn't re-emit them after the user had a chance to rotate via
+	// SetSecret/UnsetSecret.
+	p.pendingSecrets = nil
 
 	if err := p.applyWorkerTriggers(ctx, workerName, cfBlock); err != nil {
 		return err
@@ -501,19 +717,31 @@ func (p *CloudflareProvider) applyCronTriggers(ctx context.Context, workerName s
 	return nil
 }
 
-// UpdateSecrets pushes a batch of secrets as Worker secret_text bindings.
+// UpdateSecrets stashes a batch of secrets onto the provider so DeployCompute
+// can fold them into the next Workers.Scripts.Update call as secret_text
+// bindings. This bypasses CF's per-secret PUT endpoint (rate-limited at ~13
+// req/s, error 10013) and lands every secret atomically in a single upload.
+//
+// Trade-off: secret rotation requires a Worker re-upload. That re-upload is
+// cheap because the bundle is content-hashed and reused — only the metadata
+// changes — but it does mean `nextdeploy secrets set FOO=bar` outside of a
+// full deploy uses the per-secret path (SetSecret/UnsetSecret) instead of
+// going through here.
+//
+// Calling UpdateSecrets with an empty map clears the staged set.
 func (p *CloudflareProvider) UpdateSecrets(ctx context.Context, appName string, secrets map[string]string) error {
+	_ = ctx
+	_ = appName
 	if len(secrets) == 0 {
+		p.pendingSecrets = nil
 		return nil
 	}
-	p.log.Info("Pushing %d secrets to Cloudflare Workers...", len(secrets))
-
-	workerName := p.workerName(appName)
-	for key, value := range secrets {
-		if err := p.putWorkerSecret(ctx, workerName, key, value); err != nil {
-			return fmt.Errorf("failed to set secret %s: %w", key, err)
-		}
+	staged := make(map[string]string, len(secrets))
+	for k, v := range secrets {
+		staged[k] = v
 	}
+	p.pendingSecrets = staged
+	p.log.Info("Staged %d secrets to fold into the next Worker upload", len(staged))
 	return nil
 }
 

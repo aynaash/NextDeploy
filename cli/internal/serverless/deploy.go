@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Golangcodes/nextdeploy/internal/packaging"
@@ -35,6 +36,10 @@ func New(providerName string, verbose bool) (Provider, error) {
 //  5. Invalidates the CDN cache
 func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload, verbose bool) error {
 	log := shared.PackageLogger("serverless", "☁️  SERVERLESS")
+
+	if err := validateProviderConsistency(cfg, log); err != nil {
+		return err
+	}
 
 	// ── 1. Resolve provider ──────────────────────────────────────────────────
 	p, err := New(cfg.Serverless.Provider, verbose)
@@ -69,14 +74,14 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	}
 	log.Info("Package split: %dMB Lambda zip, %d S3 assets", pkgResult.LambdaZipSize/(1024*1024), len(pkgResult.S3Assets))
 
-	// ── 3. Push secrets (ordering depends on provider) ───────────────────────
-	// AWS: secrets must land in Secrets Manager BEFORE DeployCompute, because
-	//      the allow_secrets_in_env fallback reads them at deploy time to bake
-	//      into Lambda env vars.
-	// Cloudflare: secrets are attached to an existing worker, so the worker
-	//      must be created by DeployCompute first.
-	secretsBeforeCompute := cfg.Serverless.Provider != "cloudflare"
-
+	// ── 3. Push secrets (always before compute) ──────────────────────────────
+	// AWS: secrets must land in Secrets Manager BEFORE DeployCompute because
+	//      the allow_secrets_in_env fallback reads them at deploy time to
+	//      bake into Lambda env vars.
+	// Cloudflare: UpdateSecrets stashes the set onto the provider; the
+	//      stash is then folded into the script upload as secret_text
+	//      bindings during DeployCompute. This avoids the per-secret PUT
+	//      rate limit (CF error 10013).
 	pushSecrets := func() error {
 		appSecrets, err := loadLocalSecrets(cfg)
 		if err != nil {
@@ -89,10 +94,8 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 		return nil
 	}
 
-	if secretsBeforeCompute {
-		if err := pushSecrets(); err != nil {
-			return err
-		}
+	if err := pushSecrets(); err != nil {
+		return err
 	}
 
 	// ── 4. Deploy static assets ──────────────────────────────────────────────
@@ -111,12 +114,6 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	}
 	if verbose {
 		log.Info("  Lambda deployment completed in %s", time.Since(t0).Round(time.Millisecond))
-	}
-
-	if !secretsBeforeCompute {
-		if err := pushSecrets(); err != nil {
-			return err
-		}
 	}
 
 	// ── 6. Invalidate CDN cache ──────────────────────────────────────────────
@@ -197,7 +194,10 @@ func Rollback(ctx context.Context, cfg *config.NextDeployConfig, opts RollbackOp
 //
 //  1. Auto-detected dotenv file at project root (`.env`)
 //  2. Files declared in `nextdeploy.yml` under `secrets.files[]` (in order)
-//  3. The managed JSON store at `.nextdeploy/.env`, populated by
+//  3. Doppler — when running under `doppler run -- nextdeploy ship`, or when
+//     `secrets.doppler.inject_env: true` is set in nextdeploy.yml, the
+//     process environment is harvested and merged. See harvestDopplerEnv.
+//  4. The managed JSON store at `.nextdeploy/.env`, populated by
 //     `nextdeploy secrets set/load`
 //
 // Higher-precedence sources override lower ones. The managed store wins
@@ -229,7 +229,13 @@ func loadLocalSecrets(cfg *config.NextDeployConfig) (map[string]string, error) {
 		log.Info("Loaded %d secrets from %s", len(env), sf.Path)
 	}
 
-	// 3. Managed JSON store (.nextdeploy/.env). Highest precedence.
+	// 3. Doppler — harvest process env when running under `doppler run --`.
+	if dopplerEnv, source := harvestDopplerEnv(cfg); source != "" {
+		mergeInto(merged, dopplerEnv)
+		log.Info("Loaded %d secrets from Doppler (%s)", len(dopplerEnv), source)
+	}
+
+	// 4. Managed JSON store (.nextdeploy/.env). Highest precedence.
 	sm, err := secrets.NewSecretManager(secrets.WithConfig(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("failed to init secret manager: %w", err)
@@ -248,9 +254,169 @@ func loadLocalSecrets(cfg *config.NextDeployConfig) (map[string]string, error) {
 	return merged, nil
 }
 
+// harvestDopplerEnv inspects the process environment for Doppler-injected
+// secrets and returns them as a name→value map. Returns an empty map when
+// Doppler is not in play.
+//
+// Activation, in order:
+//
+//  1. The standard variables `doppler run` injects (DOPPLER_PROJECT,
+//     DOPPLER_CONFIG, DOPPLER_ENVIRONMENT, DOPPLER_TOKEN) are present →
+//     auto-detected, no config required. This is the
+//     `doppler run -- nextdeploy ship` path.
+//  2. The user explicitly opts in via nextdeploy.yml:
+//
+//       secrets:
+//         doppler:
+//           inject_env: true
+//
+//     This is useful when the env is populated by something other than
+//     `doppler run` — for example a CI step that calls
+//     `doppler secrets download --no-file --format=env > $GITHUB_ENV`.
+//
+// To avoid leaking the local shell into the cloud, we filter out variables
+// that are clearly system, tooling, or nextdeploy-internal. Doppler-injected
+// secrets are by convention SCREAMING_SNAKE_CASE app vars, so the heuristic
+// is: keep upper-case identifiers that don't match any deny-list pattern.
+//
+// The second return value is a short label describing the activation source,
+// used for logging. Empty string means "Doppler not active, nothing was
+// harvested".
+func harvestDopplerEnv(cfg *config.NextDeployConfig) (map[string]string, string) {
+	dopplerProject := os.Getenv("DOPPLER_PROJECT")
+	dopplerConfig := os.Getenv("DOPPLER_CONFIG")
+	dopplerEnvName := os.Getenv("DOPPLER_ENVIRONMENT")
+	dopplerToken := os.Getenv("DOPPLER_TOKEN")
+	autoDetected := dopplerProject != "" || dopplerConfig != "" || dopplerEnvName != "" || dopplerToken != ""
+
+	optIn := cfg != nil && cfg.Secrets.Doppler != nil && cfg.Secrets.Doppler.InjectEnv
+
+	if !autoDetected && !optIn {
+		return nil, ""
+	}
+
+	out := map[string]string{}
+	for _, kv := range os.Environ() {
+		i := strings.IndexByte(kv, '=')
+		if i <= 0 {
+			continue
+		}
+		k, v := kv[:i], kv[i+1:]
+		if !shouldHarvestEnvKey(k) {
+			continue
+		}
+		out[k] = v
+	}
+
+	source := "config opt-in"
+	switch {
+	case autoDetected && dopplerProject != "" && dopplerConfig != "":
+		source = fmt.Sprintf("doppler run: project=%s config=%s", dopplerProject, dopplerConfig)
+	case autoDetected:
+		source = "doppler run"
+	}
+	return out, source
+}
+
+// shouldHarvestEnvKey returns true when an environment variable looks like a
+// user app secret rather than a system/tooling/nextdeploy variable.
+//
+// Rules:
+//   - Must be SCREAMING_SNAKE_CASE (no lowercase letters).
+//   - Must not match any tooling/credential/system prefix the harvester
+//     should never push to the cloud (CLOUDFLARE_API_TOKEN, AWS keys, the
+//     Doppler bookkeeping vars themselves, shell internals).
+//
+// This list is conservative — we'd rather drop a secret the user expected
+// us to push than push a credential we shouldn't. Users who need to force
+// a denied key into the deploy can declare it in `secrets.files[]` or in
+// the managed store.
+func shouldHarvestEnvKey(k string) bool {
+	if k == "" {
+		return false
+	}
+	hasLower := false
+	for _, r := range k {
+		if r >= 'a' && r <= 'z' {
+			hasLower = true
+			break
+		}
+	}
+	if hasLower {
+		return false
+	}
+	denyExact := map[string]struct{}{
+		"PATH": {}, "HOME": {}, "USER": {}, "SHELL": {}, "PWD": {}, "OLDPWD": {},
+		"LANG": {}, "LC_ALL": {}, "TERM": {}, "TMPDIR": {}, "LOGNAME": {},
+		"HOSTNAME": {}, "DISPLAY": {}, "XAUTHORITY": {}, "MAIL": {},
+		"SSH_AUTH_SOCK": {}, "SSH_AGENT_PID": {}, "SSH_CONNECTION": {}, "SSH_CLIENT": {}, "SSH_TTY": {},
+		"GOPATH": {}, "GOROOT": {}, "GOCACHE": {}, "GOMODCACHE": {},
+		"NODE_PATH": {}, "NPM_CONFIG_PREFIX": {},
+		"_": {},
+	}
+	if _, bad := denyExact[k]; bad {
+		return false
+	}
+	denyPrefixes := []string{
+		"DOPPLER_",       // Doppler bookkeeping (we don't push our own auth)
+		"CLOUDFLARE_",    // CF deploy creds, not app secrets
+		"R2_",            // R2 deploy creds
+		"AWS_",           // AWS deploy creds
+		"GOOGLE_",        // GCP deploy creds
+		"AZURE_",         // Azure deploy creds
+		"NEXTDEPLOY_",    // our own internal flags
+		"ND_",            // our own internal flags (short prefix)
+		"BASH_",          // shell internals
+		"XDG_",           // XDG base dirs
+		"LC_",            // locale
+		"GITHUB_",        // GitHub Actions runner internals
+		"RUNNER_",        // GitHub Actions runner internals
+		"CI_",            // generic CI internals
+	}
+	for _, p := range denyPrefixes {
+		if strings.HasPrefix(k, p) {
+			return false
+		}
+	}
+	return true
+}
+
 // mergeInto copies src into dst, overwriting existing keys.
 func mergeInto(dst, src map[string]string) {
 	for k, v := range src {
 		dst[k] = v
 	}
+}
+
+// validateProviderConsistency rejects configurations where the legacy
+// CloudProvider.name disagrees with serverless.provider. It's an easy
+// foot-gun: an old AWS yaml that grew a new `serverless: { provider:
+// cloudflare }` block would silently load AWS creds from CloudProvider
+// and try to ship them to Cloudflare. We'd rather fail loud than have
+// access keys leak across providers.
+func validateProviderConsistency(cfg *config.NextDeployConfig, log *shared.Logger) error {
+	if cfg == nil || cfg.Serverless == nil {
+		return nil
+	}
+	want := cfg.Serverless.Provider
+	if want == "" {
+		return fmt.Errorf("serverless.provider is required for target_type: serverless (one of: aws, cloudflare)")
+	}
+	if cfg.CloudProvider == nil {
+		return nil
+	}
+	got := cfg.CloudProvider.Name
+	if got == "" || got == want {
+		return nil
+	}
+	// Allow harmless aliases. CloudProvider was originally an AWS-only
+	// concept; treat empty/aws as compatible with serverless.provider:aws.
+	if got == "aws" && want == "aws" {
+		return nil
+	}
+	return fmt.Errorf(
+		"provider mismatch: CloudProvider.name=%q but serverless.provider=%q — "+
+			"set them to the same value, or remove CloudProvider entirely if you only deploy via serverless",
+		got, want,
+	)
 }

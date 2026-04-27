@@ -157,7 +157,12 @@ func humanBytes(n int64) string {
 //   - --format=esm        Workers require ESM
 //   - --bundle            resolve all transitively-imported modules
 //   - --platform=node     use Node-style resolution (import "node:*")
-//   - --conditions=worker,node  prefer "worker" exports where present
+//   - --conditions=workerd,worker,node  prefer "workerd" then "worker"
+//     exports where present. The "workerd" condition is required for
+//     packages like pg-cloudflare and cloudflare:sockets consumers that
+//     ship runtime-specific entrypoints; without it they resolve to
+//     empty stubs at bundle time and fail at runtime with cryptic
+//     "X is not a constructor" errors.
 //   - --external:node:*   let the Worker runtime provide Node polyfills
 //   - --external:cloudflare:*   don't bundle CF platform modules
 //   - --loader:.json=json   dispatch.mjs imports manifest.json with JSON assertion
@@ -178,7 +183,7 @@ func runEsbuild(ctx context.Context, entry, out, cwd string, log *shared.Logger)
 		"--format=esm",
 		"--target=esnext",
 		"--main-fields=module,main",
-		"--conditions=worker,node",
+		"--conditions=workerd,worker,node",
 		"--external:node:*",
 		"--external:cloudflare:*",
 		"--loader:.node=copy",

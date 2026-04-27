@@ -49,7 +49,7 @@ func TestBuildScriptMetadata_PesastreamShape(t *testing.T) {
 		},
 	}
 
-	meta, err := buildScriptMetadata(cf, "default-bucket", "worker.mjs", noResolver)
+	meta, err := buildScriptMetadata(cf, "default-bucket", "worker.mjs", noResolver, nil)
 	if err != nil {
 		t.Fatalf("buildScriptMetadata: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestBuildScriptMetadata_PesastreamShape(t *testing.T) {
 }
 
 func TestBuildScriptMetadata_DefaultsAppliedWhenCloudflareBlockNil(t *testing.T) {
-	meta, err := buildScriptMetadata(nil, "auto-bucket", "worker.mjs", noResolver)
+	meta, err := buildScriptMetadata(nil, "auto-bucket", "worker.mjs", noResolver, nil)
 	if err != nil {
 		t.Fatalf("buildScriptMetadata: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestBuildScriptMetadata_UserR2OverridesAutoAssets(t *testing.T) {
 			R2: []config.CFR2Binding{{Name: "STATIC", Bucket: "user-bucket"}},
 		},
 	}
-	meta, err := buildScriptMetadata(cf, "auto-bucket", "worker.mjs", noResolver)
+	meta, err := buildScriptMetadata(cf, "auto-bucket", "worker.mjs", noResolver, nil)
 	if err != nil {
 		t.Fatalf("buildScriptMetadata: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestBuildScriptMetadata_HyperdriveRefUnresolvedErrors(t *testing.T) {
 			},
 		},
 	}
-	_, err := buildScriptMetadata(cf, "bucket", "worker.mjs", noResolver)
+	_, err := buildScriptMetadata(cf, "bucket", "worker.mjs", noResolver, nil)
 	if err == nil {
 		t.Fatal("expected error for ref with no resolver match")
 	}
@@ -156,7 +156,7 @@ func TestBuildScriptMetadata_HyperdriveRefResolvedToID(t *testing.T) {
 		}
 		return "", false
 	}
-	meta, err := buildScriptMetadata(cf, "bucket", "worker.mjs", resolver)
+	meta, err := buildScriptMetadata(cf, "bucket", "worker.mjs", resolver, nil)
 	if err != nil {
 		t.Fatalf("buildScriptMetadata: %v", err)
 	}
@@ -170,6 +170,42 @@ func TestBuildScriptMetadata_HyperdriveRefResolvedToID(t *testing.T) {
 // each migration step. We don't introspect the union directly; the JSON
 // round-trip in PesastreamShape covers the wire contract.
 var _ = workers.ScriptUpdateParamsMetadataMigrationsWorkersMultipleStepMigrations{}
+
+func TestBuildScriptMetadata_SecretsFoldedAsSecretText(t *testing.T) {
+	secrets := map[string]string{
+		"DATABASE_URL": "postgres://u:p@h/db",
+		"API_KEY":      "sk-live-xxx",
+	}
+	meta, err := buildScriptMetadata(nil, "auto-bucket", "worker.mjs", noResolver, secrets)
+	if err != nil {
+		t.Fatalf("buildScriptMetadata: %v", err)
+	}
+	raw, _ := json.Marshal(meta)
+	got := string(raw)
+	for _, frag := range []string{
+		`"name":"API_KEY"`, `"text":"sk-live-xxx"`, `"type":"secret_text"`,
+		`"name":"DATABASE_URL"`, `"text":"postgres://u:p@h/db"`,
+	} {
+		if !strings.Contains(got, frag) {
+			t.Errorf("secret_text binding missing fragment %q\n--- got ---\n%s", frag, got)
+		}
+	}
+	// API_KEY must appear before DATABASE_URL because emit order is sorted.
+	if strings.Index(got, `"name":"API_KEY"`) > strings.Index(got, `"name":"DATABASE_URL"`) {
+		t.Error("secret_text bindings not emitted in sorted order")
+	}
+}
+
+func TestBuildScriptMetadata_NilSecretsEmitsNoSecretText(t *testing.T) {
+	meta, err := buildScriptMetadata(nil, "auto-bucket", "worker.mjs", noResolver, nil)
+	if err != nil {
+		t.Fatalf("buildScriptMetadata: %v", err)
+	}
+	raw, _ := json.Marshal(meta)
+	if strings.Contains(string(raw), `"type":"secret_text"`) {
+		t.Errorf("nil secrets map produced secret_text bindings:\n%s", raw)
+	}
+}
 
 func TestZoneNameFromHostname(t *testing.T) {
 	cases := map[string]string{
