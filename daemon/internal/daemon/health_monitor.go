@@ -2,7 +2,7 @@ package daemon
 
 import (
 	"context"
-	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
+	"github.com/aynaash/nextdeploy/daemon/internal/types"
 	"time"
 )
 

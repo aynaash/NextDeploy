@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/config"
-	"github.com/Golangcodes/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/shared/nextcore"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/spf13/cobra"

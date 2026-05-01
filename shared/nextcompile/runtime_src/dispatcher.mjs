@@ -128,13 +128,19 @@ async function tryStaticAsset(env, pathname) {
  * dynamic table. Returns Response on match, null to fall through.
  */
 async function tryRouteDispatch(request, env, ctx, url, pathname, tables) {
+  // Cached prerendered HTML (SSG / ISR) is checked FIRST. App Router
+  // pages have a compiled module in staticTable AND a prerendered HTML
+  // file in R2 — but the compiled module can't be invoked directly
+  // (no default export, App Router runtime not available). Serving the
+  // HTML from R2 is correct for any route that prerendered, regardless
+  // of whether a compiled module also exists.
+  const cached = await tryCachedRender(env, tables.manifest, pathname);
+  if (cached) return cached;
+
   const staticEntry = tables.staticTable[pathname];
   if (staticEntry) {
     return invokeCompiled(staticEntry, request, env, ctx, { params: {} }, url);
   }
-
-  const cached = await tryCachedRender(env, tables.manifest, pathname);
-  if (cached) return cached;
 
   const dyn = matchDynamic(pathname, tables.dynamicTable);
   if (dyn) {

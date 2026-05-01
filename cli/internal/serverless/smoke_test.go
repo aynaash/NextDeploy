@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/config"
-	"github.com/Golangcodes/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/shared/nextcore"
 )
 
 func TestSmokeVerify_NoDomainSkips(t *testing.T) {

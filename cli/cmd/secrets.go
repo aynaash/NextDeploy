@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Golangcodes/nextdeploy/cli/internal/server"
-	"github.com/Golangcodes/nextdeploy/cli/internal/serverless"
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/cli/internal/server"
+	"github.com/aynaash/nextdeploy/cli/internal/serverless"
+	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/config"
 	"github.com/spf13/cobra"
 )
 
@@ -68,6 +68,137 @@ var secretsLoadCmd = &cobra.Command{
 		}
 		runSecretsLoad(filename)
 	},
+}
+
+var (
+	secretsPruneApply bool
+)
+
+var secretsPruneCmd = &cobra.Command{
+	Use:   "prune",
+	Short: "Delete remote secrets that are not in the local allowlist",
+	Long: `Diffs the secrets currently stored on your deploy target against the
+canonical local set (Doppler keys + .env + nextdeploy managed store) and
+removes anything on the remote that isn't owned by you.
+
+Useful after a leaky deploy that pushed shell environment variables (e.g.
+KITTY_PID, WAYLAND_DISPLAY, GNOME_DESKTOP_SESSION_ID) to a Cloudflare
+Worker. Prints the diff and exits without changes by default — pass
+--apply to actually delete.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		runSecretsPrune(secretsPruneApply)
+	},
+}
+
+// runSecretsPrune is the workhorse for `nextdeploy secrets prune`.
+//
+// Algorithm:
+//  1. Compute the local allowlist via serverless.LoadLocalSecrets — this
+//     is the same merge that `nextdeploy ship` would push (Doppler keys
+//     + .env + managed store).
+//  2. Fetch the remote secret name list via Provider.GetSecrets.
+//  3. Diff: anything on the remote that isn't in the local allowlist is
+//     a deletion candidate.
+//  4. Print the candidates. With --apply, call Provider.UnsetSecret for
+//     each.
+//
+// The dry-run-by-default policy is intentional: deleting secrets is
+// destructive and the user should see exactly what will be removed
+// before authorising it.
+func runSecretsPrune(apply bool) {
+	log := shared.PackageLogger("secrets", "🔐 SECRETS")
+	cfg, err := config.Load()
+	if err != nil {
+		log.Error("Failed to load config: %v", err)
+		os.Exit(1)
+	}
+
+	target := strings.ToLower(cfg.TargetType)
+	if target != "serverless" {
+		log.Error("`secrets prune` is only supported for serverless targets (got: %s)", target)
+		os.Exit(1)
+	}
+
+	providerName := "aws"
+	if cfg.Serverless != nil && cfg.Serverless.Provider != "" {
+		providerName = strings.ToLower(cfg.Serverless.Provider)
+	}
+
+	p, err := serverless.New(providerName, false)
+	if err != nil {
+		log.Error("Failed to initialize serverless provider: %v", err)
+		os.Exit(1)
+	}
+	ctx := context.Background()
+	if err := p.Initialize(ctx, cfg); err != nil {
+		log.Error("Failed to initialize provider: %v", err)
+		os.Exit(1)
+	}
+
+	local, err := serverless.LoadLocalSecrets(cfg)
+	if err != nil {
+		log.Error("Failed to load local secrets: %v", err)
+		os.Exit(1)
+	}
+	if len(local) == 0 {
+		log.Error(
+			"Local allowlist is empty — refusing to prune. " +
+				"This usually means Doppler is not configured or .env is missing. " +
+				"Pruning against an empty allowlist would delete every remote secret, " +
+				"which is almost certainly not what you want.",
+		)
+		os.Exit(1)
+	}
+
+	remote, err := p.GetSecrets(ctx, cfg.App.Name)
+	if err != nil {
+		log.Error("Failed to list remote secrets: %v", err)
+		os.Exit(1)
+	}
+
+	candidates := diffPruneCandidates(remote, local)
+	if len(candidates) == 0 {
+		log.Success("No leaked secrets — remote matches local allowlist (%d keys)", len(local))
+		return
+	}
+
+	log.Info("Local allowlist: %d keys", len(local))
+	log.Info("Remote: %d keys", len(remote))
+	log.Warn("Candidates to delete: %d", len(candidates))
+	for _, k := range candidates {
+		fmt.Printf("  - %s\n", k)
+	}
+
+	if !apply {
+		log.Info("Dry-run only. Re-run with `--apply` to delete these from the remote.")
+		return
+	}
+
+	log.Info("Applying — deleting %d secrets...", len(candidates))
+	deleted, failed := 0, 0
+	for _, k := range candidates {
+		if err := p.UnsetSecret(ctx, cfg.App.Name, k); err != nil {
+			log.Warn("Failed to delete %s: %v", k, err)
+			failed++
+			continue
+		}
+		deleted++
+	}
+	log.Success("Pruned %d secrets (%d failures)", deleted, failed)
+}
+
+// diffPruneCandidates returns the remote secret names that are absent
+// from the local allowlist, sorted ascending so the dry-run output is
+// stable across runs.
+func diffPruneCandidates(remote, local map[string]string) []string {
+	var out []string
+	for k := range remote {
+		if _, ok := local[k]; !ok {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func runSecretAction(action string, args []string) {
@@ -278,5 +409,9 @@ func init() {
 	secretsCmd.AddCommand(secretsListCmd)
 	secretsCmd.AddCommand(secretsUnsetCmd)
 	secretsCmd.AddCommand(secretsLoadCmd)
+
+	secretsPruneCmd.Flags().BoolVar(&secretsPruneApply, "apply", false, "Actually delete the candidates (default is dry-run)")
+	secretsCmd.AddCommand(secretsPruneCmd)
+
 	rootCmd.AddCommand(secretsCmd)
 }

@@ -3,7 +3,7 @@ package cmd
 import (
 	"testing"
 
-	"github.com/Golangcodes/nextdeploy/cli/internal/serverless"
+	"github.com/aynaash/nextdeploy/cli/internal/serverless"
 )
 
 func TestFilterPlanByModules(t *testing.T) {

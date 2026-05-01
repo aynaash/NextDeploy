@@ -1,5 +1,6 @@
 # Ideas
 
+
 Loose collection of in-progress design notes for nextdeploy. Each section is one
 self-contained idea; not a roadmap, not committed work. Promote to a real doc
 (like `CLOUDFLARE_PARITY.md`) when an idea graduates.

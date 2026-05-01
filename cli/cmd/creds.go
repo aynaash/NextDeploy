@@ -10,8 +10,8 @@ import (
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/credstore"
+	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/credstore"
 )
 
 // providerSchemas declares the credential fields each supported provider has.

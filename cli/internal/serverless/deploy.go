@@ -2,18 +2,20 @@ package serverless
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/Golangcodes/nextdeploy/internal/packaging"
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/config"
-	"github.com/Golangcodes/nextdeploy/shared/envstore"
-	"github.com/Golangcodes/nextdeploy/shared/nextcore"
-	"github.com/Golangcodes/nextdeploy/shared/secrets"
+	"github.com/aynaash/nextdeploy/internal/packaging"
+	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/shared/envstore"
+	"github.com/aynaash/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/shared/secrets"
 )
 
 // New returns a new serverless provider based on the provider name.
@@ -189,6 +191,13 @@ func Rollback(ctx context.Context, cfg *config.NextDeployConfig, opts RollbackOp
 	return nil
 }
 
+// LoadLocalSecrets is the exported alias for loadLocalSecrets, used by
+// CLI commands outside this package (e.g. `nextdeploy secrets prune`)
+// that need to compute the canonical local secret set.
+func LoadLocalSecrets(cfg *config.NextDeployConfig) (map[string]string, error) {
+	return loadLocalSecrets(cfg)
+}
+
 // loadLocalSecrets merges secrets from every supported source for the current
 // project. Precedence (lowest → highest):
 //
@@ -270,18 +279,25 @@ func loadLocalSecrets(cfg *config.NextDeployConfig) (map[string]string, error) {
 //         doppler:
 //           inject_env: true
 //
-//     This is useful when the env is populated by something other than
-//     `doppler run` — for example a CI step that calls
-//     `doppler secrets download --no-file --format=env > $GITHUB_ENV`.
+// Filtering strategy — allowlist, not denylist:
 //
-// To avoid leaking the local shell into the cloud, we filter out variables
-// that are clearly system, tooling, or nextdeploy-internal. Doppler-injected
-// secrets are by convention SCREAMING_SNAKE_CASE app vars, so the heuristic
-// is: keep upper-case identifiers that don't match any deny-list pattern.
+// We shell out to `doppler secrets --json` (which inherits DOPPLER_*
+// from our env) to get the canonical list of Doppler-managed key names
+// for the active project/config, then keep only env vars whose names
+// appear in that list. This guarantees the user's local shell
+// environment (KITTY_PID, WAYLAND_DISPLAY, GNOME_DESKTOP_SESSION_ID, …)
+// can never leak into a deploy, even if a future shell adds a brand-new
+// SCREAMING_SNAKE_CASE variable that no denylist anticipates.
 //
-// The second return value is a short label describing the activation source,
-// used for logging. Empty string means "Doppler not active, nothing was
-// harvested".
+// Fallback path: when the doppler CLI is unavailable or the call fails
+// (no network, expired token), we revert to the legacy denylist
+// heuristic and emit a loud warning so the operator knows what's
+// happening. Better to ship with the conservative filter than to fail
+// the deploy outright.
+//
+// The second return value is a short label describing the activation
+// source, used for logging. Empty string means "Doppler not active,
+// nothing was harvested".
 func harvestDopplerEnv(cfg *config.NextDeployConfig) (map[string]string, string) {
 	dopplerProject := os.Getenv("DOPPLER_PROJECT")
 	dopplerConfig := os.Getenv("DOPPLER_CONFIG")
@@ -295,19 +311,6 @@ func harvestDopplerEnv(cfg *config.NextDeployConfig) (map[string]string, string)
 		return nil, ""
 	}
 
-	out := map[string]string{}
-	for _, kv := range os.Environ() {
-		i := strings.IndexByte(kv, '=')
-		if i <= 0 {
-			continue
-		}
-		k, v := kv[:i], kv[i+1:]
-		if !shouldHarvestEnvKey(k) {
-			continue
-		}
-		out[k] = v
-	}
-
 	source := "config opt-in"
 	switch {
 	case autoDetected && dopplerProject != "" && dopplerConfig != "":
@@ -315,7 +318,94 @@ func harvestDopplerEnv(cfg *config.NextDeployConfig) (map[string]string, string)
 	case autoDetected:
 		source = "doppler run"
 	}
+
+	log := shared.PackageLogger("serverless", "🔐 SECRETS")
+
+	allowlist, allowErr := dopplerKeyAllowlist()
+	envMap := envSliceToMap(os.Environ())
+
+	if allowErr != nil {
+		log.Warn("Could not query `doppler secrets --json` for allowlist (%v) — "+
+			"falling back to denylist heuristic. Some local shell vars may leak; "+
+			"prefer fixing the doppler CLI or running outside `doppler run -- ...`", allowErr)
+		return harvestByDenylist(envMap), source
+	}
+
+	out := make(map[string]string, len(allowlist))
+	for k := range allowlist {
+		// Skip Doppler's own bookkeeping vars even if they appear in the
+		// allowlist — DOPPLER_PROJECT/CONFIG/TOKEN must not be pushed to
+		// the application runtime.
+		if strings.HasPrefix(k, "DOPPLER_") {
+			continue
+		}
+		if v, ok := envMap[k]; ok {
+			out[k] = v
+		}
+	}
 	return out, source
+}
+
+// dopplerKeyAllowlist queries the local doppler CLI for the set of
+// secret names managed by the active project/config. The CLI inherits
+// DOPPLER_PROJECT/DOPPLER_CONFIG/DOPPLER_TOKEN from our process env, so
+// this matches whatever `doppler run` would inject.
+//
+// Returns (set, nil) on success, (nil, err) when the CLI is missing,
+// the call fails, or the JSON shape is unexpected. The caller is
+// expected to fall back to a heuristic on error rather than abort.
+func dopplerKeyAllowlist() (map[string]struct{}, error) {
+	bin, err := exec.LookPath("doppler")
+	if err != nil {
+		return nil, fmt.Errorf("doppler CLI not on PATH: %w", err)
+	}
+	// `doppler secrets --json` returns an object keyed by secret name.
+	// Values contain {computed, computedValueType, computedVisibility,
+	// note, ...}. We only need the keys.
+	cmd := exec.Command(bin, "secrets", "--json", "--no-check-version") // #nosec G204 — bin is from LookPath, args are static
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("`doppler secrets --json`: %w", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, fmt.Errorf("parse doppler json: %w", err)
+	}
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("doppler returned an empty key list (project/config not selected?)")
+	}
+	keys := make(map[string]struct{}, len(raw))
+	for k := range raw {
+		keys[k] = struct{}{}
+	}
+	return keys, nil
+}
+
+// harvestByDenylist is the legacy filter used as a fallback when the
+// doppler CLI can't be queried. Kept as-is so the deploy still ships
+// when offline; the allowlist path above is the preferred filter.
+func harvestByDenylist(envMap map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range envMap {
+		if !shouldHarvestEnvKey(k) {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// envSliceToMap turns os.Environ() output into a name→value map.
+func envSliceToMap(env []string) map[string]string {
+	out := make(map[string]string, len(env))
+	for _, kv := range env {
+		i := strings.IndexByte(kv, '=')
+		if i <= 0 {
+			continue
+		}
+		out[kv[:i]] = kv[i+1:]
+	}
+	return out
 }
 
 // shouldHarvestEnvKey returns true when an environment variable looks like a

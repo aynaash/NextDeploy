@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
-	"github.com/Golangcodes/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/daemon/internal/types"
+	"github.com/aynaash/nextdeploy/shared/config"
 
 	"gopkg.in/yaml.v3"
 )

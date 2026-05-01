@@ -29,7 +29,7 @@ import (
 // ── constants ────────────────────────────────────────────────────────────────
 
 const (
-	modulePath = "github.com/Golangcodes/nextdeploy"
+	modulePath = "github.com/aynaash/nextdeploy"
 	binDir     = "bin"
 	distDir    = "dist"
 	cliPkg     = "./cli"
@@ -127,7 +127,36 @@ func ensureTool(name, installSpec string) error {
 		return nil
 	}
 	fmt.Printf("Installing %s...\n", name)
-	return sh.Run("go", "install", installSpec)
+	if err := sh.Run("go", "install", installSpec); err != nil {
+		return err
+	}
+	// After `go install`, the binary lives in $GOPATH/bin (or
+	// $GOBIN if set). If that directory isn't already on PATH,
+	// prepend it for this process so subsequent sh.Run calls
+	// resolve the tool by bare name. Without this, a fresh user
+	// who never added ~/go/bin to PATH gets a confusing
+	// "executable file not found in $PATH" right after we tell
+	// them we just installed it.
+	binDir, err := sh.Output("go", "env", "GOBIN")
+	if err == nil && strings.TrimSpace(binDir) == "" {
+		binDir, err = sh.Output("go", "env", "GOPATH")
+		if err == nil {
+			binDir = filepath.Join(strings.TrimSpace(binDir), "bin")
+		}
+	}
+	if err != nil || binDir == "" {
+		binDir = filepath.Join(home(), "go", "bin")
+	}
+	binDir = strings.TrimSpace(binDir)
+	pathSep := string(os.PathListSeparator)
+	currentPath := os.Getenv("PATH")
+	if !strings.Contains(pathSep+currentPath+pathSep, pathSep+binDir+pathSep) {
+		_ = os.Setenv("PATH", binDir+pathSep+currentPath)
+	}
+	if _, lookErr := exec.LookPath(name); lookErr != nil {
+		return fmt.Errorf("%s installed to %s but still not resolvable: %w", name, binDir, lookErr)
+	}
+	return nil
 }
 
 // ensureDevBinOnPath appends ~/.nextdeploy/bin to the user's ~/.bashrc if not

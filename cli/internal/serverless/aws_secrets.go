@@ -12,7 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	smTypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
 
-	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared"
 )
 
 // SetSecret performs an optimistic read-modify-write that survives concurrent

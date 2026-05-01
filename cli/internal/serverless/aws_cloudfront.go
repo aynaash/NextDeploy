@@ -13,7 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudfront"
 	cfTypes "github.com/aws/aws-sdk-go-v2/service/cloudfront/types"
 
-	cfgTypes "github.com/Golangcodes/nextdeploy/shared/config"
+	cfgTypes "github.com/aynaash/nextdeploy/shared/config"
 )
 
 var cfDistributionIDPattern = regexp.MustCompile(`^E[A-Z0-9]{10,14}$`)

@@ -10,7 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/smithy-go"
 
-	"github.com/Golangcodes/nextdeploy/internal/packaging"
+	"github.com/aynaash/nextdeploy/internal/packaging"
 )
 
 type fakeUploader struct {

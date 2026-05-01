@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/updater"
+	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/updater"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
@@ -64,7 +64,7 @@ Deploy your Next.js app to *any* VPS — with SSL, logs, and zero downtime.
 			fmt.Printf("  %s - Deploy your app on the VPS\n\n", command("nextdeploy ship"))
 
 			fmt.Printf("%s %s\n\n",
-				warning("Docs →"), command("https://github.com/Golangcodes/nextdeploy"),
+				warning("Docs →"), command("https://github.com/aynaash/nextdeploy"),
 			)
 		}
 	},
@@ -84,7 +84,7 @@ func Execute() {
 	fmt.Println(strings.Repeat("─", 60))
 	fmt.Printf("%s %s\n",
 		command("Need help?"),
-		warning("Visit https://github.com/Golangcodes/nextdeploy"),
+		warning("Visit https://github.com/aynaash/nextdeploy"),
 	)
 	fmt.Println(strings.Repeat("─", 60))
 	fmt.Println()

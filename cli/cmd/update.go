@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/updater"
+	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/updater"
 	"github.com/spf13/cobra"
 )
 

@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Golangcodes/nextdeploy/daemon/internal/config"
-	"github.com/Golangcodes/nextdeploy/daemon/internal/logging"
-	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/updater"
+	"github.com/aynaash/nextdeploy/daemon/internal/config"
+	"github.com/aynaash/nextdeploy/daemon/internal/logging"
+	"github.com/aynaash/nextdeploy/daemon/internal/types"
+	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/updater"
 )
 
 const systemctlPath = "/usr/bin/systemctl" // Assuming a default path for systemctl

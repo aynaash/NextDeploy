@@ -8,11 +8,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Golangcodes/nextdeploy/cli/internal/logs"
-	"github.com/Golangcodes/nextdeploy/cli/internal/server"
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/config"
-	"github.com/Golangcodes/nextdeploy/shared/sensitive"
+	"github.com/aynaash/nextdeploy/cli/internal/logs"
+	"github.com/aynaash/nextdeploy/cli/internal/server"
+	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/shared/sensitive"
 	"github.com/spf13/cobra"
 )
 

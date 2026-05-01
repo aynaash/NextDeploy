@@ -1,7 +1,7 @@
 package nextcore
 
 import (
-	"github.com/Golangcodes/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/shared/config"
 )
 
 type OutputMode string

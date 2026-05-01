@@ -7,11 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strings"
 
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/config"
-	"github.com/Golangcodes/nextdeploy/shared/nextcompile"
-	"github.com/Golangcodes/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/shared/nextcompile"
+	"github.com/aynaash/nextdeploy/shared/nextcore"
 )
 
 // BuildWorkerBundle adapts a Next.js standalone build into a single
@@ -70,7 +72,8 @@ func BuildWorkerBundle(
 	logBundleSummary(log, bundle)
 
 	esbuildOut := filepath.Join(outDir, "worker.mjs")
-	if err := runEsbuild(ctx, bundle.EntryPath, esbuildOut, standaloneDir, log); err != nil {
+	metaPath := filepath.Join(outDir, "_nextdeploy", "esbuild-meta.json")
+	if err := runEsbuild(ctx, bundle.EntryPath, esbuildOut, metaPath, standaloneDir, log); err != nil {
 		return "", fmt.Errorf("esbuild: %w", err)
 	}
 
@@ -79,6 +82,7 @@ func BuildWorkerBundle(
 		return "", fmt.Errorf("bundle output missing: %w", err)
 	}
 	log.Info("Worker bundle ready: %s (%.1f KB)", esbuildOut, float64(info.Size())/1024)
+	logBundleTopContributors(log, metaPath, esbuildOut)
 	return esbuildOut, nil
 }
 
@@ -151,6 +155,112 @@ func humanBytes(n int64) string {
 	}
 }
 
+// logBundleTopContributors parses esbuild's --metafile JSON and prints the
+// modules contributing the most bytes to the final Worker bundle. This is
+// the answer to "why is worker.mjs huge?" — operators get a one-screen
+// view without needing to crack open the metafile by hand.
+//
+// Best-effort: a missing or malformed metafile only suppresses the report;
+// it never fails the build. The metafile we read is the same one esbuild
+// emits via --metafile in runEsbuild, located relative to the standalone
+// dir.
+func logBundleTopContributors(log *shared.Logger, metaPath, bundlePath string) {
+	const topN = 10
+
+	data, err := os.ReadFile(metaPath) // #nosec G304 — reading our own emitted metafile
+	if err != nil {
+		log.Debug("esbuild metafile not readable (%v) — skipping size report", err)
+		return
+	}
+	var meta struct {
+		Outputs map[string]struct {
+			Bytes  int64 `json:"bytes"`
+			Inputs map[string]struct {
+				BytesInOutput int64 `json:"bytesInOutput"`
+			} `json:"inputs"`
+		} `json:"outputs"`
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		log.Debug("esbuild metafile parse failed (%v) — skipping size report", err)
+		return
+	}
+
+	// Find the entry corresponding to the Worker bundle. esbuild keys
+	// outputs by path relative to its cwd (standaloneDir); the metafile
+	// is loaded after the build, so we match by basename to stay robust
+	// against absolute-vs-relative path differences.
+	wantBase := filepath.Base(bundlePath)
+	var inputs map[string]int64
+	var totalBytes int64
+	for outPath, out := range meta.Outputs {
+		if filepath.Base(outPath) != wantBase {
+			continue
+		}
+		totalBytes = out.Bytes
+		inputs = make(map[string]int64, len(out.Inputs))
+		for in, info := range out.Inputs {
+			inputs[in] = info.BytesInOutput
+		}
+		break
+	}
+	if len(inputs) == 0 {
+		return
+	}
+
+	type pair struct {
+		path  string
+		bytes int64
+	}
+	pairs := make([]pair, 0, len(inputs))
+	for p, b := range inputs {
+		pairs = append(pairs, pair{p, b})
+	}
+	sort.Slice(pairs, func(i, j int) bool { return pairs[i].bytes > pairs[j].bytes })
+
+	if len(pairs) > topN {
+		pairs = pairs[:topN]
+	}
+
+	log.Info("─────────── bundle top contributors ───────────")
+	for _, p := range pairs {
+		pct := 0.0
+		if totalBytes > 0 {
+			pct = float64(p.bytes) / float64(totalBytes) * 100
+		}
+		log.Info("  %8s  %5.1f%%  %s", humanBytes(p.bytes), pct, shortenInputPath(p.path))
+	}
+	log.Info("──────────────────────────────────────────────")
+}
+
+// shortenInputPath collapses esbuild's input keys to a more readable form.
+// esbuild reports paths relative to its cwd, sometimes with "../" prefixes
+// or workspace-internal redirects; the head of the path is rarely what an
+// operator cares about — they want to know which compiled module / runtime
+// piece is dominating.
+func shortenInputPath(p string) string {
+	// Strip leading "../" climbs — they're noise to a reader.
+	for strings.HasPrefix(p, "../") {
+		p = p[3:]
+	}
+	return p
+}
+
+// optionalExternalPackages lists modules Next.js conditionally requires
+// at runtime via try/catch'd `require()` calls. Each is loaded only when
+// the host app opts in (e.g. by installing the peer dep). esbuild can't
+// see the surrounding try/catch and errors out on the unresolved import,
+// so we mark them external. The Worker runtime never resolves them
+// (because they aren't installed); the require call throws inside Next's
+// catch block and the fallback path runs.
+//
+// Keep this list narrow — every entry is a Worker that won't try to use
+// the package's real implementation. If we ever need one of these to
+// actually work, the fix is to install it as a real dependency, not
+// remove it from this list.
+var optionalExternalPackages = []string{
+	"@opentelemetry/api", // Next's tracer fallback when tracing isn't enabled
+}
+
 // runEsbuild invokes `npx esbuild` against the generated entrypoint. Flags
 // are tuned for Cloudflare Workers:
 //
@@ -166,13 +276,29 @@ func humanBytes(n int64) string {
 //   - --external:node:*   let the Worker runtime provide Node polyfills
 //   - --external:cloudflare:*   don't bundle CF platform modules
 //   - --loader:.json=json   dispatch.mjs imports manifest.json with JSON assertion
+//   - --minify-syntax + --minify-whitespace + --legal-comments=none:
+//     shrink the output without renaming identifiers. Keeping names
+//     readable matters because the same bundle is what shows up in
+//     Worker stack traces; a 3–5× byte reduction is worth the slight
+//     LOC cost vs. full --minify, which would mangle identifiers and
+//     make tail-time debugging miserable.
+//   - --metafile     dropped beside the bundle so we can report which
+//     modules contributed the most bytes (logBundleTopContributors).
 //
 // cwd is the standalone dir so relative imports in the compiled Next tree
 // resolve correctly.
-func runEsbuild(ctx context.Context, entry, out, cwd string, log *shared.Logger) error {
+func runEsbuild(ctx context.Context, entry, out, metaPath, cwd string, log *shared.Logger) error {
 	// Aliases redirect Next's public module specifiers to our runtime
 	// shims. Path is relative to the standalone dir (esbuild's cwd).
 	runtimeRoot := ".nextdeploy-cf/_nextdeploy/runtime"
+
+	// metaPath is given to us as absolute; esbuild resolves --metafile
+	// relative to its cwd. Make it relative so the path lands where the
+	// caller expects (and stays readable in the esbuild log line).
+	relMeta, err := filepath.Rel(cwd, metaPath)
+	if err != nil {
+		relMeta = metaPath
+	}
 
 	args := []string{
 		"--yes",
@@ -188,10 +314,24 @@ func runEsbuild(ctx context.Context, entry, out, cwd string, log *shared.Logger)
 		"--external:cloudflare:*",
 		"--loader:.node=copy",
 		"--loader:.json=json",
+		"--minify-syntax",
+		"--minify-whitespace",
+		"--legal-comments=none",
+		"--metafile=" + relMeta,
 		"--alias:next/cache=" + filepath.Join(runtimeRoot, "next_shims", "cache.mjs"),
 		"--alias:next/headers=" + filepath.Join(runtimeRoot, "next_shims", "headers.mjs"),
 		"--alias:next/server=" + filepath.Join(runtimeRoot, "next_shims", "server.mjs"),
 		"--outfile=" + out,
+	}
+	// Optional Next.js peer dependencies that aren't part of the
+	// standard bundle and are imported via try/catch'd require() calls
+	// in Next's source. Marking them external lets the bundle complete;
+	// at runtime the `require()` throws and Next's catch fallback runs.
+	//
+	// Add new entries here as we encounter them — each is one user-deploy
+	// failure away from being added.
+	for _, pkg := range optionalExternalPackages {
+		args = append(args, "--external:"+pkg)
 	}
 
 	log.Info("Bundling Worker via esbuild (entry: %s)...", filepath.Base(entry))

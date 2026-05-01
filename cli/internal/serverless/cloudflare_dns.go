@@ -6,19 +6,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Golangcodes/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/shared/config"
 
 	"github.com/cloudflare/cloudflare-go/v6"
 	"github.com/cloudflare/cloudflare-go/v6/dns"
 )
 
-// ensureDNSRecord creates a DNS record if one doesn't already exist for
-// (zone, name, type), or updates it in-place if content/ttl/proxied drift.
-//
-// Match key is (name, type) — CF allows multiple records of different types
-// on the same name (e.g. A + AAAA), but we treat (name,type) as the unique
-// identifier for declarative purposes. If you need multiple A records on the
-// same name (round-robin), declare them outside NextDeploy.
 func (p *CloudflareProvider) ensureDNSRecord(ctx context.Context, decl config.CFDNSRecord) error {
 	if decl.Zone == "" {
 		return errors.New("dns: zone is required")
@@ -126,11 +119,6 @@ func dnsRecordMatches(r dns.RecordResponse, content string, ttl int, proxied boo
 	return r.Content == content && int(r.TTL) == ttl && r.Proxied == proxied
 }
 
-// buildDNSRecordBody returns the right type-specific param body for the
-// supported record types. The same struct value satisfies both
-// RecordNewParamsBodyUnion and RecordEditParamsBodyUnion (the SDK uses two
-// sentinel interfaces but the same set of types implements both), so we
-// return it twice rather than duplicate the switch.
 func buildDNSRecordBody(name, recType, content string, ttl int, proxied bool) (dns.RecordNewParamsBodyUnion, dns.RecordEditParamsBodyUnion, error) {
 	switch recType {
 	case "A":

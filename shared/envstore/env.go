@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared"
 )
 
 type Store[T any] struct {

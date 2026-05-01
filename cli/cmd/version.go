@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared"
 	"github.com/spf13/cobra"
 )
 

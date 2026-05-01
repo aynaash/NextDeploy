@@ -1,4 +1,4 @@
-module github.com/Golangcodes/nextdeploy
+module github.com/aynaash/nextdeploy
 
 go 1.25.0
 

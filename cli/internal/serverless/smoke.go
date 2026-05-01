@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/config"
-	"github.com/Golangcodes/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/shared/nextcore"
 )
 
 // SmokeOpts tunes the post-deploy smoke check. Defaults are correct for

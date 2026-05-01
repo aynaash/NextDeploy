@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Golangcodes/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/shared/config"
 )
 
 func TestResolveHyperdriveOrigin_PostgresFullURL(t *testing.T) {

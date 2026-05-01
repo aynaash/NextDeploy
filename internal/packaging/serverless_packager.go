@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/nextcore"
 )
 
 // bridgeJS is the Node.js shim that the Lambda runtime executes. It:
@@ -162,12 +162,37 @@ func (p *Packager) collectS3Assets() ([]S3Asset, error) {
 		})
 	}
 
-	// 3. Prerendered routes
-	for _, route := range p.payload.RouteInfo.StaticRoutes {
+	// 3. Prerendered routes.
+	//
+	// Three separate sources can declare a prerendered HTML for a route:
+	//   - StaticRoutes: routes-manifest.json's staticRoutes (mostly Pages
+	//     Router; in App Router this is often just /_app, /_error).
+	//   - SSGRoutes:    prerender-manifest.json entries with no revalidate
+	//     window (Next 16 App Router default for fully-static pages).
+	//   - ISRRoutes:    prerender-manifest.json entries with a revalidate
+	//     window.
+	// Iterating only the first two missed App Router landing pages — the
+	// manifest then claimed an SSG entry the runtime tried to fetch from
+	// R2 but the packager never uploaded, producing a silent fall-through
+	// to the compiled-module dispatch path (which can't invoke an App
+	// Router page). Dedupe by route so addPrerenderedAsset isn't asked to
+	// stat + queue the same path twice.
+	seen := make(map[string]struct{})
+	queue := func(route string) {
+		if _, dup := seen[route]; dup {
+			return
+		}
+		seen[route] = struct{}{}
 		p.addPrerenderedAsset(&assets, route)
 	}
+	for _, route := range p.payload.RouteInfo.StaticRoutes {
+		queue(route)
+	}
+	for route := range p.payload.RouteInfo.SSGRoutes {
+		queue(route)
+	}
 	for route := range p.payload.RouteInfo.ISRRoutes {
-		p.addPrerenderedAsset(&assets, route)
+		queue(route)
 	}
 
 	// 4. ISR Tag Map (if enabled/built)
@@ -185,10 +210,19 @@ func (p *Packager) collectS3Assets() ([]S3Asset, error) {
 }
 
 func (p *Packager) addPrerenderedAsset(assets *[]S3Asset, routePath string) {
-	// Root route "/" maps to index.html
+	// Root route "/" maps to index.html — both for the R2 key and for
+	// locating the on-disk file. filepath.Join(prefix, "/") collapses to
+	// just `prefix`, which would make us look for `.next/server/app.html`
+	// (doesn't exist) instead of `.next/server/app/index.html`. We
+	// normalize routePath to "/index" for the FS probe but keep the R2
+	// key at "index.html" — the runtime's lookup pulls it by R2 key.
 	s3KeyBase := strings.TrimPrefix(routePath, "/")
 	if s3KeyBase == "" {
 		s3KeyBase = "index"
+	}
+	fsRoutePath := routePath
+	if fsRoutePath == "/" || fsRoutePath == "" {
+		fsRoutePath = "/index"
 	}
 
 	// Standalone output structure: .next/standalone/.next/server/
@@ -199,8 +233,10 @@ func (p *Packager) addPrerenderedAsset(assets *[]S3Asset, routePath string) {
 		filepath.Join(standaloneNext, "server", "pages"),
 	}
 
+	pkgLog := shared.PackageLogger("packaging", "📦 PKG")
+	htmlAdded := false
 	for _, prefix := range prefixes {
-		serverPath := filepath.Join(prefix, routePath)
+		serverPath := filepath.Join(prefix, fsRoutePath)
 
 		htmlPath := serverPath + ".html"
 		if _, err := os.Stat(htmlPath); err == nil {
@@ -210,6 +246,8 @@ func (p *Packager) addPrerenderedAsset(assets *[]S3Asset, routePath string) {
 				CacheControl: "public, max-age=0, must-revalidate",
 				ContentType:  "text/html; charset=utf-8",
 			})
+			htmlAdded = true
+			pkgLog.Debug("Prerendered HTML queued: %s → %s", routePath, s3KeyBase+".html")
 		}
 
 		rscPath := serverPath + ".rsc"
@@ -221,6 +259,10 @@ func (p *Packager) addPrerenderedAsset(assets *[]S3Asset, routePath string) {
 				ContentType:  "text/x-component",
 			})
 		}
+	}
+	if !htmlAdded {
+		pkgLog.Warn("Prerendered HTML missing for route %s — looked under %s and %s. The runtime will fall through to the live dispatcher.",
+			routePath, prefixes[0], prefixes[1])
 	}
 }
 

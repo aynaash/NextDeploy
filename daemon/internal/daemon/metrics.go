@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared"
 )
 
 var (

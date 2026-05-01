@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
+	"github.com/aynaash/nextdeploy/daemon/internal/types"
 )
 
 func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Response {

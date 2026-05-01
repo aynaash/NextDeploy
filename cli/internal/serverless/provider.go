@@ -3,9 +3,9 @@ package serverless
 import (
 	"context"
 
-	"github.com/Golangcodes/nextdeploy/internal/packaging"
-	"github.com/Golangcodes/nextdeploy/shared/config"
-	"github.com/Golangcodes/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/internal/packaging"
+	"github.com/aynaash/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/shared/nextcore"
 )
 
 // RollbackOptions controls how a rollback selects its target deployment.

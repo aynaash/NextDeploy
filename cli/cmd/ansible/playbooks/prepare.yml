@@ -656,7 +656,7 @@
       ansible.builtin.shell: |
         set -euo pipefail
         curl -fsSL --retry 3 --retry-delay 2 \
-          https://api.github.com/repos/Golangcodes/nextdeploy/releases/latest \
+          https://api.github.com/repos/aynaash/nextdeploy/releases/latest \
           | grep '"tag_name"' | head -1 \
           | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/'
       args:
@@ -670,7 +670,7 @@
         set -euo pipefail
         TAG="{{ latest_tag.stdout | trim }}"
         ARCH="{{ ansible_architecture | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}"
-        URL="https://github.com/Golangcodes/nextdeploy/releases/download/${TAG}/nextdeployd-linux-${ARCH}"
+        URL="https://github.com/aynaash/nextdeploy/releases/download/${TAG}/nextdeployd-linux-${ARCH}"
 
         echo "Downloading nextdeployd ${TAG} for linux/${ARCH}..."
         curl -fsSL --retry 3 --retry-delay 2 "${URL}" -o /tmp/nextdeployd
@@ -699,7 +699,7 @@
         export GOPATH="${HOME}/go"
         export PATH="${GOPATH}/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         echo "Building nextdeployd from source (go install)..."
-        go install github.com/Golangcodes/nextdeploy/daemon/cmd/nextdeployd@latest
+        go install github.com/aynaash/nextdeploy/daemon/cmd/nextdeployd@latest
         sudo install -m 0755 "${GOPATH}/bin/nextdeployd" /usr/local/bin/nextdeployd
       args:
         executable: /bin/bash
@@ -733,7 +733,7 @@
         content: |
           [Unit]
           Description=NextDeploy Daemon
-          Documentation=https://nextdeploy.one/docs
+          Documentation=https://nextdeploy.org/docs
           After=network.target caddy.service
           Wants=caddy.service
 

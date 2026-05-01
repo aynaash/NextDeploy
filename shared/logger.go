@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Golangcodes/nextdeploy/shared/sensitive"
+	"github.com/aynaash/nextdeploy/shared/sensitive"
 )
 
 type LogLevel int

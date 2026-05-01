@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Golangcodes/nextdeploy/cli/internal/server"
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/config"
-	"github.com/Golangcodes/nextdeploy/shared/updater"
+	"github.com/aynaash/nextdeploy/cli/internal/server"
+	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/shared/updater"
 	"github.com/spf13/cobra"
 )
 

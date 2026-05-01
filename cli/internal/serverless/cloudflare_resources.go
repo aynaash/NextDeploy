@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/Golangcodes/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/shared/config"
 )
 
 // resourceMap holds the IDs of resources provisioned by ensure* methods so

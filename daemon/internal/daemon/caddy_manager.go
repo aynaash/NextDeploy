@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Golangcodes/nextdeploy/shared/caddy"
-	"github.com/Golangcodes/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/shared/caddy"
+	"github.com/aynaash/nextdeploy/shared/nextcore"
 )
 
 const mainCaddyfilePath = "/etc/caddy/Caddyfile"

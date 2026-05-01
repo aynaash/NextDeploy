@@ -78,7 +78,12 @@ func Compile(ctx context.Context, opts CompileOpts) (*CompiledBundle, error) {
 	}
 
 	// Phase 8 — emit dispatch.mjs (build-time route table + action loaders).
-	dispatchPath, err := EmitDispatchTable(kept, actionManifest, opts.OutDir)
+	// The compiled paths in `kept` are relative to opts.StandaloneDir, and
+	// dispatch.mjs lives at <opts.OutDir>/_nextdeploy/dispatch.mjs; when
+	// OutDir is nested inside StandaloneDir (as the cloudflare adapter
+	// does for isolation), the import-prefix has to walk back through the
+	// nesting to reach the standalone root.
+	dispatchPath, err := EmitDispatchTable(kept, actionManifest, opts.OutDir, opts.StandaloneDir)
 	if err != nil {
 		return nil, fmt.Errorf("emit dispatch: %w", err)
 	}

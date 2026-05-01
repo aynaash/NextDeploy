@@ -19,13 +19,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Golangcodes/nextdeploy/shared/sensitive"
+	"github.com/aynaash/nextdeploy/shared/sensitive"
 
-	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared"
 )
 
 const (
-	githubOwner = "Golangcodes"
+	githubOwner = "aynaash"
 	githubRepo  = "nextdeploy"
 	apiURL      = "https://api.github.com/repos/" + githubOwner + "/" + githubRepo + "/releases/latest"
 	lockFile    = "/tmp/nextdeploy-update.lock"

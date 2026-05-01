@@ -1,9 +1,9 @@
 package serverless
 
 import (
-	"github.com/Golangcodes/nextdeploy/shared/config"
-	"github.com/Golangcodes/nextdeploy/shared/nextcompile"
-	"github.com/Golangcodes/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/shared/nextcompile"
+	"github.com/aynaash/nextdeploy/shared/nextcore"
 )
 
 // toCompilePayload translates nextcore.NextCorePayload (+ nextdeploy config)

@@ -3,7 +3,7 @@ package serverless
 import (
 	"testing"
 
-	"github.com/Golangcodes/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/shared/nextcore"
 )
 
 func TestToCompilePayload_MapsAllFields(t *testing.T) {

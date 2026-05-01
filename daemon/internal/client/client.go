@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
+	"github.com/aynaash/nextdeploy/daemon/internal/types"
 )
 
 type ClientConfig struct {

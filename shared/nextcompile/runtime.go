@@ -14,7 +14,7 @@ import (
 // modules into one worker.mjs.
 //
 // Why embed instead of copy at install time: `go install
-// github.com/Golangcodes/nextdeploy/cli` produces a self-contained binary
+// github.com/aynaash/nextdeploy/cli` produces a self-contained binary
 // with no on-disk sibling files. Embedding is the only way to keep that
 // property. Embedded size is a few KB — trivial vs. the rest of the binary.
 //

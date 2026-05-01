@@ -13,13 +13,13 @@
 //
 // Author: Yussuf Hersi <yussuf@hersi.dev>
 // License: MIT
-// Source: https://github.com/Golangcodes/nextdeploy
+// Source: https://github.com/aynaash/nextdeploy
 //
 // ─────────────────────────────────────────────────────────────────────────────
 package main
 
 import (
-	"github.com/Golangcodes/nextdeploy/cli/cmd"
+	"github.com/aynaash/nextdeploy/cli/cmd"
 )
 
 func main() {

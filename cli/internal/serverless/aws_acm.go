@@ -12,7 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/acm"
 	acmTypes "github.com/aws/aws-sdk-go-v2/service/acm/types"
 
-	"github.com/Golangcodes/nextdeploy/cli/internal/dns"
+	"github.com/aynaash/nextdeploy/cli/internal/dns"
 )
 
 func (p *AWSProvider) ensureACMCertificateExists(ctx context.Context, domain string) (string, error) {

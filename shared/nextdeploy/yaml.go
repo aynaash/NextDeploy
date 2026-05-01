@@ -3,7 +3,7 @@ package nextdeploy
 import (
 	"errors"
 	"fmt"
-	"github.com/Golangcodes/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared"
 	"os"
 	"path/filepath"
 

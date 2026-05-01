@@ -13,12 +13,12 @@ import (
 	"strings"
 	"syscall"
 
-	daemoniclient "github.com/Golangcodes/nextdeploy/daemon/internal/client"
-	"github.com/Golangcodes/nextdeploy/daemon/internal/config"
-	"github.com/Golangcodes/nextdeploy/daemon/internal/daemon"
-	daemontypes "github.com/Golangcodes/nextdeploy/daemon/internal/types"
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/updater"
+	daemoniclient "github.com/aynaash/nextdeploy/daemon/internal/client"
+	"github.com/aynaash/nextdeploy/daemon/internal/config"
+	"github.com/aynaash/nextdeploy/daemon/internal/daemon"
+	daemontypes "github.com/aynaash/nextdeploy/daemon/internal/types"
+	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/updater"
 	"github.com/gofrs/flock"
 )
 

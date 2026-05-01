@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/Golangcodes/nextdeploy/shared/secrets"
+	"github.com/aynaash/nextdeploy/shared/secrets"
 	"os"
 )
 

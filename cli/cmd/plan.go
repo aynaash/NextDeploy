@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Golangcodes/nextdeploy/cli/internal/serverless"
-	"github.com/Golangcodes/nextdeploy/shared"
-	"github.com/Golangcodes/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/cli/internal/serverless"
+	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/config"
 	"github.com/spf13/cobra"
 )
 

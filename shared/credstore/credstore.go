@@ -31,7 +31,7 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/Golangcodes/nextdeploy/shared/sensitive"
+	"github.com/aynaash/nextdeploy/shared/sensitive"
 )
 
 const (

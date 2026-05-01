@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"github.com/Golangcodes/nextdeploy/cli/internal/initialcommand"
-	"github.com/Golangcodes/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/cli/internal/initialcommand"
+	"github.com/aynaash/nextdeploy/shared/nextcore"
 	"github.com/spf13/cobra"
 )
 

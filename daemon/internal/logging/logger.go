@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Golangcodes/nextdeploy/daemon/internal/types"
+	"github.com/aynaash/nextdeploy/daemon/internal/types"
 )
 
 func SetupLogger(config types.LoggerConfig) *log.Logger {

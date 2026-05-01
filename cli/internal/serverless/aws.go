@@ -20,12 +20,12 @@ import (
 	smTypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/Golangcodes/nextdeploy/assets"
-	"github.com/Golangcodes/nextdeploy/cli/internal/dns"
-	"github.com/Golangcodes/nextdeploy/shared"
-	cfgTypes "github.com/Golangcodes/nextdeploy/shared/config"
-	"github.com/Golangcodes/nextdeploy/shared/credstore"
-	"github.com/Golangcodes/nextdeploy/shared/sensitive"
+	"github.com/aynaash/nextdeploy/assets"
+	"github.com/aynaash/nextdeploy/cli/internal/dns"
+	"github.com/aynaash/nextdeploy/shared"
+	cfgTypes "github.com/aynaash/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/shared/credstore"
+	"github.com/aynaash/nextdeploy/shared/sensitive"
 
 	"archive/zip"
 	"bytes"

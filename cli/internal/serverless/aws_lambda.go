@@ -19,9 +19,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
 
-	"github.com/Golangcodes/nextdeploy/internal/packaging"
-	cfgTypes "github.com/Golangcodes/nextdeploy/shared/config"
-	"github.com/Golangcodes/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/internal/packaging"
+	cfgTypes "github.com/aynaash/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/shared/nextcore"
 )
 
 // secretsExtensionLayerAccount is the AWS-published account ID that hosts the

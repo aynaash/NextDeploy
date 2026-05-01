@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Golangcodes/nextdeploy/internal/packaging"
-	"github.com/Golangcodes/nextdeploy/shared/nextcore"
-	"github.com/Golangcodes/nextdeploy/shared/sensitive"
+	"github.com/aynaash/nextdeploy/internal/packaging"
+	"github.com/aynaash/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/shared/sensitive"
 	"github.com/spf13/cobra"
 )
 

@@ -10,7 +10,7 @@ import (
 const (
 	mdTableHeader = "| Type | Host (Name) | Target (Value) |\n"
 	mdTableSep    = "| :--- | :--- | :--- |\n"
-	docsURL       = "https://nextdeploy.one/docs"
+	docsURL       = "https://nextdeploy.org/docs"
 )
 
 // ValidationRecord represents an SSL validation CNAME record
@@ -276,12 +276,12 @@ func writePitfallsSection(f *os.File, domain string) {
 		Why  string
 	}{
 		{
-			Bad:  "_5f2eb7...nextdeploy.one",
+			Bad:  "_5f2eb7...nextdeploy.org",
 			Good: "_5f2eb7...",
 			Why:  "Host field should NOT include your domain name",
 		},
 		{
-			Bad:  "_hash.www.nextdeploy.one",
+			Bad:  "_hash.www.nextdeploy.org",
 			Good: "_hash.www",
 			Why:  "For www SSL records, stop at '.www'",
 		},
@@ -312,12 +312,12 @@ func writeVerificationSection(f *os.File) {
 
 	fmt.Fprintf(f, "```bash\n")
 	fmt.Fprintf(f, "# Check root domain\n")
-	fmt.Fprintf(f, "dig nextdeploy.one CNAME +short\n\n")
+	fmt.Fprintf(f, "dig nextdeploy.org CNAME +short\n\n")
 	fmt.Fprintf(f, "# Check SSL validation records\n")
-	fmt.Fprintf(f, "dig _5f2eb7...nextdeploy.one CNAME +short\n")
-	fmt.Fprintf(f, "dig @8.8.8.8 _hash.www.nextdeploy.one CNAME +short  # Use Google DNS\n\n")
+	fmt.Fprintf(f, "dig _5f2eb7...nextdeploy.org CNAME +short\n")
+	fmt.Fprintf(f, "dig @8.8.8.8 _hash.www.nextdeploy.org CNAME +short  # Use Google DNS\n\n")
 	fmt.Fprintf(f, "# Watch for propagation\n")
-	fmt.Fprintf(f, "watch -n 60 'dig @8.8.8.8 _hash.www.nextdeploy.one CNAME +short'\n")
+	fmt.Fprintf(f, "watch -n 60 'dig @8.8.8.8 _hash.www.nextdeploy.org CNAME +short'\n")
 	fmt.Fprintf(f, "```\n\n")
 
 	fmt.Fprintf(f, "**Expected output**: You should see the target value (CloudFront domain or validation string)\n\n")
@@ -334,7 +334,7 @@ func writeFinalSteps(f *os.File) {
 	fmt.Fprintf(f, "- [ ] Run `nextdeploy ship` to complete\n\n")
 
 	fmt.Fprintf(f, "---\n")
-	fmt.Fprintf(f, "*Need help? Visit [nextdeploy.one/docs](%s) or run `nextdeploy support`*\n", docsURL)
+	fmt.Fprintf(f, "*Need help? Visit [nextdeploy.org/docs](%s) or run `nextdeploy support`*\n", docsURL)
 }
 
 // Helper function to determine record purpose
