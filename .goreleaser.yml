@@ -1,0 +1,93 @@
+version: 2
+
+project_name: nextdeploy
+
+builds:
+  - id: nextdeploy
+    main: ./cli
+    binary: nextdeploy
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/aynaash/nextdeploy/shared.Commit={{.ShortCommit}}
+
+  - id: nextdeployd
+    main: ./daemon/cmd/nextdeployd
+    binary: nextdeployd
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/aynaash/nextdeploy/shared.Commit={{.ShortCommit}}
+
+archives:
+  - id: nextdeploy
+    ids:
+      - nextdeploy
+    name_template: "nextdeploy_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE
+      - README.md
+      - sample.nextdeploy.yml
+
+  - id: nextdeployd
+    ids:
+      - nextdeployd
+    name_template: "nextdeployd_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "nextdeploy_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ .Tag }}-snapshot-{{ .ShortCommit }}"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "merge conflict"
+      - Merge pull request
+      - Merge remote-tracking branch
+      - Merge branch
+
+release:
+  github:
+    owner: aynaash
+    name: NextDeploy
+  draft: false
+  prerelease: auto

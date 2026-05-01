@@ -22,10 +22,6 @@ import (
 
 var shipVerbose bool
 
-// shipCmd builds the project (via buildflow) and deploys to the
-// configured target. Build is no longer a precondition — ship calls
-// buildflow.Run itself, which handles validation, `next build`
-// (target-aware), and artifact creation.
 var shipCmd = &cobra.Command{
 	Use:     "ship",
 	Aliases: []string{"deploy"},
@@ -49,10 +45,6 @@ var shipCmd = &cobra.Command{
 			log.Warn("   Commit before shipping for cleaner deployment provenance.")
 		}
 
-		// Unified build flow — validation, `next build`, audit, and (for
-		// VPS) tarball creation. Force=false: ship trusts the incremental
-		// skip; users wanting a forced rebuild run `nextdeploy build -f`
-		// first.
 		result, err := buildflow.Run(context.Background(), buildflow.Opts{
 			ProjectDir: ".",
 			Cfg:        cfg,
@@ -72,8 +64,6 @@ var shipCmd = &cobra.Command{
 	},
 }
 
-// shipServerless dispatches to the AWS / Cloudflare deploy path. Provider
-// selection happens inside cli/internal/serverless.
 func shipServerless(log *shared.Logger, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) {
 	log.Info("Deployment Target: SERVERLESS (provider=%s)", cfg.Serverless.Provider)
 	if cfg.Serverless == nil {
@@ -86,9 +76,6 @@ func shipServerless(log *shared.Logger, cfg *config.NextDeployConfig, meta *next
 	}
 }
 
-// shipVPS uploads the buildflow-produced tarball over SSH and triggers
-// the remote daemon. The tarball path comes from buildflow — ship no
-// longer requires a pre-existing app.tar.gz on disk.
 func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow.Result) {
 	log.Info("Deployment Target: VPS (Traditional Server)")
 	meta := &result.Payload
@@ -133,10 +120,6 @@ func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow
 
 	tarballName := result.TarballPath
 	if tarballName == "" {
-		// buildflow always emits a tarball on the VPS path, but the
-		// incremental-skip branch returns Skipped=true and leaves
-		// TarballPath empty. Fall back to the conventional name in
-		// that case so a previously-built artifact is still shipped.
 		tarballName = "app.tar.gz"
 	}
 	if _, err := os.Stat(tarballName); os.IsNotExist(err) {
