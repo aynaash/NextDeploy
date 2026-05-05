@@ -25,7 +25,7 @@ provider. See `sample.nextdeploy.yml` in this repo for the full schema.
 
 | Target          | Status | What it gives you                                  |
 | --------------- | ------ | -------------------------------------------------- |
-| **VPS**         | stable | Docker + Caddy + the `nextdeployd` daemon over SSH |
+| **VPS**         | stable | Caddy + the `nextdeployd` daemon over SSH          |
 | **AWS**         | stable | Lambda + S3 + CloudFront, full SSR/ISR/image opt   |
 | **Cloudflare**  | beta   | Workers + R2 + KV via the `nextcompile` adapter    |
 
