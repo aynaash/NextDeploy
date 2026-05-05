@@ -67,6 +67,10 @@ test_src_dir/
 # ── Misc ─────────────────────────────────────────────────────────
 /daemon.md
 vendor/
+# Embedded vendor README is part of the runtime source tree.
+!shared/nextcompile/runtime_src/vendor/
+shared/nextcompile/runtime_src/vendor/*
+!shared/nextcompile/runtime_src/vendor/README.md
 
 # ── Dev-local ────────────────────────────────────────────────────
 tmp/
