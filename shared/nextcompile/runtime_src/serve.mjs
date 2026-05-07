@@ -39,6 +39,32 @@ export async function serveStaticFromR2(env, pathname) {
 }
 
 /**
+ * Serve a public/* file requested at the bare root path (e.g.
+ * /install.sh, /robots.txt, /favicon.ico). Next serves public/ at the
+ * root, and the packager uploads those files to R2 keyed by their
+ * basename — so the request path minus the leading slash is the R2
+ * key. Restricted to paths whose final segment contains a "." to keep
+ * real 404s from spending an R2 GET each.
+ */
+export async function serveRootPublicFromR2(env, pathname) {
+  if (!env.ASSETS) return null;
+  if (pathname.length < 2 || pathname.endsWith("/")) return null;
+  const last = pathname.slice(pathname.lastIndexOf("/") + 1);
+  if (!last.includes(".")) return null;
+
+  const obj = await env.ASSETS.get(pathname.slice(1));
+  if (!obj) return null;
+
+  const headers = new Headers();
+  obj.writeHttpMetadata?.(headers);
+  if (obj.httpEtag) headers.set("etag", obj.httpEtag);
+  if (!headers.has("cache-control")) {
+    headers.set("cache-control", "public, max-age=300");
+  }
+  return new Response(obj.body, { headers });
+}
+
+/**
  * Serve a pre-rendered HTML file (SSG or ISR) from R2. The dispatcher
  * resolves the R2 key from manifest.routes.ssg/isr and passes it here.
  */

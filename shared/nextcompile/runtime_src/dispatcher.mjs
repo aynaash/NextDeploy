@@ -12,7 +12,8 @@
 //   5. SSG routes — pre-rendered HTML from R2
 //   6. ISR routes — HTML from R2 (revalidation arrives with cache.mjs)
 //   7. Dynamic table — regex-matched routes, ordered by specificity
-//   8. 404
+//   8. Root-served public files (/install.sh, /robots.txt, …) from R2
+//   9. 404
 //
 // Every handler invocation is wrapped in an AsyncLocalStorage context so
 // Next's async cookies() / headers() / draftMode() resolve to per-request
@@ -23,7 +24,7 @@
 // without RSC fall through to the legacy default-export path (Pages
 // Router + simple App Router pages).
 
-import { serveStaticFromR2, serveSSGFromR2 } from "./serve.mjs";
+import { serveStaticFromR2, serveSSGFromR2, serveRootPublicFromR2 } from "./serve.mjs";
 import { matchDynamic, buildRouteContext } from "./route_match.mjs";
 import { notFound, serverError } from "./errors.mjs";
 import { runWithContext, createRequestContext } from "./context.mjs";
@@ -68,6 +69,9 @@ export async function dispatch(request, env, ctx, tables) {
 
     const routed = await tryRouteDispatch(request, env, ctx, url, pathname, tables);
     if (routed) return routed;
+
+    const publicRoot = await serveRootPublicFromR2(env, pathname);
+    if (publicRoot) return publicRoot;
 
     return notFound();
   } catch (err) {
