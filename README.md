@@ -9,6 +9,10 @@ curl -fsSL https://nextdeploy.org/install.sh | bash
 
 Windows: download `install.bat` from <https://nextdeploy.org/install.bat>.
 
+<p align="center">
+  <img src="./assets/ship-demo.gif" alt="nextdeploy ship — edit a Next.js component and deploy to Cloudflare in seconds (2× speed, no edits)" width="820" />
+</p>
+
 ## Quick start
 
 ```bash
