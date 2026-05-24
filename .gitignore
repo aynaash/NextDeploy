@@ -76,3 +76,8 @@ shared/nextcompile/runtime_src/vendor/*
 tmp/
 NextDeploy/
 graphify-out/
+
+# ── Personal flow notes (do NOT commit) ──────────────────────────
+/docs/AWS_DEPLOY_FLOW.md
+/docs/VPS_DEPLOY_FLOW.md
+/docs/CLOUDFLARE_DEPLOY_FLOW.md

@@ -13,6 +13,9 @@ Windows: download `install.bat` from <https://nextdeploy.org/install.bat>.
   <img src="./assets/ship-demo.gif" alt="nextdeploy ship — edit a Next.js component and deploy to Cloudflare in seconds (2× speed, no edits)" width="820" />
 </p>
 
+Questions, bug reports, or just want to follow along? Join the community
+on [Discord](https://discord.gg/xd9Cub9fm).
+
 ## Quick start
 
 ```bash
@@ -65,7 +68,9 @@ sample.nextdeploy.yml      Annotated reference config
 
 Issues and PRs welcome. Run `go test ./...` before pushing — the release
 pipeline is gated on a green test run. For larger changes, open an issue
-first so we can align on direction.
+first so we can align on direction. The
+[Discord](https://discord.gg/xd9Cub9fm) is the fastest place to get a
+yes/no on direction before you spend time on a PR.
 
 ## License
 
