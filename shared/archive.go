@@ -1,30 +1,142 @@
 package shared
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/aynaash/nextdeploy/shared/sensitive"
 )
 
+// withinDir reports whether the cleaned path p is dest itself or lies beneath
+// it. Used to reject archive entries (and symlink/hardlink targets) that would
+// escape the extraction directory ("zip slip").
+func withinDir(dest, p string) bool {
+	dest = filepath.Clean(dest)
+	p = filepath.Clean(p)
+	if p == dest {
+		return true
+	}
+	return strings.HasPrefix(p, dest+string(os.PathSeparator))
+}
+
+// ExtractTarGz extracts a gzipped tarball into dest using a pure-Go reader.
+// Unlike a `tar -xzf` shell-out, every entry is validated so a malicious
+// archive cannot write outside dest via "../" components, absolute paths, or
+// symlink/hardlink targets that point outside the extraction root.
 func ExtractTarGz(src, dest string) error {
-	if err := os.MkdirAll(dest, 0750); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dest, err)
-	}
-
-	tarPath, err := exec.LookPath("tar")
+	destAbs, err := filepath.Abs(dest)
 	if err != nil {
-		return fmt.Errorf("tar utility not found in PATH: %w", err)
+		return fmt.Errorf("resolve dest %s: %w", dest, err)
+	}
+	if err := os.MkdirAll(destAbs, 0750); err != nil {
+		return fmt.Errorf("mkdir %s: %w", destAbs, err)
 	}
 
-	// #nosec G204
-	cmd := exec.Command(tarPath, "--no-same-owner", "--no-same-permissions", "-xzf", src, "-C", dest)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("tar extraction failed: %v - %s", err, string(out))
+	// #nosec G304 — src is validated by the caller (must be within uploadsDir).
+	f, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open archive %s: %w", src, err)
+	}
+	defer f.Close()
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("gzip reader: %w", err)
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read tar entry: %w", err)
+		}
+
+		// Reject absolute paths and any ".." traversal up front.
+		if filepath.IsAbs(hdr.Name) || strings.Contains(hdr.Name, "..") {
+			return fmt.Errorf("unsafe archive entry path: %q", hdr.Name)
+		}
+		target := filepath.Join(destAbs, hdr.Name)
+		if !withinDir(destAbs, target) {
+			return fmt.Errorf("archive entry escapes destination: %q", hdr.Name)
+		}
+
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0750); err != nil {
+				return fmt.Errorf("mkdir %s: %w", target, err)
+			}
+
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0750); err != nil {
+				return fmt.Errorf("mkdir parent of %s: %w", target, err)
+			}
+			mode := hdr.FileInfo().Mode().Perm()
+			if mode == 0 {
+				mode = 0600
+			}
+			// #nosec G304 — target is validated to be within destAbs above.
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+			if err != nil {
+				return fmt.Errorf("create %s: %w", target, err)
+			}
+			// #nosec G110 — decompression bomb is a DoS concern, out of scope here.
+			if _, err := io.Copy(out, tr); err != nil {
+				_ = out.Close()
+				return fmt.Errorf("write %s: %w", target, err)
+			}
+			if err := out.Close(); err != nil {
+				return fmt.Errorf("close %s: %w", target, err)
+			}
+
+		case tar.TypeSymlink:
+			// Resolve the link target relative to the symlink's own location
+			// and refuse anything that would point outside destAbs.
+			var resolved string
+			if filepath.IsAbs(hdr.Linkname) {
+				resolved = filepath.Clean(hdr.Linkname)
+			} else {
+				resolved = filepath.Join(filepath.Dir(target), hdr.Linkname)
+			}
+			if !withinDir(destAbs, resolved) {
+				return fmt.Errorf("symlink %q -> %q escapes destination", hdr.Name, hdr.Linkname)
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0750); err != nil {
+				return fmt.Errorf("mkdir parent of symlink %s: %w", target, err)
+			}
+			_ = os.Remove(target)
+			if err := os.Symlink(hdr.Linkname, target); err != nil {
+				return fmt.Errorf("symlink %s: %w", target, err)
+			}
+
+		case tar.TypeLink:
+			// Hardlink target is relative to the archive root (destAbs).
+			linkTarget := filepath.Join(destAbs, hdr.Linkname)
+			if !withinDir(destAbs, linkTarget) {
+				return fmt.Errorf("hardlink %q -> %q escapes destination", hdr.Name, hdr.Linkname)
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0750); err != nil {
+				return fmt.Errorf("mkdir parent of hardlink %s: %w", target, err)
+			}
+			_ = os.Remove(target)
+			if err := os.Link(linkTarget, target); err != nil {
+				return fmt.Errorf("hardlink %s: %w", target, err)
+			}
+
+		default:
+			// Skip char/block devices, FIFOs, etc. — not needed for app artifacts.
+			continue
+		}
 	}
 	return nil
 }

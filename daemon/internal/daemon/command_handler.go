@@ -34,6 +34,7 @@ type CommandHandler struct {
 	stateManager   *StateManager
 	auditLogger    *AuditLogger
 	rateLimiter    *RateLimiter
+	replayGuard    *ReplayGuard
 }
 
 func NewCommandHandler(config *types.DaemonConfig) *CommandHandler {
@@ -61,6 +62,7 @@ func NewCommandHandler(config *types.DaemonConfig) *CommandHandler {
 		stateManager:   NewStateManager(statePath),
 		auditLogger:    NewAuditLogger(auditPath),
 		rateLimiter:    NewRateLimiter(rate, burst),
+		replayGuard:    NewReplayGuard(5 * time.Minute),
 	}
 }
 
@@ -96,13 +98,23 @@ func (ch *CommandHandler) HandleCommand(cmd types.Command, clientIdentity string
 	}
 
 	// 3. Signature Verification
-	// We marshal the type and args to verify the signature
+	// We marshal the type, args, timestamp and nonce to verify the signature.
+	// These four fields must match exactly what the client signed in client.go.
 	payload, _ := json.Marshal(map[string]interface{}{
-		"type": cmd.Type,
-		"args": cmd.Args,
+		"type":      cmd.Type,
+		"args":      cmd.Args,
+		"timestamp": cmd.Timestamp,
+		"nonce":     cmd.Nonce,
 	})
 	if !VerifySignature(payload, cmd.Signature, ch.config.SecuritySecret) {
 		return types.Response{Success: false, Message: "invalid command signature"}
+	}
+
+	// 3b. Replay Protection: reject stale or already-seen commands. Because the
+	// timestamp and nonce are part of the signed payload above, an attacker
+	// cannot alter them without invalidating the signature.
+	if err := ch.replayGuard.Check(cmd.Timestamp, cmd.Nonce); err != nil {
+		return types.Response{Success: false, Message: fmt.Sprintf("replay protection: %v", err)}
 	}
 
 	var resp types.Response

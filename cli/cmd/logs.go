@@ -98,7 +98,7 @@ var logsCmd = &cobra.Command{
 }
 
 func streamAppLogs(ctx context.Context, srv *server.ServerStruct, serverName, appName, routeFilter string, out io.Writer) {
-	daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd logs --appName=%s", appName)
+	daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd logs --appName=%s", shellQuote(appName))
 	serviceName, err := srv.ExecuteCommand(ctx, serverName, daemonCmd, nil)
 	if err != nil {
 		sensitive.Fprintf(os.Stderr, "\033[31mError querying app logs: %v\033[0m\n", err)

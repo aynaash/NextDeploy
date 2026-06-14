@@ -445,6 +445,23 @@ func TestCover() error {
 	return sh.RunV("go", "tool", "cover", "-func=coverage.out")
 }
 
+// CoverRatchet enforces the non-regressing coverage floor (.coverage-floor) and
+// reports the gap to the 45% target. Usage: mage coverRatchet
+func CoverRatchet() error {
+	return sh.RunV("bash", "scripts/coverage-ratchet.sh")
+}
+
+// CoverBump raises .coverage-floor to the current coverage (run after adding
+// tests, then commit the file). Usage: mage coverBump
+func CoverBump() error {
+	return sh.RunV("bash", "scripts/coverage-ratchet.sh", "--bump")
+}
+
+// ScaffoldTests drops a skipped test stub into every package lacking tests.
+func ScaffoldTests() error {
+	return sh.RunV("bash", "scripts/scaffold-tests.sh")
+}
+
 // TestIntegration runs tests with the integration build tag (needs AWS creds).
 func TestIntegration() error {
 	pkgs, err := testPkgs()

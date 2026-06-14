@@ -60,26 +60,27 @@ func (ss *SocketServer) startTCPListener() error {
 		return nil
 	}
 
-	var tl net.Listener
-	var err error
-
-	if ss.config.TLSCertFile != "" && ss.config.TLSKeyFile != "" {
-		tlsConfig, err := ss.loadTLSConfig()
-		if err != nil {
-			return fmt.Errorf("failed to load TLS config: %w", err)
-		}
-		tl, err = tls.Listen("tcp", ss.config.TCPListenAddr, tlsConfig)
-		if err != nil {
-			return fmt.Errorf("failed to listen on tcp+tls: %w", err)
-		}
-		log.Printf("[socket] Listening on tcp+tls:%s (mTLS: %v)", ss.config.TCPListenAddr, ss.config.TLSCAFile != "")
-	} else {
-		tl, err = net.Listen("tcp", ss.config.TCPListenAddr)
-		if err != nil {
-			return fmt.Errorf("failed to listen on tcp: %w", err)
-		}
-		log.Printf("[socket] Listening on tcp:%s (INSECURE)", ss.config.TCPListenAddr)
+	// Refuse to expose the control plane over TCP without mutual TLS. A
+	// plaintext (or server-only TLS) listener would let any reachable peer
+	// send commands; require a server cert/key AND a client CA so only holders
+	// of a CA-issued client certificate can connect.
+	if ss.config.TLSCertFile == "" || ss.config.TLSKeyFile == "" || ss.config.TLSCAFile == "" {
+		return fmt.Errorf(
+			"refusing to start TCP listener on %s without mutual TLS: "+
+				"tls_cert_file, tls_key_file and tls_ca_file must all be configured",
+			ss.config.TCPListenAddr,
+		)
 	}
+
+	tlsConfig, err := ss.loadTLSConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load TLS config: %w", err)
+	}
+	tl, err := tls.Listen("tcp", ss.config.TCPListenAddr, tlsConfig)
+	if err != nil {
+		return fmt.Errorf("failed to listen on tcp+tls: %w", err)
+	}
+	log.Printf("[socket] Listening on tcp+tls:%s (mTLS enforced)", ss.config.TCPListenAddr)
 	ss.tcpListener = tl
 	return nil
 }

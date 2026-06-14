@@ -725,6 +725,45 @@
       ansible.builtin.debug:
         msg: "nextdeployd: {{ daemon_version_before.stdout | trim }} → {{ daemon_version_after.stdout | trim }}"
 
+    - name: "Phase 3 | Daemon | Ensure config directory exists"
+      ansible.builtin.file:
+        path: /etc/nextdeployd
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+      become: true
+
+    - name: "Phase 3 | Daemon | Check for existing daemon config"
+      ansible.builtin.stat:
+        path: /etc/nextdeployd/config.json
+      register: daemon_config_stat
+      become: true
+
+    - name: "Phase 3 | Daemon | Generate HMAC security secret"
+      ansible.builtin.command: openssl rand -hex 32
+      register: daemon_secret
+      changed_when: false
+      when: not daemon_config_stat.stat.exists
+
+    # Provision a random HMAC secret so the daemon is authenticated from first
+    # boot. The daemon also self-generates one on startup if this is absent, but
+    # writing it here closes the startup window and keeps it root-only (0600):
+    # only root can read the secret, so only root can sign daemon commands even
+    # though the socket itself is group-accessible.
+    - name: "Phase 3 | Daemon | Write daemon config with security secret"
+      ansible.builtin.copy:
+        dest: /etc/nextdeployd/config.json
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          {
+            "security_secret": "{{ daemon_secret.stdout | trim }}"
+          }
+      become: true
+      when: not daemon_config_stat.stat.exists
+
     - name: "Phase 3 | Daemon | Write systemd service unit with socket configuration"
       ansible.builtin.copy:
         dest: /etc/systemd/system/nextdeployd.service

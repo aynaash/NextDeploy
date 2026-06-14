@@ -102,7 +102,7 @@ var destroyCmd = &cobra.Command{
 
 			// 4. Trigger daemon to destroy app
 			log.Info("Triggering daemon to destroy app: %s...", appName)
-			destroyCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd destroy --appName=%s --socket-path=/run/nextdeployd/nextdeployd.sock", appName)
+			destroyCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd destroy --appName=%s --socket-path=/run/nextdeployd/nextdeployd.sock", shellQuote(appName))
 			output, err := srv.ExecuteCommand(ctx, deploymentServer, destroyCmd, os.Stdout)
 			if err != nil {
 				log.Error("Failed to destroy app via daemon: %v\nOutput: %s", err, output)

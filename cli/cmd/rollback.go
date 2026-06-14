@@ -85,9 +85,9 @@ the commit must still be within the retention window.`,
 			}
 
 			log.Info("Triggering daemon to rollback %s on %s...", cfg.App.Name, deploymentServer)
-			daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd rollback --appName=%q", cfg.App.Name)
+			daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd rollback --appName=%s", shellQuote(cfg.App.Name))
 			if rollbackToCommit != "" {
-				daemonCmd += fmt.Sprintf(" --toCommit=%q", rollbackToCommit)
+				daemonCmd += fmt.Sprintf(" --toCommit=%s", shellQuote(rollbackToCommit))
 			} else if rollbackSteps > 0 {
 				daemonCmd += fmt.Sprintf(" --steps=%d", rollbackSteps)
 			}

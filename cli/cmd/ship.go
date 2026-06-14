@@ -139,7 +139,7 @@ func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow
 
 	log.Info("Upload complete. Triggering daemon to process deployment...")
 
-	daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd ship --tarball=\"%s\" --socket-path=/run/nextdeployd/nextdeployd.sock", remotePath)
+	daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd ship --tarball=%s --socket-path=/run/nextdeployd/nextdeployd.sock", shellQuote(remotePath))
 	output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, os.Stdout)
 	if err != nil {
 		log.Error("Failed to trigger daemon (ensure nextdeployd is in PATH): %v\nOutput: %s", err, output)

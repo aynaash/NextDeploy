@@ -2,6 +2,7 @@ package client
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -51,11 +52,22 @@ func SendCommand(cfg ClientConfig, cmd types.Command) (*types.Response, error) {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Minute))
 
+	// Freshness + uniqueness metadata, covered by the signature below so the
+	// daemon's ReplayGuard can reject stale or replayed commands.
+	cmd.Timestamp = time.Now().Unix()
+	nonceBytes := make([]byte, 16)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		return nil, fmt.Errorf("failed to generate command nonce: %w", err)
+	}
+	cmd.Nonce = hex.EncodeToString(nonceBytes)
+
 	// Sign the command
 	if cfg.Secret != "" {
-		payload, _ := json.Marshal(map[string]interface{}{
-			"type": cmd.Type,
-			"args": cmd.Args,
+		payload, _ := json.Marshal(map[string]any{
+			"type":      cmd.Type,
+			"args":      cmd.Args,
+			"timestamp": cmd.Timestamp,
+			"nonce":     cmd.Nonce,
 		})
 		h := hmac.New(sha256.New, []byte(cfg.Secret))
 		h.Write(payload)
@@ -82,9 +94,14 @@ func loadTLSConfig(cfg ClientConfig) (*tls.Config, error) {
 		return nil, err
 	}
 
+	// InsecureSkipVerify disables server certificate verification and must
+	// never be enabled by accident. Honour cfg.SkipVerify only when an
+	// operator has also set the explicit dev-only escape hatch.
+	insecure := cfg.SkipVerify && os.Getenv("NEXTDEPLOY_INSECURE_SKIP_VERIFY") == "1"
+
 	tlsConfig := &tls.Config{
 		Certificates:       []tls.Certificate{cert},
-		InsecureSkipVerify: cfg.SkipVerify,
+		InsecureSkipVerify: insecure, // #nosec G402 — gated behind explicit env opt-in
 		MinVersion:         tls.VersionTLS12,
 	}
 

@@ -4,6 +4,10 @@ type Command struct {
 	Type      string                 `json:"type"`
 	Args      map[string]interface{} `json:"args"`
 	Signature string                 `json:"signature,omitempty"`
+	// Timestamp (Unix seconds) and Nonce are covered by the HMAC signature
+	// and used by the daemon's ReplayGuard to reject stale/replayed commands.
+	Timestamp int64  `json:"timestamp,omitempty"`
+	Nonce     string `json:"nonce,omitempty"`
 }
 
 const (

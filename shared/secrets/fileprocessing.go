@@ -1,12 +1,28 @@
 package secrets
 
 import (
-	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/crypto/pbkdf2"
+)
+
+// Encrypted file layout: salt(16) || nonce(12) || AES-256-GCM ciphertext.
+// The key is derived from the password with PBKDF2-HMAC-SHA256. GCM is an
+// authenticated cipher, so tampering is detected on decryption, and because
+// encryption happens in-process the password never appears in any process's
+// argument list (unlike the previous `openssl enc -pass pass:...` shell-out).
+const (
+	encSaltLen  = 16
+	encNonceLen = 12
+	encIter     = 600_000
+	encKeyLen   = 32
 )
 
 func (sm *SecretManager) EncryptEnvFile(masterKey string) (map[string]string, error) {
@@ -30,8 +46,7 @@ func (sm *SecretManager) EncryptEnvFile(masterKey string) (map[string]string, er
 		SLogs.Info("Encrypting .env file: %s", file)
 
 		encryptedFile := file + ".enc"
-		err := sm.encryptWithOpenSSL(file, encryptedFile, masterKey)
-		if err != nil {
+		if err := sm.encryptToFile(file, encryptedFile, masterKey); err != nil {
 			SLogs.Error("Failed to encrypt file %s: %v", file, err)
 			return nil, fmt.Errorf("%w: %v", ErrEncryptionFailed, err)
 		}
@@ -44,47 +59,91 @@ func (sm *SecretManager) EncryptEnvFile(masterKey string) (map[string]string, er
 
 func (sm *SecretManager) EncryptFile(filename string, key []byte) error {
 	encryptedFilename := filename + ".enc"
-	return sm.encryptWithOpenSSL(filename, encryptedFilename, string(key))
+	return sm.encryptToFile(filename, encryptedFilename, string(key))
 }
 
-func (sm *SecretManager) encryptWithOpenSSL(inputPath, outputPath, password string) error {
-	// #nosec G204
-	cmd := exec.Command("openssl", "enc", "-aes-256-cbc", "-salt",
-		"-in", inputPath, "-out", outputPath, "-pass", "pass:"+password, "-pbkdf2")
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("openssl encryption failed: %v, stderr: %s", err, stderr.String())
+// encryptToFile reads inputPath, encrypts it with AES-256-GCM (key derived from
+// password via PBKDF2), and writes salt||nonce||ciphertext to outputPath (0600).
+func (sm *SecretManager) encryptToFile(inputPath, outputPath, password string) error {
+	// #nosec G304 — inputPath is an operator-selected local .env/config file.
+	plaintext, err := os.ReadFile(inputPath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", inputPath, err)
 	}
 
-	if err := os.Chmod(outputPath, 0600); err != nil {
-		return fmt.Errorf("failed to set permissions on encrypted file: %w", err)
+	salt := make([]byte, encSaltLen)
+	if _, err := rand.Read(salt); err != nil {
+		return fmt.Errorf("generate salt: %w", err)
+	}
+	gcm, err := newGCM(password, salt)
+	if err != nil {
+		return err
+	}
+	nonce := make([]byte, encNonceLen)
+	if _, err := rand.Read(nonce); err != nil {
+		return fmt.Errorf("generate nonce: %w", err)
+	}
+
+	ciphertext := gcm.Seal(nil, nonce, plaintext, nil)
+
+	out := make([]byte, 0, len(salt)+len(nonce)+len(ciphertext))
+	out = append(out, salt...)
+	out = append(out, nonce...)
+	out = append(out, ciphertext...)
+
+	if err := os.WriteFile(outputPath, out, 0600); err != nil {
+		return fmt.Errorf("failed to write encrypted file: %w", err)
 	}
 
 	SLogs.Info("Successfully encrypted file %s to %s", inputPath, outputPath)
 	return nil
 }
 
+// DecryptFile decrypts a .enc file produced by encryptToFile and returns the
+// plaintext. A wrong key or any tampering surfaces as a decryption error
+// (GCM authentication failure).
 func (sm *SecretManager) DecryptFile(filename string, key []byte) (string, error) {
 	if !strings.HasSuffix(filename, ".enc") {
 		return "", fmt.Errorf("file %s is not an encrypted file", filename)
 	}
 
-	decryptedFilename := strings.TrimSuffix(filename, ".enc")
-
-	command, err := sm.decryptWithOpenSSL(filename, decryptedFilename, string(key))
+	// #nosec G304 — filename is an operator-selected local encrypted file.
+	data, err := os.ReadFile(filename)
 	if err != nil {
-		return "", fmt.Errorf("failed to decrypt file %s: %w", filename, err)
+		return "", fmt.Errorf("read %s: %w", filename, err)
 	}
-	SLogs.Info("Decrypted file %s to %s using command: %s", filename, decryptedFilename, command)
+	if len(data) < encSaltLen+encNonceLen {
+		return "", fmt.Errorf("file %s is too short to be a valid encrypted file", filename)
+	}
 
-	return command, nil
+	salt := data[:encSaltLen]
+	nonce := data[encSaltLen : encSaltLen+encNonceLen]
+	ciphertext := data[encSaltLen+encNonceLen:]
+
+	gcm, err := newGCM(string(key), salt)
+	if err != nil {
+		return "", err
+	}
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", fmt.Errorf("decrypt %s (wrong key or corrupted/tampered file): %w", filename, err)
+	}
+
+	SLogs.Info("Successfully decrypted file %s", filename)
+	return string(plaintext), nil
 }
 
-func (sm *SecretManager) decryptWithOpenSSL(inputPath, outputPath, password string) (string, error) {
-	// decrypt command is
-	command := "openssl enc -d -aes-256-cbc -in .env.enc -out .env -pass pass:%password"
-	return command, nil
+// newGCM derives a 32-byte key from password+salt via PBKDF2-SHA256 and returns
+// an AES-256-GCM AEAD.
+func newGCM(password string, salt []byte) (cipher.AEAD, error) {
+	key := pbkdf2.Key([]byte(password), salt, encIter, encKeyLen, sha256.New)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("aes cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("gcm: %w", err)
+	}
+	return gcm, nil
 }

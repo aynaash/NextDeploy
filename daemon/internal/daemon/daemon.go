@@ -35,6 +35,15 @@ func NewNextDeployDaemon(configPath string, socketPathOverride string) (*NextDep
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Secure by default: generate and persist a random HMAC secret if none is
+	// configured. Without this the daemon would accept unsigned commands (see
+	// VerifySignature, which now fails closed on an empty secret).
+	if generated, err := config.EnsureSecuritySecret(configPath, cfg); err != nil {
+		return nil, fmt.Errorf("failed to ensure security secret: %w", err)
+	} else if generated {
+		log.Printf("[security] No security_secret configured; generated and persisted a new one at %s", configPath)
+	}
+
 	// --socket-path flag from systemd ExecStart takes precedence over config.
 	if socketPathOverride != "" {
 		cfg.SocketPath = socketPathOverride
