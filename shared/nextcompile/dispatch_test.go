@@ -166,8 +166,8 @@ func TestEmitDispatchTable_NestedOutDirUsesDeeperImportPrefix(t *testing.T) {
 
 func TestImportPrefixFor(t *testing.T) {
 	cases := []struct {
-		name      string
-		dispatch  string
+		name       string
+		dispatch   string
 		standalone string
 		want       string
 	}{

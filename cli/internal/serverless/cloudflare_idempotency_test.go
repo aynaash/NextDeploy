@@ -122,13 +122,13 @@ func TestMd5OfFile_StableAcrossPaths(t *testing.T) {
 
 func TestLooksLikeCloudflareAccountID(t *testing.T) {
 	cases := map[string]bool{
-		"a7a222ece3a9a56fa8e88a442f2ab46b": true,  // real-shape (32 hex)
-		"A7A222ECE3A9A56FA8E88A442F2AB46B": false, // upper case rejected
-		"YOUR_CLOUDFLARE_ACCOUNT_ID":       false, // placeholder
-		"":                                 false,
-		"a7a222ece3a9a56fa8e88a442f2ab46":  false, // 31 chars
+		"a7a222ece3a9a56fa8e88a442f2ab46b":  true,  // real-shape (32 hex)
+		"A7A222ECE3A9A56FA8E88A442F2AB46B":  false, // upper case rejected
+		"YOUR_CLOUDFLARE_ACCOUNT_ID":        false, // placeholder
+		"":                                  false,
+		"a7a222ece3a9a56fa8e88a442f2ab46":   false, // 31 chars
 		"a7a222ece3a9a56fa8e88a442f2ab46bb": false, // 33 chars
-		"a7a222ece3a9a56fa8e88a442f2ab46g": false, // non-hex char
+		"a7a222ece3a9a56fa8e88a442f2ab46g":  false, // non-hex char
 	}
 	for in, want := range cases {
 		if got := looksLikeCloudflareAccountID(in); got != want {
