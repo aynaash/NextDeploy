@@ -73,9 +73,19 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 		return runCloudflareInit(log, appName)
 	}
 
+	// Ask about the custom domain and where its DNS lives, so the generated
+	// config carries enough for provider-aware DNS guidance later.
+	domainCfg, err := promptDomain()
+	if err != nil {
+		return fmt.Errorf("prompt failed: %w", err)
+	}
+
 	// Use the raw template to preserve comments
 	configContent := config.GetSampleConfigTemplate(targetType)
 	configContent = strings.ReplaceAll(configContent, "name: example-app", "name: "+appName)
+	configContent = strings.Replace(configContent,
+		"  domain: app.example.com # Public domain for your app",
+		renderDomainYAML(domainCfg), 1)
 
 	if err := os.WriteFile("nextdeploy.yml", []byte(configContent), 0600); err != nil {
 		return fmt.Errorf("failed to save configuration: %w", err)
@@ -86,6 +96,93 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	log.Info("- Run 'nextdeploy prepare' to prepare a target server")
 
 	return nil
+}
+
+// promptDomain asks for the app's custom domain and how its DNS is managed.
+// Returns an empty DomainConfig if the user skips (the deploy then uses the
+// platform default host). Provider/DNS drive later DNS-setup guidance: a
+// Cloudflare-owned zone can be configured via the API, while namecheap/other
+// or dns:manual print the records to add at the registrar.
+func promptDomain() (config.DomainConfig, error) {
+	var name string
+	if err := survey.AskOne(&survey.Input{
+		Message: "Custom domain for this app (blank = use the platform default):",
+		Help:    "e.g. app.example.com — you can add or change this later in nextdeploy.yml.",
+	}, &name); err != nil {
+		return config.DomainConfig{}, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return config.DomainConfig{}, nil
+	}
+
+	var provider string
+	if err := survey.AskOne(&survey.Select{
+		Message: "Where is this domain registered / managed?",
+		Options: []string{"Cloudflare", "Namecheap", "Other registrar"},
+		Default: "Other registrar",
+	}, &provider); err != nil {
+		return config.DomainConfig{}, err
+	}
+
+	dc := config.DomainConfig{Name: name, DNS: "manual"}
+	switch provider {
+	case "Cloudflare":
+		dc.Provider = "cloudflare"
+		dc.Zone = apexZone(name)
+		var auto bool
+		if err := survey.AskOne(&survey.Confirm{
+			Message: "Configure DNS automatically via the Cloudflare API?",
+			Default: true,
+		}, &auto); err != nil {
+			return config.DomainConfig{}, err
+		}
+		if auto {
+			dc.DNS = "auto"
+		}
+	case "Namecheap":
+		dc.Provider = "namecheap"
+	default:
+		dc.Provider = "other"
+	}
+	return dc, nil
+}
+
+// renderDomainYAML renders a DomainConfig as the `domain:` value for the
+// generated nextdeploy.yml, matching the template's 2-space `app:` indentation.
+// A name-only domain stays a compact scalar; provider/dns/zone expand to a block.
+func renderDomainYAML(dc config.DomainConfig) string {
+	if dc.Name == "" {
+		return `  domain: "" # Public domain for your app (blank uses the platform default)`
+	}
+	if dc.Provider == "" && dc.DNS == "" && dc.Zone == "" {
+		return fmt.Sprintf("  domain: %s # Public domain for your app", dc.Name)
+	}
+	var b strings.Builder
+	b.WriteString("  domain:\n")
+	b.WriteString(fmt.Sprintf("    name: %s\n", dc.Name))
+	if dc.Provider != "" {
+		b.WriteString(fmt.Sprintf("    provider: %s # namecheap | cloudflare | other\n", dc.Provider))
+	}
+	if dc.DNS != "" {
+		b.WriteString(fmt.Sprintf("    dns: %s # auto (provider API) | manual (print records)\n", dc.DNS))
+	}
+	if dc.Zone != "" {
+		b.WriteString(fmt.Sprintf("    zone: %s", dc.Zone))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// apexZone reduces a hostname to its registrable apex using a simple
+// last-two-labels heuristic (app.example.com -> example.com). Multi-part TLDs
+// (example.co.uk) won't be perfect; the user can adjust `zone` in nextdeploy.yml.
+func apexZone(host string) string {
+	host = strings.TrimSuffix(host, ".")
+	labels := strings.Split(host, ".")
+	if len(labels) <= 2 {
+		return host
+	}
+	return strings.Join(labels[len(labels)-2:], ".")
 }
 
 // runCloudflareInit drives the Cloudflare-specific init: scaffold a new

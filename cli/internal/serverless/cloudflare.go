@@ -907,7 +907,7 @@ func (p *CloudflareProvider) wireQueueConsumers(ctx context.Context, workerName 
 // independent and non-fatal so one bad hostname doesn't sink the deploy.
 //
 // When the user has not declared an explicit cloudflare.custom_domains or
-// cloudflare.routes block, we auto-promote cfg.App.Domain to a Custom
+// cloudflare.routes block, we auto-promote cfg.App.Domain.Name to a Custom
 // Domain attachment (Workers.Domains.Update). Custom Domains provision
 // DNS + worker route + SSL atomically — the user does not need to create
 // any DNS records by hand. This replaces an older fallback that called
@@ -931,12 +931,12 @@ func (p *CloudflareProvider) attachEdgeRoutes(ctx context.Context, workerName st
 			}
 		}
 	}
-	// Auto-attach: when the user gave us cfg.App.Domain but no explicit
+	// Auto-attach: when the user gave us cfg.App.Domain.Name but no explicit
 	// edge block, treat it as a Custom Domain. We attach the apex + the
 	// www subdomain so a typical "https://example.com" / "https://www.example.com"
 	// pair works out of the box. Each call is idempotent.
-	if cfg.App.Domain != "" && hasNoExplicitEdge(cfBlock) {
-		hostnames := autoCustomDomainHostnames(cfg.App.Domain)
+	if cfg.App.Domain.Name != "" && hasNoExplicitEdge(cfBlock) {
+		hostnames := autoCustomDomainHostnames(cfg.App.Domain.Name)
 		for _, hostname := range hostnames {
 			if err := p.ensureCustomDomain(ctx, workerName, config.CFCustomDomain{Hostname: hostname}); err != nil {
 				p.log.Warn(
@@ -951,7 +951,7 @@ func (p *CloudflareProvider) attachEdgeRoutes(ctx context.Context, workerName st
 }
 
 // autoCustomDomainHostnames returns the set of hostnames to auto-attach
-// when only cfg.App.Domain is set. For an apex (example.com) we attach
+// when only cfg.App.Domain.Name is set. For an apex (example.com) we attach
 // both apex and www. For a subdomain (app.example.com) we attach only
 // the subdomain — adding `www.app.example.com` is rarely what users
 // want.
@@ -1108,14 +1108,14 @@ func (p *CloudflareProvider) putWorkerSecret(ctx context.Context, workerName, ke
 
 // InvalidateCache purges the Cloudflare zone cache for the configured domain.
 func (p *CloudflareProvider) InvalidateCache(ctx context.Context, cfg *config.NextDeployConfig) error {
-	if cfg.App.Domain == "" {
+	if cfg.App.Domain.Name == "" {
 		p.log.Info("No domain configured, skipping cache purge.")
 		return nil
 	}
 
-	zoneID, err := p.getZoneID(ctx, cfg.App.Domain)
+	zoneID, err := p.getZoneID(ctx, cfg.App.Domain.Name)
 	if err != nil {
-		return fmt.Errorf("failed to find zone for %s: %w", cfg.App.Domain, err)
+		return fmt.Errorf("failed to find zone for %s: %w", cfg.App.Domain.Name, err)
 	}
 
 	_, err = p.cf.Cache.Purge(ctx, cache.CachePurgeParams{
@@ -1218,7 +1218,7 @@ func (p *CloudflareProvider) GetResourceMap(ctx context.Context, cfg *config.Nex
 		Environment:    cfg.App.Environment,
 		Region:         "global",
 		S3BucketName:   p.getBucketName(cfg),
-		CustomDomain:   cfg.App.Domain,
+		CustomDomain:   cfg.App.Domain.Name,
 		DeploymentTime: time.Now(),
 	}, nil
 }

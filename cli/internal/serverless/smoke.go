@@ -102,11 +102,11 @@ func SmokeVerify(
 	return result, nil
 }
 
-// smokeTargets builds the probe list. Prefers cfg.App.Domain (root)
+// smokeTargets builds the probe list. Prefers cfg.App.Domain.Name (root)
 // plus up to 3 declared static routes. Kept small so we don't hammer
 // the deployment or wait minutes for the check to complete.
 func smokeTargets(cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) []string {
-	domain := strings.TrimSpace(cfg.App.Domain)
+	domain := strings.TrimSpace(cfg.App.Domain.Name)
 	if domain == "" {
 		return nil
 	}

@@ -34,7 +34,7 @@ func TestSmokeVerify_PassingEndpoint(t *testing.T) {
 	cfg := &config.NextDeployConfig{}
 	// Keep the http:// scheme so smokeTargets doesn't force https:// onto
 	// a plain-HTTP httptest server.
-	cfg.App.Domain = server.URL
+	cfg.App.Domain = config.DomainConfig{Name: server.URL}
 
 	log := shared.PackageLogger("test", "")
 	res, err := SmokeVerify(context.Background(), log, cfg,
@@ -61,7 +61,7 @@ func TestSmokeVerify_RetriesOn5xxThenSucceeds(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	cfg := &config.NextDeployConfig{}
-	cfg.App.Domain = server.URL
+	cfg.App.Domain = config.DomainConfig{Name: server.URL}
 
 	log := shared.PackageLogger("test", "")
 	res, err := SmokeVerify(context.Background(), log, cfg, nil, SmokeOpts{
@@ -85,7 +85,7 @@ func TestSmokeVerify_FailOnErrorGates(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	cfg := &config.NextDeployConfig{}
-	cfg.App.Domain = server.URL
+	cfg.App.Domain = config.DomainConfig{Name: server.URL}
 
 	log := shared.PackageLogger("test", "")
 	_, err := SmokeVerify(context.Background(), log, cfg, nil, SmokeOpts{
@@ -99,7 +99,7 @@ func TestSmokeVerify_FailOnErrorGates(t *testing.T) {
 
 func TestSmokeTargets_PrefersRootPlusFewStatics(t *testing.T) {
 	cfg := &config.NextDeployConfig{}
-	cfg.App.Domain = "example.com"
+	cfg.App.Domain = config.DomainConfig{Name: "example.com"}
 	meta := &nextcore.NextCorePayload{
 		RouteInfo: nextcore.RouteInfo{
 			StaticRoutes: []string{"/", "/about", "/contact", "/docs", "/pricing"},

@@ -250,7 +250,7 @@ func (p *AWSProvider) Destroy(ctx context.Context, appCfg *cfgTypes.NextDeployCo
 	// 1. CloudFront Distribution (Paginated discovery by comment or CNAME)
 	clientCF := cloudfront.NewFromConfig(p.cfg)
 	callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
-	domain := appCfg.App.Domain
+	domain := appCfg.App.Domain.Name
 
 	dists, err := p.findManagedDistributions(ctx, clientCF, callerRef, domain)
 	if err != nil {
@@ -383,7 +383,7 @@ func (p *AWSProvider) GetResourceMap(ctx context.Context, appCfg *cfgTypes.NextD
 	// 2. CloudFront Info
 	clientCF := cloudfront.NewFromConfig(p.cfg)
 	callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
-	cfDists, _ := p.findManagedDistributions(ctx, clientCF, callerRef, appCfg.App.Domain)
+	cfDists, _ := p.findManagedDistributions(ctx, clientCF, callerRef, appCfg.App.Domain.Name)
 	if len(cfDists) > 0 {
 		distID := cfDists[0]
 		res.CloudFrontID = distID
@@ -395,7 +395,7 @@ func (p *AWSProvider) GetResourceMap(ctx context.Context, appCfg *cfgTypes.NextD
 	}
 
 	// 3. Custom Domain & cert
-	res.CustomDomain = appCfg.App.Domain
+	res.CustomDomain = appCfg.App.Domain.Name
 	if appCfg.SSLConfig != nil {
 		res.DNSProvider = appCfg.SSLConfig.DNSProvider
 	} else if appCfg.SSL != nil {

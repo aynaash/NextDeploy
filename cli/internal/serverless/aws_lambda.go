@@ -236,7 +236,7 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 		// Determine domain
 		domain := meta.Domain
 		if domain == "" {
-			domain = appCfg.App.Domain
+			domain = appCfg.App.Domain.Name
 		}
 
 		_, err := p.ensureCloudFrontDistributionExists(ctx, appCfg.Serverless, bucketName, "", "", domain)
@@ -354,7 +354,7 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 	bucketName := p.getS3BucketName(appCfg)
 	domain := meta.Domain
 	if domain == "" {
-		domain = appCfg.App.Domain
+		domain = appCfg.App.Domain.Name
 	}
 
 	p.log.Info("Ensuring CloudFront distribution exists for Lambda origin (Domain: %s)...", domain)

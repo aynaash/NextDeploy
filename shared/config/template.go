@@ -77,6 +77,13 @@ target_type: vps
 app:
   name: example-app # [REQUIRED] Unique app name used for identification
   environment: production # [REQUIRED] production | staging | development
+  # domain can be a bare hostname, or a block recording the registrar and how
+  # DNS is managed (drives 'nextdeploy ship' DNS guidance):
+  #   domain:
+  #     name: app.example.com
+  #     provider: namecheap   # namecheap | cloudflare | other
+  #     dns: manual           # auto (provider API) | manual (print records)
+  #     zone: example.com
   domain: app.example.com # Public domain for your app
   port: 3000 # [REQUIRED] Internal port your app listens on
 
@@ -103,6 +110,13 @@ target_type: serverless
 app:
   name: example-app # [REQUIRED] Unique app name used for identification
   environment: production # [REQUIRED] production | staging | development
+  # domain can be a bare hostname, or a block recording the registrar and how
+  # DNS is managed (drives 'nextdeploy ship' DNS guidance):
+  #   domain:
+  #     name: app.example.com
+  #     provider: namecheap   # namecheap | cloudflare | other
+  #     dns: manual           # auto (provider API) | manual (print records)
+  #     zone: example.com
   domain: app.example.com # Public domain for your app
   port: 3000 # [REQUIRED] Internal port your app listens on
 
@@ -146,6 +160,13 @@ target_type: serverless
 app:
   name: example-app # [REQUIRED] Unique app name used for identification
   environment: production # [REQUIRED] production | staging | development
+  # domain can be a bare hostname, or a block recording the registrar and how
+  # DNS is managed (drives 'nextdeploy ship' DNS guidance):
+  #   domain:
+  #     name: app.example.com
+  #     provider: namecheap   # namecheap | cloudflare | other
+  #     dns: manual           # auto (provider API) | manual (print records)
+  #     zone: example.com
   domain: app.example.com # Public domain for your app
   port: 3000 # [REQUIRED] Internal port your app listens on (used locally; Workers ignore this)
 

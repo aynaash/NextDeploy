@@ -83,7 +83,7 @@ func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow
 	if meta.AppName != "" {
 		domain := meta.Domain
 		if domain == "" {
-			domain = cfg.App.Domain
+			domain = cfg.App.Domain.Name
 		}
 		if domain != "" {
 			caddyPlan := caddy.GenerateCaddyfile(meta.AppName, domain, string(meta.OutputMode), meta.Config.Port, "/opt/nextdeploy/apps/"+meta.AppName+"/current", meta.DetectedFeatures, meta.DistDir, meta.ExportDir)
@@ -110,11 +110,11 @@ func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow
 	}
 	log.Info("Deployment server: %s", deploymentServer)
 
-	if cfg.App.Domain != "" {
-		if err := dns.GenerateVPSGuide(cfg.App.Domain, deploymentServer); err != nil {
+	if cfg.App.Domain.Name != "" {
+		if err := dns.GenerateVPSGuide(cfg.App.Domain.Name, deploymentServer); err != nil {
 			log.Warn("Failed to generate DNS guide: %v", err)
 		} else {
-			log.Info("   DNS Guide Generated: dns.md (Point %s to %s)", cfg.App.Domain, deploymentServer)
+			log.Info("   DNS Guide Generated: dns.md (Point %s to %s)", cfg.App.Domain.Name, deploymentServer)
 		}
 	}
 
@@ -167,7 +167,7 @@ func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow
 		AppName:        cfg.App.Name,
 		Environment:    "production",
 		ServerIP:       deploymentServer,
-		CustomDomain:   cfg.App.Domain,
+		CustomDomain:   cfg.App.Domain.Name,
 		Port:           port,
 		DeploymentTime: time.Now(),
 		DNSProvider:    dnsProvider,

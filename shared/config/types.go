@@ -399,7 +399,7 @@ type AppConfig struct {
 	Name        string          `yaml:"name"`
 	Port        int             `yaml:"port"`
 	Environment string          `yaml:"environment"`
-	Domain      string          `yaml:"domain,omitempty"`
+	Domain      DomainConfig    `yaml:"domain,omitempty"`
 	CDNEnabled  bool            `yaml:"cdn_enabled,omitempty"`
 	Secrets     *SecretsConfig  `yaml:"secrets,omitempty"`
 	Resources   *ResourceLimits `yaml:"resources,omitempty"`
@@ -407,6 +407,53 @@ type AppConfig struct {
 	// bucket / app data) unless explicitly overridden with --force. Off by
 	// default; set true for production apps.
 	DeletionProtection bool `yaml:"deletion_protection,omitempty"`
+}
+
+// DomainConfig describes the app's custom domain and where its DNS lives. In
+// nextdeploy.yml it accepts either a bare hostname or a block, so existing
+// `domain: example.com` configs keep working unchanged:
+//
+//	domain: example.com
+//
+//	domain:
+//	  name: example.com
+//	  provider: cloudflare   # namecheap | cloudflare | other
+//	  dns: auto              # auto (provider API) | manual (print records)
+//	  zone: example.com
+//
+// Provider/DNS drive how `init`/`ship` guide DNS setup: a Cloudflare-owned zone
+// with dns:auto can be configured via the API, while namecheap/other or
+// dns:manual print the exact records to add at the registrar.
+type DomainConfig struct {
+	Name     string `yaml:"name"`
+	Provider string `yaml:"provider,omitempty"`
+	DNS      string `yaml:"dns,omitempty"`
+	Zone     string `yaml:"zone,omitempty"`
+}
+
+// UnmarshalYAML accepts both the scalar form (`domain: example.com`) and the
+// block form, keeping older configs valid.
+func (d *DomainConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		return value.Decode(&d.Name)
+	}
+	type rawDomain DomainConfig // alias avoids recursing into this method
+	var raw rawDomain
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*d = DomainConfig(raw)
+	return nil
+}
+
+// MarshalYAML emits the compact scalar form when only the name is set, so
+// simple configs round-trip cleanly instead of expanding into a block.
+func (d DomainConfig) MarshalYAML() (interface{}, error) {
+	if d.Provider == "" && d.DNS == "" && d.Zone == "" {
+		return d.Name, nil
+	}
+	type rawDomain DomainConfig
+	return rawDomain(d), nil
 }
 
 // ResourceLimits is the opt-in cgroup throttling layer for VPS deploys. Each
