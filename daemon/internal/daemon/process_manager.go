@@ -6,9 +6,25 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/aynaash/nextdeploy/shared/config"
 )
+
+// processAlive reports whether a PID still refers to a live process. Signal 0
+// performs existence/permission checks without delivering a signal: nil means
+// alive, EPERM means alive-but-not-ours, ESRCH means gone.
+func processAlive(pidStr string) bool {
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil || pid <= 0 {
+		return false
+	}
+	err = syscall.Kill(pid, 0)
+	return err == nil || err == syscall.EPERM
+}
 
 type ProcessManager struct {
 	systemdDir  string
@@ -22,7 +38,7 @@ func NewProcessManager() *ProcessManager {
 	}
 }
 
-func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode string, dopplerToken string, port int, packageManager string, releaseID string) (string, bool, error) {
+func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode string, dopplerToken string, port int, packageManager string, releaseID string, limits *config.ResourceLimits) (string, bool, error) {
 	serviceName := fmt.Sprintf("nextdeploy-%s-%s.service", appName, releaseID)
 	servicePath := filepath.Join(pm.systemdDir, serviceName)
 
@@ -38,6 +54,13 @@ func (pm *ProcessManager) GenerateServiceFile(appName, projectDir, outputMode st
 		return "", false, nil
 	}
 
+	// Validate before any value reaches the unit file — a crafted resource
+	// string must never be able to inject extra directives.
+	if err := limits.Validate(); err != nil {
+		return "", false, err
+	}
+	resourceBlock := renderResourceLimits(limits)
+
 	serviceContent := fmt.Sprintf(`[Unit]
 Description=NextDeploy Next.js Application (%s)
 After=network.target
@@ -50,10 +73,19 @@ WorkingDirectory=%s
 ExecStart=%s
 Restart=on-failure
 RestartSec=5s
+
+# Lifecycle: guarantee fast, complete port release on rollout. A hung Node
+# process (unclosed pool, stuck async) is SIGKILLed after the timeout, and
+# KillMode=control-group reaps the whole cgroup so no child lingers on the port.
+TimeoutStopSec=10s
+KillMode=control-group
+KillSignal=SIGTERM
+FinalKillSignal=SIGKILL
+OOMPolicy=stop
 Environment=NODE_ENV=production
 Environment=PORT=%d
 EnvironmentFile=-%s/.env.nextdeploy
-
+%s
 # Security Sandboxing
 ProtectSystem=strict
 ProtectHome=yes
@@ -70,7 +102,7 @@ ReadWritePaths=%s
 
 [Install]
 WantedBy=multi-user.target
-`, appName, projectDir, execStart, port, projectDir, projectDir)
+`, appName, projectDir, execStart, port, projectDir, resourceBlock, projectDir)
 
 	if dopplerToken != "" {
 		envFilePath := filepath.Join(projectDir, ".env.nextdeploy")
@@ -107,6 +139,31 @@ WantedBy=multi-user.target
 	time.Sleep(500 * time.Millisecond)
 
 	return serviceName, true, nil
+}
+
+// renderResourceLimits emits the systemd cgroup directives for the opt-in
+// resource block. Returns "" when nothing is configured so the unit file is
+// byte-for-byte identical to the pre-feature output (limits off by default).
+// Values are assumed already validated by config.ResourceLimits.Validate.
+func renderResourceLimits(limits *config.ResourceLimits) string {
+	if limits == nil {
+		return ""
+	}
+	var b strings.Builder
+	if limits.CPUQuota != "" {
+		// CPUAccounting is implicit on cgroup v2 but harmless and explicit.
+		fmt.Fprintf(&b, "CPUAccounting=true\nCPUQuota=%s\n", limits.CPUQuota)
+	}
+	if limits.MemoryMax != "" {
+		fmt.Fprintf(&b, "MemoryAccounting=true\nMemoryMax=%s\n", limits.MemoryMax)
+	}
+	if limits.MemoryHigh != "" {
+		fmt.Fprintf(&b, "MemoryHigh=%s\n", limits.MemoryHigh)
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return "\n# --- Resource limits (cgroup, opt-in via nextdeploy.yml) ---\n" + b.String()
 }
 
 func (pm *ProcessManager) resolveExecStart(outputMode, packageManager, dopplerToken string) (string, error) {
@@ -209,15 +266,24 @@ func (pm *ProcessManager) StopService(serviceName string) error {
 	pidOut, _ := pidCmd.CombinedOutput()
 	pidStr := strings.TrimSpace(string(pidOut))
 
+	// systemctl stop blocks until the unit is fully stopped. With the unit's
+	// TimeoutStopSec/KillSignal=SIGTERM, systemd sends SIGTERM first and gives
+	// Node a grace window to drain in-flight requests (streaming, SSE, slow
+	// uploads), only escalating to SIGKILL itself after the timeout. So after a
+	// successful stop the process is already gone — no manual kill needed.
 	// #nosec G204
 	cmd := exec.Command(systemctl, "stop", serviceName)
+	stopFailed := false
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "not loaded") {
+		stopFailed = true
 		log.Printf("[process] Warning: systemctl stop %s failed: %v - %s", serviceName, err, string(out))
 	}
 
-	// Force kill if PID is known and still exists
-	if pidStr != "" && pidStr != "0" {
-		log.Printf("[process] Forcefully killing process %s for service %s", pidStr, serviceName)
+	// Last resort: only force-kill if the graceful stop failed AND the process
+	// is somehow still alive. Under normal operation this never fires; it guards
+	// against a wedged systemctl that returned an error without reaping the unit.
+	if stopFailed && pidStr != "" && pidStr != "0" && processAlive(pidStr) {
+		log.Printf("[process] Graceful stop failed; force-killing process %s for service %s", pidStr, serviceName)
 		// #nosec G204
 		_ = exec.Command("sudo", "kill", "-9", pidStr).Run()
 		// Also kill the process group to be sure

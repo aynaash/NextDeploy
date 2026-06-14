@@ -49,10 +49,23 @@ See: https://docs.ansible.com/ansible/latest/installation_guide/`,
 	Run: runPrepare,
 }
 
+var prepareAllowRoot bool
+
+// rootCredentialBlocked reports whether provisioning must be refused because the
+// configured SSH user is root. Pure, so it's unit-tested. --allow-root overrides.
+func rootCredentialBlocked(username string, allowRoot bool) (bool, string) {
+	if username == "root" && !allowRoot {
+		return true, "refusing to provision over the 'root' SSH login. Use a sudo-capable " +
+			"non-root user (recommended for security/compliance), or pass --allow-root to override."
+	}
+	return false, ""
+}
+
 func init() {
 	prepareCmd.Flags().BoolVar(&verbose, "verbose", false, "enable verbose Ansible output (-v)")
 	prepareCmd.Flags().DurationVar(&timeout, "timeout", 10*time.Minute, "overall timeout for the preparation")
 	prepareCmd.Flags().BoolVar(&streamMode, "stream", false, "stream raw Ansible output (no colour filter)")
+	prepareCmd.Flags().BoolVar(&prepareAllowRoot, "allow-root", false, "allow provisioning over a root SSH login (not recommended)")
 	rootCmd.AddCommand(prepareCmd)
 }
 
@@ -78,6 +91,14 @@ func runPrepare(cmd *cobra.Command, args []string) {
 	serverName, serverCfg, err := resolveTargetServer()
 	if err != nil {
 		PrepLogs.Error("Failed to resolve target server: %v", err)
+		os.Exit(1)
+	}
+
+	// Refuse to provision over a naked root login — a compliance non-starter in
+	// most professional networks. Apps run as the unprivileged `nextdeploy`
+	// user; provisioning only needs a sudo-capable account.
+	if blocked, reason := rootCredentialBlocked(serverCfg.Username, prepareAllowRoot); blocked {
+		PrepLogs.Error("%s", reason)
 		os.Exit(1)
 	}
 

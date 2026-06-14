@@ -278,6 +278,9 @@
         fi
       args:
         executable: /bin/bash
+        # Idempotency guard: skip the curl|bash install entirely if the binary
+        # is already in place, independent of the PATH-based fact above.
+        creates: /usr/local/bin/bun
       when: not bun_installed
 
     - name: "Phase 2 | Bun | Verify symlink is executable"
@@ -347,6 +350,8 @@
         sudo ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
       args:
         executable: /bin/bash
+        # Idempotency guard: skip re-download/extract if go is already installed.
+        creates: /usr/local/bin/go
       become: true
       when: not go_installed
 
@@ -387,6 +392,8 @@
         fi
       args:
         executable: /bin/bash
+        # Idempotency guard: skip the install script if doppler is already present.
+        creates: /usr/local/bin/doppler
       when: not doppler_installed
 
     - name: "Phase 2 | Doppler | Assert installed"

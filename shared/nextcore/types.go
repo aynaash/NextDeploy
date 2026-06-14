@@ -30,6 +30,13 @@ type NextCorePayload struct {
 	ExportDir         string            `json:"export_dir"`
 	OutputMode        OutputMode        `json:"output_mode"`
 	PackageManager    string            `json:"package_manager"`
+	// Resources carries the opt-in cgroup limits from nextdeploy.yml through to
+	// the daemon's systemd unit generator. Nil means "no limits" (the default).
+	Resources *config.ResourceLimits `json:"resources,omitempty"`
+	// HealthPath is the HTTP path the daemon probes before cutting over to a new
+	// release. Empty means "/". A release that binds its port but returns >=500
+	// on this path fails activation, so the old release stays live.
+	HealthPath string `json:"health_path,omitempty"`
 }
 
 type BuildLock struct {

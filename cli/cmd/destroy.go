@@ -15,10 +15,27 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	destroyForce bool
+	destroyYes   bool
+)
+
+// destroyBlocked reports whether a destroy must be refused. deletion_protection
+// blocks unconditionally unless --force is passed. Pure so it can be unit-tested.
+func destroyBlocked(protected, force bool) (bool, string) {
+	if protected && !force {
+		return true, "deletion_protection is enabled for this app — refusing to destroy. " +
+			"Re-run with --force to override (this can delete the R2 bucket and its data)."
+	}
+	return false, ""
+}
+
 var destroyCmd = &cobra.Command{
 	Use:   "destroy",
-	Short: "Remove the application files from the remote server",
-	Long:  "Deletes the application deployment from the remote VPS by removing the files in /opt/nextdeploy/apps/<app-name>.",
+	Short: "Remove the application and its provisioned resources",
+	Long: "Decommissions the deployment. For VPS this removes the app files/services; " +
+		"for serverless it deletes the Worker and its R2 bucket. This is destructive and " +
+		"can erase data — guarded by deletion_protection and an interactive confirmation.",
 	Run: func(cmd *cobra.Command, args []string) {
 		log := shared.PackageLogger("destroy", " DESTROY")
 		log.Info("Starting NextDeploy destruction process...")
@@ -27,6 +44,21 @@ var destroyCmd = &cobra.Command{
 		if err != nil {
 			log.Error("Failed to load config: %v", err)
 			os.Exit(1)
+		}
+
+		// Deletion guard: refuse if protected (unless --force), then require an
+		// explicit confirmation (unless --yes) before anything is removed.
+		if blocked, reason := destroyBlocked(cfg.App.DeletionProtection, destroyForce); blocked {
+			log.Error("%s", reason)
+			os.Exit(1)
+		}
+		if !destroyYes {
+			log.Warn("This will permanently destroy app %q and its resources (services, Caddy config, or the Worker + R2 bucket).", cfg.App.Name)
+			fmt.Printf("Type the app name %q to confirm destruction: ", cfg.App.Name)
+			if !confirmExact(cfg.App.Name) {
+				log.Info("Aborted — name did not match; nothing was destroyed.")
+				return
+			}
 		}
 
 		var meta nextcore.NextCorePayload
@@ -55,6 +87,8 @@ var destroyCmd = &cobra.Command{
 			switch cfg.Serverless.Provider {
 			case "aws":
 				p = serverless.NewAWSProvider(false)
+			case "cloudflare":
+				p = serverless.NewCloudflareProvider()
 			default:
 				log.Error("Unsupported serverless provider: %s", cfg.Serverless.Provider)
 				os.Exit(1)
@@ -122,6 +156,18 @@ var destroyCmd = &cobra.Command{
 	},
 }
 
+// confirmExact reads a line from stdin and reports whether it matches expected.
+// Used for destructive confirmations where typing the exact app name is required.
+func confirmExact(expected string) bool {
+	var answer string
+	if _, err := fmt.Scanln(&answer); err != nil {
+		return false
+	}
+	return answer == expected
+}
+
 func init() {
+	destroyCmd.Flags().BoolVar(&destroyForce, "force", false, "Override deletion_protection")
+	destroyCmd.Flags().BoolVar(&destroyYes, "yes", false, "Skip the interactive confirmation (non-interactive)")
 	rootCmd.AddCommand(destroyCmd)
 }

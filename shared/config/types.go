@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"regexp"
 
 	"gopkg.in/yaml.v3"
 )
@@ -395,12 +396,57 @@ type ServerConfig struct {
 }
 
 type AppConfig struct {
-	Name        string         `yaml:"name"`
-	Port        int            `yaml:"port"`
-	Environment string         `yaml:"environment"`
-	Domain      string         `yaml:"domain,omitempty"`
-	CDNEnabled  bool           `yaml:"cdn_enabled,omitempty"`
-	Secrets     *SecretsConfig `yaml:"secrets,omitempty"`
+	Name        string          `yaml:"name"`
+	Port        int             `yaml:"port"`
+	Environment string          `yaml:"environment"`
+	Domain      string          `yaml:"domain,omitempty"`
+	CDNEnabled  bool            `yaml:"cdn_enabled,omitempty"`
+	Secrets     *SecretsConfig  `yaml:"secrets,omitempty"`
+	Resources   *ResourceLimits `yaml:"resources,omitempty"`
+	// DeletionProtection refuses `nextdeploy destroy` (which can drop the R2
+	// bucket / app data) unless explicitly overridden with --force. Off by
+	// default; set true for production apps.
+	DeletionProtection bool `yaml:"deletion_protection,omitempty"`
+}
+
+// ResourceLimits is the opt-in cgroup throttling layer for VPS deploys. Each
+// field maps to a systemd directive in the generated unit; an empty field is
+// omitted entirely so a partial config never produces a malformed unit. Values
+// use systemd's own syntax (validated before they reach the unit file):
+//   - CPUQuota:   percentage, e.g. "80%" (may exceed 100% on multi-core)
+//   - MemoryMax:  hard cap, e.g. "1G" / "512M" (OOM-killed past this)
+//   - MemoryHigh: soft throttle, e.g. "800M" (reclaim pressure, not a kill)
+type ResourceLimits struct {
+	CPUQuota   string `yaml:"cpu_quota,omitempty"`
+	MemoryMax  string `yaml:"memory_max,omitempty"`
+	MemoryHigh string `yaml:"memory_high,omitempty"`
+}
+
+// These values are written verbatim into a systemd unit, so the grammar is
+// intentionally strict — anything outside it (newlines, extra directives) is
+// rejected before it can reach the unit file.
+var (
+	cpuQuotaPattern = regexp.MustCompile(`^[1-9][0-9]*%$`)
+	memoryPattern   = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?([KMGT])?$`)
+)
+
+// Validate rejects values that don't match systemd's resource-control grammar.
+// This is what stops a hostile or fat-fingered nextdeploy.yml from injecting
+// arbitrary unit directives via a crafted value.
+func (r *ResourceLimits) Validate() error {
+	if r == nil {
+		return nil
+	}
+	if r.CPUQuota != "" && !cpuQuotaPattern.MatchString(r.CPUQuota) {
+		return fmt.Errorf("resources.cpu_quota %q invalid: want a percentage like \"80%%\"", r.CPUQuota)
+	}
+	if r.MemoryMax != "" && !memoryPattern.MatchString(r.MemoryMax) {
+		return fmt.Errorf("resources.memory_max %q invalid: want a size like \"1G\" or \"512M\"", r.MemoryMax)
+	}
+	if r.MemoryHigh != "" && !memoryPattern.MatchString(r.MemoryHigh) {
+		return fmt.Errorf("resources.memory_high %q invalid: want a size like \"800M\"", r.MemoryHigh)
+	}
+	return nil
 }
 
 type Repository struct {

@@ -126,6 +126,7 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		PackageManager:   packageManager.String(),
 		OutputMode:       outputMode,
 		ImageAssets:      *imagesAssets,
+		Resources:        cfg.App.Resources,
 	}
 
 	if len(metadata.RouteInfo.ISRDetail) > 0 {

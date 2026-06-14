@@ -288,6 +288,18 @@ func getAuthMethods(cfg config.ServerConfig) ([]ssh.AuthMethod, error) {
 
 	return authMethods, nil
 }
+
+// isTruthyEnv reports whether an env-var value means "on". Accepts the usual
+// 1/true/yes/on spellings, case-insensitively; empty or anything else is false.
+func isTruthyEnv(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func getHostKeyCallback() (ssh.HostKeyCallback, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -311,12 +323,28 @@ func getHostKeyCallback() (ssh.HostKeyCallback, error) {
 		return nil, fmt.Errorf("failed to create known hosts callback: %w", err)
 	}
 
+	// Strict mode (NEXTDEPLOY_STRICT_HOST_KEY truthy) disables trust-on-first-use
+	// and fails closed on any unknown host. Intended for CI, where known_hosts is
+	// fresh every run, so *every* connection is a first connection and blind TOFU
+	// means host verification effectively never happens. Off by default to keep
+	// interactive first deploys ergonomic.
+	strict := isTruthyEnv(os.Getenv("NEXTDEPLOY_STRICT_HOST_KEY"))
+
 	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 		err := initialCallback(hostname, remote, key)
 		if err != nil {
 			var keyErr *knownhosts.KeyError
 			if errors.As(err, &keyErr) && len(keyErr.Want) == 0 {
-				serverlogger.Info("Adding unknown host %s to known_hosts automatically", hostname)
+				// Unknown host (no entry in known_hosts).
+				fingerprint := ssh.FingerprintSHA256(key)
+				if strict {
+					serverlogger.Error("Refusing to connect to unknown host %s (%s): strict host-key checking is on and the key is not pinned in known_hosts.", hostname, fingerprint)
+					return fmt.Errorf("unknown host %s: strict host-key checking rejected an unpinned key (%s)", hostname, fingerprint)
+				}
+				// TOFU: trust on first use, but log loudly — this connection had
+				// zero MITM protection. Operators can pin %s in known_hosts ahead
+				// of time (or set NEXTDEPLOY_STRICT_HOST_KEY) to close the window.
+				serverlogger.Warn("Trusting host %s on first use (%s) — this first connection is NOT protected against MITM. Set NEXTDEPLOY_STRICT_HOST_KEY=1 to fail closed instead.", hostname, fingerprint)
 				// #nosec G304
 				f, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_WRONLY, 0600)
 				if err != nil {

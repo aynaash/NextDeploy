@@ -6,15 +6,18 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aynaash/nextdeploy/daemon/internal/types"
 	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/config"
 	"github.com/aynaash/nextdeploy/shared/nextcore"
 	"github.com/aynaash/nextdeploy/shared/updater"
 )
@@ -35,6 +38,38 @@ type CommandHandler struct {
 	auditLogger    *AuditLogger
 	rateLimiter    *RateLimiter
 	replayGuard    *ReplayGuard
+	deployLocks    *appLocker
+}
+
+// appLocker serializes mutating operations (ship, rollback, destroy) per app so
+// two overlapping operations for the same app cannot interleave their `current`
+// symlink flips or persisted port writes. The rate limiter throttles request
+// rate but does not serialize mutations — this does. Operations fail fast with a
+// clear message rather than queueing, so the operator never waits on a silent stall.
+type appLocker struct {
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
+}
+
+func newAppLocker() *appLocker {
+	return &appLocker{locks: make(map[string]*sync.Mutex)}
+}
+
+// tryAcquire grabs the per-app lock without blocking. The returned release func
+// is nil and ok is false if another operation already holds the lock.
+func (a *appLocker) tryAcquire(app string) (release func(), ok bool) {
+	a.mu.Lock()
+	m, exists := a.locks[app]
+	if !exists {
+		m = &sync.Mutex{}
+		a.locks[app] = m
+	}
+	a.mu.Unlock()
+
+	if !m.TryLock() {
+		return nil, false
+	}
+	return m.Unlock, true
 }
 
 func NewCommandHandler(config *types.DaemonConfig) *CommandHandler {
@@ -63,6 +98,7 @@ func NewCommandHandler(config *types.DaemonConfig) *CommandHandler {
 		auditLogger:    NewAuditLogger(auditPath),
 		rateLimiter:    NewRateLimiter(rate, burst),
 		replayGuard:    NewReplayGuard(5 * time.Minute),
+		deployLocks:    newAppLocker(),
 	}
 }
 
@@ -313,6 +349,14 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 		return types.Response{Success: false, Message: err.Error()}
 	}
 
+	// Serialize mutating ops per app: a concurrent ship/rollback/destroy for the
+	// same app must not interleave symlink flips or port writes.
+	release, ok := ch.deployLocks.tryAcquire(appName)
+	if !ok {
+		return types.Response{Success: false, Message: fmt.Sprintf("another deploy or rollback for %q is already in progress", appName)}
+	}
+	defer release()
+
 	domain := Coalesce(meta.Domain, "localhost")
 	if err := validateDomain(domain); err != nil {
 		return types.Response{Success: false, Message: err.Error()}
@@ -372,6 +416,8 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 		DetectedFeatures: meta.DetectedFeatures,
 		DistDir:          meta.DistDir,
 		ExportDir:        meta.ExportDir,
+		Resources:        meta.Resources,
+		HealthPath:       meta.HealthPath,
 	}
 	return ch.activateRelease(ctx)
 }
@@ -388,9 +434,18 @@ type ReleaseContext struct {
 	DetectedFeatures *nextcore.DetectedFeatures
 	DistDir          string
 	ExportDir        string
+	Resources        *config.ResourceLimits
+	HealthPath       string
 }
 
 func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
+	// Host runtime drift: records the baseline on first deploy; on later deploys
+	// warns loudly if Node/glibc/arch changed out from under the compiled
+	// artifact (e.g. an apt upgrade). Streams to the operator's CLI.
+	for _, w := range CheckRuntimeDrift(ch.stateManager) {
+		log.Printf("[drift] ⚠️  Host environment drift detected — %s. The artifact was compiled against a different runtime and may misbehave; re-prepare or rebuild if it crashes.", w)
+	}
+
 	currentSymlink := filepath.Join(appsDir, ctx.AppName, "current")
 	var serviceName string
 	var serviceGenerated bool
@@ -423,7 +478,7 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 	log.Printf("[activate] Allocated port %d for release %s", port, ctx.ReleaseID)
 
 	serviceName, serviceGenerated, err = ch.processManager.GenerateServiceFile(
-		ctx.AppName, ctx.ReleaseDir, ctx.OutputMode, ctx.DopplerToken, port, ctx.PackageManager, ctx.ReleaseID,
+		ctx.AppName, ctx.ReleaseDir, ctx.OutputMode, ctx.DopplerToken, port, ctx.PackageManager, ctx.ReleaseID, ctx.Resources,
 	)
 	if err != nil {
 		ch.stateManager.SetPort(ctx.AppName, 0)
@@ -448,7 +503,7 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 	}
 
 	log.Printf("[activate] Waiting for app to become healthy on port %d...", port)
-	if err := waitForHealthy(port, 5*time.Minute); err != nil {
+	if err := waitForHealthy(port, ctx.HealthPath, 5*time.Minute); err != nil {
 		log.Printf("[activate] Health check failed on port %d, cleaning up...", port)
 		if serviceGenerated {
 			_ = ch.processManager.RemoveService(serviceName)
@@ -547,6 +602,12 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 		return types.Response{Success: false, Message: err.Error()}
 	}
 
+	release, ok := ch.deployLocks.tryAcquire(appName)
+	if !ok {
+		return types.Response{Success: false, Message: fmt.Sprintf("another deploy or rollback for %q is already in progress", appName)}
+	}
+	defer release()
+
 	// Optional rollback selectors. JSON-over-socket decodes numbers as float64.
 	steps := 1
 	if v, ok := args["steps"].(float64); ok && v > 0 {
@@ -609,6 +670,8 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 		DetectedFeatures: meta.DetectedFeatures,
 		DistDir:          meta.DistDir,
 		ExportDir:        meta.ExportDir,
+		Resources:        meta.Resources,
+		HealthPath:       meta.HealthPath,
 	}
 	return ch.activateRelease(ctx)
 }
@@ -711,18 +774,43 @@ func findFreePort() (int, func() error, error) {
 	return port, ln.Close, nil
 }
 
-func waitForHealthy(port int, timeout time.Duration) error {
+// waitForHealthy gates the cutover. It first waits for the port to accept a TCP
+// connection (fast-fail while the process is still starting), then escalates to
+// an HTTP GET on healthPath and requires a status < 500. A Next.js process can
+// accept TCP while returning 500 on every request (bad env, failed DB connect,
+// broken ISR) — the HTTP probe stops the daemon from flipping `current` onto a
+// release that is "up" but serving errors. healthPath defaults to "/".
+func waitForHealthy(port int, healthPath string, timeout time.Duration) error {
+	if healthPath == "" {
+		healthPath = "/"
+	}
+	if !strings.HasPrefix(healthPath, "/") {
+		healthPath = "/" + healthPath
+	}
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	url := fmt.Sprintf("http://%s%s", addr, healthPath)
 	deadline := time.Now().Add(timeout)
 
+	client := &http.Client{Timeout: 3 * time.Second}
 	backoff := 100 * time.Millisecond
 	maxBackoff := 2 * time.Second
 
 	for time.Now().Before(deadline) {
+		// Gate 1: TCP dial — cheap liveness while the process is still binding.
 		conn, err := net.DialTimeout("tcp", addr, 1*time.Second)
 		if err == nil {
 			_ = conn.Close()
-			return nil
+
+			// Gate 2: HTTP probe — require the app to actually serve a non-5xx
+			// response before we consider it healthy.
+			resp, herr := client.Get(url)
+			if herr == nil {
+				_ = resp.Body.Close()
+				if resp.StatusCode < 500 {
+					return nil
+				}
+				log.Printf("[activate] %s returned %d, still waiting for a healthy response...", url, resp.StatusCode)
+			}
 		}
 
 		time.Sleep(backoff)
@@ -731,7 +819,7 @@ func waitForHealthy(port int, timeout time.Duration) error {
 			backoff = maxBackoff
 		}
 	}
-	return fmt.Errorf("app did not become healthy on %s within %s", addr, timeout)
+	return fmt.Errorf("app did not become healthy on %s within %s", url, timeout)
 }
 
 func pruneReleases(appName string, keep int) error {
@@ -744,19 +832,39 @@ func pruneReleases(appName string, keep int) error {
 		return fmt.Errorf("read releases dir: %w", err)
 	}
 
-	if len(entries) <= keep {
-		return nil
+	// Collect directory names and sort explicitly before trimming. ReadDir
+	// returns lexically-sorted names, but relying on that ordering is brittle:
+	// a single non-conforming dir name (legacy bare-timestamp, manual dir) could
+	// otherwise prune the wrong release. The release-ID scheme {unix-ts}-{sha}
+	// makes lexical order == chronological order, so sort.Strings is canonical —
+	// mirroring the explicit sort in handleRollback.
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			names = append(names, entry.Name())
+		}
 	}
 
-	toDelete := entries[:len(entries)-keep]
-	for _, entry := range toDelete {
-		path := filepath.Join(releasesDir, entry.Name())
+	for _, name := range releasesToPrune(names, keep) {
+		path := filepath.Join(releasesDir, name)
 		log.Printf("[prune] Removing old release: %s", path)
 		if err := os.RemoveAll(path); err != nil {
 			log.Printf("[prune] Warning: failed to remove %s: %v", path, err)
 		}
 	}
 	return nil
+}
+
+// releasesToPrune returns the release IDs to delete, keeping the newest `keep`
+// by release-ID order. Pure and sort-stable so it can be unit-tested
+// independently of the filesystem.
+func releasesToPrune(names []string, keep int) []string {
+	if len(names) <= keep {
+		return nil
+	}
+	sorted := append([]string(nil), names...)
+	sort.Strings(sorted)
+	return sorted[:len(sorted)-keep]
 }
 
 func copyDir(src, dst string) error {
@@ -851,6 +959,12 @@ func (ch *CommandHandler) handleDestroy(args map[string]interface{}) types.Respo
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
 	}
+
+	release, ok := ch.deployLocks.tryAcquire(appName)
+	if !ok {
+		return types.Response{Success: false, Message: fmt.Sprintf("another deploy or rollback for %q is already in progress", appName)}
+	}
+	defer release()
 
 	log.Printf("[destroy] Destroying app: %s", appName)
 

@@ -10,6 +10,9 @@ import (
 
 type State struct {
 	Ports map[string]int `json:"ports"` // appName -> port
+	// Fingerprint is the host runtime baseline recorded on the first deploy.
+	// Re-checked each deploy to detect out-of-band host drift (glibc/Node bumps).
+	Fingerprint *EnvFingerprint `json:"fingerprint,omitempty"`
 }
 
 type StateManager struct {
@@ -73,4 +76,19 @@ func (sm *StateManager) SetPort(appName string, port int) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.state.Ports[appName] = port
+}
+
+// GetFingerprint returns the recorded host runtime baseline, or nil if none has
+// been captured yet.
+func (sm *StateManager) GetFingerprint() *EnvFingerprint {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.state.Fingerprint
+}
+
+// SetFingerprint records the host runtime baseline. Caller must Save() to persist.
+func (sm *StateManager) SetFingerprint(fp *EnvFingerprint) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.state.Fingerprint = fp
 }

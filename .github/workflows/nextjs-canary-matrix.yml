@@ -1,0 +1,127 @@
+name: Next.js Ecosystem Canary Matrix
+
+# Compiles a freshly-scaffolded Next.js app through NextDeploy's real Cloudflare
+# pipeline (BuildWorkerBundle: 13-phase nextcompile + esbuild) and asserts the
+# resulting Worker in Miniflare. Catches upstream drift in Next's standalone
+# output / action manifest / RSC surface before it reaches users.
+#
+# Compile-only: no Cloudflare credentials, no upload — BuildWorkerBundle just
+# emits the local worker.mjs.
+
+on:
+  schedule:
+    - cron: "0 0 * * 1" # Mondays 00:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.25.x"
+  GOTOOLCHAIN: local
+  DENIED_IP: "192.0.2.10"
+
+jobs:
+  canary:
+    name: Next.js ${{ matrix.next-version }} on Cloudflare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        next-version: ["latest", "canary"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Build the real CLI. Entrypoint is ./cli (cli/main.go), not cli/cmd.
+      - name: Build NextDeploy CLI
+        run: go build -o "$GITHUB_WORKSPACE/bin/nextdeploy" ./cli
+
+      # Scaffold a fixture pinned to the target Next.js release. Every option is
+      # specified so create-next-app runs non-interactively; flags are the
+      # current set (the removed --experimental-app / invalid --turbo=false from
+      # earlier drafts would fail here).
+      - name: Scaffold Next.js fixture (${{ matrix.next-version }})
+        run: |
+          npx --yes create-next-app@${{ matrix.next-version }} fixture \
+            --ts --app --eslint --src-dir --no-tailwind --no-turbopack \
+            --import-alias "@/*" --use-npm
+
+      # nextcore parses next.config.mjs (not .ts) and the Cloudflare target
+      # needs standalone output. Replace the scaffolded config.
+      - name: Configure fixture for standalone + Cloudflare
+        working-directory: fixture
+        run: |
+          rm -f next.config.ts next.config.js
+          cat > next.config.mjs <<'EOF'
+          /** @type {import('next').NextConfig} */
+          const nextConfig = { output: "standalone" };
+          export default nextConfig;
+          EOF
+
+          cat > nextdeploy.yml <<EOF
+          version: "1"
+          app:
+            name: canary
+            port: 3000
+            domain: canary.example.com
+            environment: production
+          repository:
+            url: https://example.com/canary.git
+            branch: main
+          secrets:
+            provider: none
+          serverless:
+            provider: cloudflare
+            cloudflare:
+              compatibility_date: "2025-04-01"
+              compatibility_flags: ["nodejs_compat_v2"]
+              protection:
+                enabled: true
+                deny: ["${DENIED_IP}"]
+          EOF
+
+      # GenerateMetadata calls git.GetCommitHash(); a fixture with no git repo
+      # fails the build. Seed a throwaway commit.
+      - name: Seed git (required by metadata generation)
+        working-directory: fixture
+        run: |
+          git init -q
+          git config user.email canary@nextdeploy.local
+          git config user.name "NextDeploy Canary"
+          git add -A
+          git commit -qm "canary fixture"
+
+      # Runs `next build` (standalone) and writes .nextdeploy/metadata.json.
+      - name: NextDeploy build
+        working-directory: fixture
+        run: "$GITHUB_WORKSPACE/bin/nextdeploy build"
+
+      # Drive the real compiler (BuildWorkerBundle) via the build-tagged harness.
+      # `go test` runs from the module dir; the harness chdirs into the fixture.
+      - name: Compile Worker bundle (canary harness)
+        env:
+          CANARY_FIXTURE_DIR: ${{ github.workspace }}/fixture
+        run: go test -tags canary -run TestCanaryCompile -v ./cli/internal/serverless/
+
+      - name: Install edge test deps
+        working-directory: tests/canary
+        run: npm install --no-save
+
+      - name: Miniflare edge assertions
+        working-directory: tests/canary
+        env:
+          WORKER_BUNDLE_PATH: ${{ github.workspace }}/fixture/.next/standalone/.nextdeploy-cf/worker.mjs
+          CANARY_FIXTURE_DIR: ${{ github.workspace }}/fixture
+          CANARY_DENIED_IP: ${{ env.DENIED_IP }}
+        run: npm test

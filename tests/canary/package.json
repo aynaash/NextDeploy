@@ -1,0 +1,13 @@
+{
+  "name": "nextdeploy-canary-edge-tests",
+  "private": true,
+  "type": "module",
+  "description": "Miniflare assertions for the Next.js ecosystem canary matrix. Not part of the app; run only by .github/workflows/nextjs-canary-matrix.yml.",
+  "scripts": {
+    "test": "vitest run --config ./vitest.config.ts"
+  },
+  "devDependencies": {
+    "miniflare": "^3.20240909.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -81,3 +81,6 @@ graphify-out/
 /docs/AWS_DEPLOY_FLOW.md
 /docs/VPS_DEPLOY_FLOW.md
 /docs/CLOUDFLARE_DEPLOY_FLOW.md
+
+# Stray local build artifact of cmd/imgopt
+/imgopt
