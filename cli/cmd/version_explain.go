@@ -10,7 +10,7 @@ var versionExplanation = explanation{
 		{
 			Num:       1,
 			Title:     "Read baked-in version",
-			Narrative: "Version string is set by the build via -ldflags -X main.version=…. Falls back to 'dev' for local builds without the ldflag.",
+			Narrative: "Version string is set by the build via -ldflags -X github.com/aynaash/nextdeploy/shared.Version=<tag>. Falls back to 'dev' for local builds without the ldflag.",
 			Ref:       "shared/version.go",
 			Function:  "shared.Version",
 			Output:    "semver string",

@@ -84,7 +84,7 @@ func Execute() {
 	fmt.Println(strings.Repeat("─", 60))
 	fmt.Printf("%s %s\n",
 		command("Need help?"),
-		warning("Visit https://github.com/aynaash/nextdeploy"),
+		warning("Docs: https://nextdeploy.org/docs  ·  Repo: https://github.com/aynaash/NextDeploy"),
 	)
 	fmt.Println(strings.Repeat("─", 60))
 	fmt.Println()
