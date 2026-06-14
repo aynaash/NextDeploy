@@ -44,11 +44,14 @@ const fetchSecrets = async () => {
                 try {
                     envelope = JSON.parse(data);
                 } catch (e) {
-                    console.error('[bridge] Extension response was not valid JSON (secret=' + secretName + '): ' + e.message);
+                    // Never log e.message here: a JSON.parse failure on the
+                    // extension response can echo bytes of the wrapped secret
+                    // back into CloudWatch. The secret name is likewise omitted.
+                    console.error('[bridge] Extension response was not valid JSON. Check the Secrets Extension layer.');
                     return resolve({});
                 }
                 if (!envelope.SecretString) {
-                    console.error('[bridge] Extension returned envelope without SecretString (secret=' + secretName + ')');
+                    console.error('[bridge] Extension returned an envelope without SecretString. Check the Secrets Extension layer.');
                     return resolve({});
                 }
                 try {
@@ -56,7 +59,9 @@ const fetchSecrets = async () => {
                     console.log('[bridge] Successfully fetched secrets from extension');
                     resolve(secrets);
                 } catch (e) {
-                    console.error('[bridge] SecretString is not valid JSON (secret=' + secretName + '): ' + e.message + ' — check that the blob stored in Secrets Manager is a JSON object of key/value pairs');
+                    // Same reasoning: parsing SecretString, so e.message can
+                    // contain the secret blob itself — log only the remedy.
+                    console.error('[bridge] SecretString is not valid JSON — the blob in Secrets Manager must be a JSON object of key/value pairs.');
                     resolve({});
                 }
             });
@@ -102,7 +107,7 @@ const startServer = async () => {
     // here surfaces the real issue (IAM, missing blob, malformed JSON) in
     // CloudWatch and makes Lambda retry the cold start cleanly.
     if (secretName && secretsMode !== 'env' && Object.keys(secrets).length === 0) {
-        console.error('[bridge] FATAL: ND_SECRET_NAME=' + secretName + ' is set but no secrets were returned. Refusing to start server. Check the Secrets Extension layer, IAM (secretsmanager:GetSecretValue), and that the secret blob is non-empty JSON.');
+        console.error('[bridge] FATAL: ND_SECRET_NAME is set but no secrets were returned. Refusing to start server. Check the Secrets Extension layer, IAM (secretsmanager:GetSecretValue), and that the secret blob is non-empty JSON.');
         process.exit(1);
     }
 

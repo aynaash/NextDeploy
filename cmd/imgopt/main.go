@@ -171,7 +171,22 @@ func fetchImage(ctx context.Context, rawURL string) (image.Image, string, error)
 		return nil, "", fmt.Errorf("domain %s is not permitted", parsed.Host)
 	}
 
-	resp, err := http.Get(rawURL)
+	// The initial host is allow-listed, but http.Get follows redirects by
+	// default — an allowed origin could 302 to an internal address (SSRF). Use a
+	// client that re-validates every hop against the same allowlist so a
+	// redirect can never escape the permitted domains.
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after 10 redirects")
+			}
+			if !isAllowedDomain(req.URL.Host, req.URL.Scheme) {
+				return fmt.Errorf("redirect to disallowed domain %s blocked", req.URL.Host)
+			}
+			return nil
+		},
+	}
+	resp, err := client.Get(rawURL)
 	if err != nil {
 		return nil, "", err
 	}
