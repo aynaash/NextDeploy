@@ -36,6 +36,13 @@ func (hm *HealthMonitor) Start() {
 	go hm.monitorLoop()
 }
 
+// Stop cancels the monitor's context, ending monitorLoop and releasing the
+// cancel function created in NewHealthMonitor. Without this the context's
+// cancel is never called — a goroutine + context leak (gosec G118).
+func (hm *HealthMonitor) Stop() {
+	hm.cancel()
+}
+
 func (hm *HealthMonitor) monitorLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()

@@ -31,7 +31,25 @@ const (
 	lockFile    = "/tmp/nextdeploy-update.lock"
 	maxRetries  = 3
 	retryDelay  = 2 * time.Second
+	// maxBinarySize bounds how many bytes we will extract from a downloaded
+	// archive, so a maliciously-crafted (or corrupt) archive cannot exhaust disk
+	// via a decompression bomb. The real binaries are ~25-30MB; 512MiB is a
+	// generous ceiling that still fails closed.
+	maxBinarySize = 512 << 20
 )
+
+// copyBounded copies from src to dst, refusing more than maxBinarySize bytes.
+// Used when extracting a binary from an untrusted/remote archive (gosec G110).
+func copyBounded(dst io.Writer, src io.Reader) error {
+	n, err := io.Copy(dst, io.LimitReader(src, maxBinarySize+1))
+	if err != nil {
+		return err
+	}
+	if n > maxBinarySize {
+		return fmt.Errorf("extracted binary exceeds %d bytes; refusing (possible decompression bomb)", maxBinarySize)
+	}
+	return nil
+}
 
 type Release struct {
 	TagName string `json:"tag_name"`
@@ -630,13 +648,15 @@ func attemptDownload(url, destPath, binaryName string, opts *UpdateOptions) erro
 	req.Header.Set("Accept", "application/octet-stream")
 	req.Header.Set("User-Agent", "nextdeploy-updater/"+shared.Version)
 
-	client := &http.Client{
-		Timeout: 10 * time.Minute,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: !opts.VerifySSL,
-			},
-		},
+	// Secure by default: the standard client verifies TLS. We only build an
+	// insecure transport when the caller has explicitly opted out (e.g. an
+	// air-gapped mirror with a self-signed cert), and we say so loudly.
+	client := &http.Client{Timeout: 10 * time.Minute}
+	if !opts.VerifySSL {
+		fmt.Println("⚠️  TLS certificate verification is DISABLED for this download (VerifySSL=false).")
+		client.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec G402 -- explicit, opt-in only
+		}
 	}
 
 	resp, err := client.Do(req)
@@ -952,8 +972,7 @@ func extractZipBinary(archivePath, binaryName, destPath string) error {
 			}
 			defer closeBestEffort(out)
 
-			_, err = io.Copy(out, rc)
-			return err
+			return copyBounded(out, rc)
 		}
 	}
 	return fmt.Errorf("binary %s not found in zip archive", binaryName)
@@ -989,8 +1008,7 @@ func extractTarGzBinary(archivePath, binaryName, destPath string) error {
 			}
 			defer closeBestEffort(out)
 
-			_, err = io.Copy(out, tr)
-			return err
+			return copyBounded(out, tr)
 		}
 	}
 	return fmt.Errorf("binary %s not found in tar.gz archive", binaryName)

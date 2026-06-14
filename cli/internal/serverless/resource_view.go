@@ -728,6 +728,9 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
 		if domain == "" {
 			domain = resMap.CloudFrontDomain
 		}
+		// Escape the domain before embedding it as raw HTML — it derives from
+		// user/provider config and must not be able to inject markup.
+		safeDomain := template.HTMLEscapeString(domain)
 		dnsNotice = template.HTML(fmt.Sprintf(`
 <div class="notice-issued">
     <div class="notice-icon">✅</div>
@@ -735,7 +738,7 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
         <strong>SSL Certificate Issued — Your site is live!</strong>
         <p>Visit: <a href="https://%s" target="_blank" style="color:#6ee7b7;">https://%s</a></p>
     </div>
-</div>`, domain, domain))
+</div>`, safeDomain, safeDomain))
 	}
 
 	// ── Validation rows ────────────────────────────────────────────────────────

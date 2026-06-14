@@ -3,6 +3,7 @@ package serverless
 import (
 	"context"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -235,7 +236,7 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 					dc.Aliases = &cfTypes.Aliases{Items: []string{}, Quantity: aws.Int32(0)}
 				}
 				dc.Aliases.Items = append(dc.Aliases.Items, domain)
-				dc.Aliases.Quantity = aws.Int32(int32(len(dc.Aliases.Items)))
+				dc.Aliases.Quantity = aws.Int32(int32Len(len(dc.Aliases.Items)))
 				changed = true
 			}
 
@@ -334,7 +335,7 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 
 	if dc.Origins == nil || int(aws.ToInt32(dc.Origins.Quantity)) != len(expectedOrigins) {
 		dc.Origins = &cfTypes.Origins{
-			Quantity: aws.Int32(int32(len(expectedOrigins))),
+			Quantity: aws.Int32(int32Len(len(expectedOrigins))),
 			Items:    expectedOrigins,
 		}
 		changed = true
@@ -535,7 +536,7 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 
 		if updateBehaviors {
 			dc.CacheBehaviors = &cfTypes.CacheBehaviors{
-				Quantity: aws.Int32(int32(len(expectedBehaviors))),
+				Quantity: aws.Int32(int32Len(len(expectedBehaviors))),
 				Items:    expectedBehaviors,
 			}
 			changed = true
@@ -943,4 +944,14 @@ func (p *AWSProvider) ensureSecurityResponseHeadersPolicy(ctx context.Context, c
 	}
 
 	return *createRes.ResponseHeadersPolicy.Id, nil
+}
+
+// int32Len safely narrows a slice length to the int32 the AWS SDK Quantity
+// fields expect. Domain/origin/behavior counts can't realistically exceed
+// int32, but the explicit bound makes the conversion overflow-safe (gosec G115).
+func int32Len(n int) int32 {
+	if n < 0 || n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(n)
 }

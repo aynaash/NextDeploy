@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 
 	"github.com/aws/aws-lambda-go/events"
@@ -125,7 +126,13 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 func invalidatePaths(ctx context.Context, paths []string) error {
 	cf := cloudfront.NewFromConfig(awsCfg)
 
-	quantity := int32(len(paths))
+	// Bound the conversion so a pathological path count can't overflow int32
+	// (gosec G115). Invalidation batches are tiny in practice.
+	n := len(paths)
+	if n > math.MaxInt32 {
+		n = math.MaxInt32
+	}
+	quantity := int32(n)
 	req := &cloudfront.CreateInvalidationInput{
 		DistributionId: aws.String(distributionID),
 		InvalidationBatch: &types.InvalidationBatch{
