@@ -119,6 +119,12 @@ func TestRenderNextDeployYAML_DetectedAndEmpty(t *testing.T) {
 			t.Errorf("rendered yaml missing %q\n%s", frag, y)
 		}
 	}
+	// The domain is configured in the file via a commented block, not prompted.
+	for _, frag := range []string{"# domain: app.example.com", "#   provider: cloudflare", "#   dns: auto"} {
+		if !strings.Contains(y, frag) {
+			t.Errorf("rendered yaml missing domain guidance %q\n%s", frag, y)
+		}
+	}
 
 	// Empty: still a valid minimal cloudflare config.
 	empty := t.TempDir()
