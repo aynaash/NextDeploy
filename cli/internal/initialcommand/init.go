@@ -161,7 +161,16 @@ func runSniffExisting(log *shared.Logger, appName string) error {
 	// `domain:` block under `app:`), not prompted on the CLI.
 	configContent := res.RenderNextDeployYAML(appName)
 	if _, statErr := os.Stat("nextdeploy.yml"); statErr == nil {
-		log.Warn("nextdeploy.yml already exists — writing suggestion to nextdeploy.suggested.yml instead.")
+		// Don't clobber an existing config (it may carry hand-tuned bindings),
+		// but DO add the domain block to it if it has none — that's the field
+		// the CF deploy reads to attach a custom domain. The full sniff result
+		// still goes to nextdeploy.suggested.yml for the rest.
+		if added, err := addDomainStubToFile("nextdeploy.yml"); err != nil {
+			log.Warn("Could not add a domain block to nextdeploy.yml: %v", err)
+		} else if added {
+			log.Info("Added a commented domain block to nextdeploy.yml — set app.domain to attach a custom domain on ship.")
+		}
+		log.Warn("nextdeploy.yml already exists — writing the full suggestion to nextdeploy.suggested.yml.")
 		if err := os.WriteFile("nextdeploy.suggested.yml", []byte(configContent), 0600); err != nil {
 			return fmt.Errorf("failed to save suggestion: %w", err)
 		}
@@ -177,4 +186,66 @@ func runSniffExisting(log *shared.Logger, appName string) error {
 	}
 	log.Info("\n🎉 Setup complete! Review nextdeploy.yml, then run 'nextdeploy ship'.")
 	return nil
+}
+
+// domainStub is the single active `domain:` line inserted under `app:`. Active
+// (not commented) and valid as-is (empty domain), so the user just fills in the
+// value — no uncommenting, no indentation or duplicate-key mistakes. For a
+// custom registrar/DNS mode they can expand it into a name/provider/dns/zone block.
+const domainStub = "  domain: \"\" # optional custom domain, e.g. example.com — attached automatically on ship\n"
+
+// addDomainStubToFile inserts domainStub into an existing config file when its
+// app block has no domain. Returns whether it modified the file.
+func addDomainStubToFile(path string) (bool, error) {
+	data, err := os.ReadFile(path) // #nosec G304 -- path is the project's own nextdeploy.yml
+	if err != nil {
+		return false, err
+	}
+	out, added := insertDomainStub(string(data))
+	if !added {
+		return false, nil
+	}
+	if err := os.WriteFile(path, []byte(out), 0600); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// insertDomainStub adds the commented domain block to a nextdeploy.yml's app
+// block, right after the `name:` line, when no domain is set. It only edits text
+// (no YAML round-trip) so existing comments and formatting are preserved. It is
+// a no-op (added=false) if the app block already declares a domain or has no
+// recognizable `app:` / `name:` anchor.
+func insertDomainStub(content string) (out string, added bool) {
+	lines := strings.Split(content, "\n")
+	inApp := false
+	nameIdx := -1
+	for i, ln := range lines {
+		switch {
+		case ln == "app:" || strings.HasPrefix(ln, "app:"):
+			inApp = true
+		case inApp && len(ln) > 0 && ln[0] != ' ' && ln[0] != '\t' && ln[0] != '#':
+			// A new top-level key ends the app block.
+			inApp = false
+		}
+		if !inApp {
+			continue
+		}
+		// Already has a domain under app — nothing to do.
+		if strings.HasPrefix(ln, "  domain:") || strings.HasPrefix(strings.TrimSpace(ln), "domain:") && strings.HasPrefix(ln, "  ") {
+			return content, false
+		}
+		if nameIdx == -1 && strings.HasPrefix(ln, "  name:") {
+			nameIdx = i
+		}
+	}
+	if nameIdx == -1 {
+		return content, false
+	}
+	stub := strings.TrimRight(domainStub, "\n")
+	newLines := make([]string, 0, len(lines)+6)
+	newLines = append(newLines, lines[:nameIdx+1]...)
+	newLines = append(newLines, strings.Split(stub, "\n")...)
+	newLines = append(newLines, lines[nameIdx+1:]...)
+	return strings.Join(newLines, "\n"), true
 }

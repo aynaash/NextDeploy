@@ -3,6 +3,10 @@ package infrasniff
 import (
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/aynaash/nextdeploy/shared/config"
 )
 
 func TestSuggestedCloudflareBlock_WranglerAuthoritative(t *testing.T) {
@@ -119,12 +123,13 @@ func TestRenderNextDeployYAML_DetectedAndEmpty(t *testing.T) {
 			t.Errorf("rendered yaml missing %q\n%s", frag, y)
 		}
 	}
-	// The domain is configured in the file via a commented block, not prompted.
-	for _, frag := range []string{"# domain: app.example.com", "#   provider: cloudflare", "#   dns: auto"} {
-		if !strings.Contains(y, frag) {
-			t.Errorf("rendered yaml missing domain guidance %q\n%s", frag, y)
-		}
+	// Domain is an active (editable) field, not a commented block.
+	if !strings.Contains(y, `  domain: ""`) {
+		t.Errorf("rendered yaml missing active domain field\n%s", y)
 	}
+	// Critical: the generated config must be valid YAML and parse into the real
+	// schema — `cloudflare:` must sit under `serverless:`, not `provider:`.
+	assertValidNextDeployYAML(t, y)
 
 	// Empty: still a valid minimal cloudflare config.
 	empty := t.TempDir()
@@ -133,6 +138,21 @@ func TestRenderNextDeployYAML_DetectedAndEmpty(t *testing.T) {
 	ey := er.RenderNextDeployYAML("bare")
 	if !strings.Contains(ey, "compatibility_date") {
 		t.Errorf("minimal yaml missing cloudflare stub:\n%s", ey)
+	}
+	assertValidNextDeployYAML(t, ey)
+}
+
+// assertValidNextDeployYAML fails if s is not parseable as a NextDeployConfig —
+// the regression guard for the init-generated config (it must never emit
+// mis-indented YAML that the loader rejects).
+func assertValidNextDeployYAML(t *testing.T, s string) {
+	t.Helper()
+	var c config.NextDeployConfig
+	if err := yaml.Unmarshal([]byte(s), &c); err != nil {
+		t.Fatalf("generated config is not valid YAML: %v\n%s", err, s)
+	}
+	if c.Serverless == nil || c.Serverless.Provider != "cloudflare" {
+		t.Errorf("expected serverless.provider=cloudflare, got %+v\n%s", c.Serverless, s)
 	}
 }
 
