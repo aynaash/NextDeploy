@@ -66,6 +66,22 @@ func (p *CloudflareProvider) Plan(ctx context.Context, cfg *config.NextDeployCon
 	res := cfg.Serverless.Cloudflare.Resources
 	out := &PlanResult{}
 
+	for _, d := range res.D1 {
+		item, err := p.planD1(ctx, d)
+		if err != nil {
+			return nil, fmt.Errorf("plan d1 %q: %w", d.Name, err)
+		}
+		out.Items = append(out.Items, item)
+	}
+
+	for _, k := range res.KV {
+		item, err := p.planKV(ctx, k)
+		if err != nil {
+			return nil, fmt.Errorf("plan kv %q: %w", k.Name, err)
+		}
+		out.Items = append(out.Items, item)
+	}
+
 	for _, h := range res.Hyperdrive {
 		item, err := p.planHyperdrive(ctx, h)
 		if err != nil {
@@ -107,6 +123,46 @@ func (p *CloudflareProvider) Plan(ctx context.Context, cfg *config.NextDeployCon
 	}
 
 	return out, nil
+}
+
+// planD1 reports create vs no-op for a D1 database. Migration drift can't be
+// computed read-only (it needs the DB to exist and a tracking-table query), so
+// for an existing DB we surface the local migration count as advisory detail
+// and leave the actual pending-set to apply-time idempotency.
+func (p *CloudflareProvider) planD1(ctx context.Context, decl config.CFD1Resource) (PlanItem, error) {
+	if decl.Name == "" {
+		return PlanItem{}, errors.New("name is required")
+	}
+	id, err := p.findD1ID(ctx, decl.Name)
+	if err != nil {
+		return PlanItem{}, err
+	}
+	detail := ""
+	if decl.MigrationsDir != "" {
+		files, err := sortedMigrationFiles(decl.MigrationsDir)
+		if err != nil {
+			return PlanItem{}, err
+		}
+		detail = fmt.Sprintf("%d migration file(s) in %s", len(files), decl.MigrationsDir)
+	}
+	if id == "" {
+		return PlanItem{Kind: "d1", Name: decl.Name, Action: PlanCreate, Detail: detail}, nil
+	}
+	return PlanItem{Kind: "d1", Name: decl.Name, Action: PlanNoOp, Detail: detail}, nil
+}
+
+func (p *CloudflareProvider) planKV(ctx context.Context, decl config.CFKVResource) (PlanItem, error) {
+	if decl.Name == "" {
+		return PlanItem{}, errors.New("name is required")
+	}
+	id, err := p.findKVNamespaceID(ctx, decl.Name)
+	if err != nil {
+		return PlanItem{}, err
+	}
+	if id == "" {
+		return PlanItem{Kind: "kv", Name: decl.Name, Action: PlanCreate}, nil
+	}
+	return PlanItem{Kind: "kv", Name: decl.Name, Action: PlanNoOp}, nil
 }
 
 func (p *CloudflareProvider) planHyperdrive(ctx context.Context, decl config.CFHyperdriveResource) (PlanItem, error) {

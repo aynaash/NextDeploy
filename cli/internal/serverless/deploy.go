@@ -15,6 +15,7 @@ import (
 	"github.com/aynaash/nextdeploy/shared/config"
 	"github.com/aynaash/nextdeploy/shared/envstore"
 	"github.com/aynaash/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/shared/secenv"
 	"github.com/aynaash/nextdeploy/shared/secrets"
 )
 
@@ -89,6 +90,13 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 		if err != nil {
 			log.Warn("Failed to load local secrets (non-fatal): %v", err)
 			appSecrets = map[string]string{}
+		}
+		// Register every secret value so it is scrubbed from any subsequent log
+		// output (deploy summaries, errors, smoke probes). Must happen before
+		// anything touches the values.
+		secenv.RegisterSecrets(appSecrets)
+		for _, warn := range secretsPreflight(cfg) {
+			log.Warn("secret hygiene: %s", warn)
 		}
 		if err := p.UpdateSecrets(ctx, cfg.App.Name, appSecrets); err != nil {
 			return fmt.Errorf("failed to push secrets to cloud provider: %w", err)
@@ -273,11 +281,12 @@ func loadLocalSecrets(cfg *config.NextDeployConfig) (map[string]string, error) {
 //     DOPPLER_CONFIG, DOPPLER_ENVIRONMENT, DOPPLER_TOKEN) are present →
 //     auto-detected, no config required. This is the
 //     `doppler run -- nextdeploy ship` path.
+//
 //  2. The user explicitly opts in via nextdeploy.yml:
 //
-//       secrets:
-//         doppler:
-//           inject_env: true
+//     secrets:
+//     doppler:
+//     inject_env: true
 //
 // Filtering strategy — allowlist, not denylist:
 //
@@ -448,20 +457,20 @@ func shouldHarvestEnvKey(k string) bool {
 		return false
 	}
 	denyPrefixes := []string{
-		"DOPPLER_",       // Doppler bookkeeping (we don't push our own auth)
-		"CLOUDFLARE_",    // CF deploy creds, not app secrets
-		"R2_",            // R2 deploy creds
-		"AWS_",           // AWS deploy creds
-		"GOOGLE_",        // GCP deploy creds
-		"AZURE_",         // Azure deploy creds
-		"NEXTDEPLOY_",    // our own internal flags
-		"ND_",            // our own internal flags (short prefix)
-		"BASH_",          // shell internals
-		"XDG_",           // XDG base dirs
-		"LC_",            // locale
-		"GITHUB_",        // GitHub Actions runner internals
-		"RUNNER_",        // GitHub Actions runner internals
-		"CI_",            // generic CI internals
+		"DOPPLER_",    // Doppler bookkeeping (we don't push our own auth)
+		"CLOUDFLARE_", // CF deploy creds, not app secrets
+		"R2_",         // R2 deploy creds
+		"AWS_",        // AWS deploy creds
+		"GOOGLE_",     // GCP deploy creds
+		"AZURE_",      // Azure deploy creds
+		"NEXTDEPLOY_", // our own internal flags
+		"ND_",         // our own internal flags (short prefix)
+		"BASH_",       // shell internals
+		"XDG_",        // XDG base dirs
+		"LC_",         // locale
+		"GITHUB_",     // GitHub Actions runner internals
+		"RUNNER_",     // GitHub Actions runner internals
+		"CI_",         // generic CI internals
 	}
 	for _, p := range denyPrefixes {
 		if strings.HasPrefix(k, p) {

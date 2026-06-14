@@ -1,0 +1,42 @@
+# NextDeploy config for __APP_NAME__ — Cloudflare Workers + R2 + BYO Postgres
+# (reached through Hyperdrive). Set DATABASE_URL as a secret.
+app:
+  name: __APP_NAME__
+
+serverless:
+  provider: cloudflare
+  cloudflare:
+    compatibility_date: "2025-04-01"
+    compatibility_flags: [nodejs_compat_v2]
+
+    bindings:
+      hyperdrive:
+        - { name: DB, ref: primary }
+      r2:
+        - { name: ASSETS }
+      ai:
+        - { name: AI }
+      kv:
+        - { name: RATE_LIMIT, ref: __APP_NAME__-rate-limit }
+      # Prefer Cloudflare Secret Store over plaintext for production secrets —
+      # the value lives in CF, only a reference ships:
+      # secrets_store:
+      #   - { name: STRIPE_KEY, store_id: <store-id>, secret_name: stripe_live }
+
+    resources:
+      hyperdrive:
+        - { name: primary, origin_env: DATABASE_URL }
+      kv:
+        - { name: __APP_NAME__-rate-limit }
+
+    # Edge protection guard — runs ahead of the app (auth + KV rate-limit).
+    protection:
+      enabled: true
+      public_paths: ["/", "/login"]
+      auth:
+        secret_env: AUTH_SECRET
+        protected_paths: ["/app/*"]
+        login_path: /login
+      rate_limit:
+        kv_binding: RATE_LIMIT
+        requests_per_minute: 60

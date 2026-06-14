@@ -34,6 +34,44 @@ func TestRuntimeSourceFiles_IncludesMVP(t *testing.T) {
 	}
 }
 
+func TestRuntimeSourceFiles_ExcludesTestFilesIncludesGuard(t *testing.T) {
+	files, err := RuntimeSourceFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPath(files, "runtime_src/guard.mjs") {
+		t.Errorf("guard.mjs should be a shipped runtime file\nfound: %v", files)
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f, ".test.mjs") {
+			t.Errorf("test file leaked into runtime source list: %s", f)
+		}
+	}
+}
+
+func TestExtractRuntime_DoesNotShipTestFiles(t *testing.T) {
+	dir := t.TempDir()
+	written, err := ExtractRuntime(dir)
+	if err != nil {
+		t.Fatalf("ExtractRuntime: %v", err)
+	}
+	for _, w := range written {
+		if strings.HasSuffix(w, ".test.mjs") {
+			t.Errorf("test file extracted into worker runtime: %s", w)
+		}
+	}
+	// guard.mjs (non-test) must ship.
+	guard := filepath.Join(dir, "_nextdeploy", "runtime", "guard.mjs")
+	if _, err := os.Stat(guard); err != nil {
+		t.Errorf("guard.mjs not extracted: %v", err)
+	}
+	// its test sibling must NOT.
+	guardTest := filepath.Join(dir, "_nextdeploy", "runtime", "guard.test.mjs")
+	if _, err := os.Stat(guardTest); err == nil {
+		t.Error("guard.test.mjs must not be extracted into the worker runtime")
+	}
+}
+
 func TestExtractRuntime_WritesFiles(t *testing.T) {
 	dir := t.TempDir()
 	written, err := ExtractRuntime(dir)

@@ -100,6 +100,52 @@ type CloudflareConfig struct {
 	// Vectorize indexes, AI Gateway slugs, DNS records, Zone settings).
 	// Populated by the user; consumed by `nextdeploy plan` and `apply`.
 	Resources *CFResources `yaml:"resources,omitempty"`
+
+	// Protection drives the generated edge guard (proxy layer) that runs ahead
+	// of the app: IP allow/deny, KV-backed per-IP rate limiting, and stateless
+	// session-cookie auth. Config-driven and regenerated on every deploy.
+	Protection *CFProtection `yaml:"protection,omitempty"`
+
+	// Observability controls Workers Logs for the deployed script. Logs are
+	// enabled by default (NextDeploy sets up log infra out of the box); set
+	// enabled:false to opt out, or tune the sampling rate.
+	Observability *CFObservability `yaml:"observability,omitempty"`
+}
+
+// CFObservability mirrors the Workers observability metadata. Enabled is a
+// pointer so "unset" can default to true while still allowing explicit false.
+type CFObservability struct {
+	Enabled          *bool   `yaml:"enabled,omitempty"`            // default true
+	HeadSamplingRate float64 `yaml:"head_sampling_rate,omitempty"` // 0..1, default 1
+}
+
+// CFProtection is the request-protection spec compiled into the Worker's edge
+// guard. Empty/absent (or Enabled=false) means no guard is emitted.
+type CFProtection struct {
+	Enabled     bool         `yaml:"enabled,omitempty"`
+	PublicPaths []string     `yaml:"public_paths,omitempty"` // never guarded (globs, e.g. "/", "/login", "/api/webhooks/*")
+	Auth        *CFAuth      `yaml:"auth,omitempty"`
+	RateLimit   *CFRateLimit `yaml:"rate_limit,omitempty"`
+	Allow       []string     `yaml:"allow,omitempty"` // IP allowlist (exact IP); if set, only these pass
+	Deny        []string     `yaml:"deny,omitempty"`  // IP denylist (exact IP)
+}
+
+// CFAuth configures stateless session-cookie protection. The cookie is verified
+// by HMAC against a secret read from SecretEnv at runtime — no DB round-trip, so
+// it works the same whether the app uses D1 or a bring-your-own Postgres/MySQL.
+type CFAuth struct {
+	SecretEnv      string   `yaml:"secret_env,omitempty"`      // secret/env holding the signing key (default "AUTH_SECRET")
+	CookieName     string   `yaml:"cookie_name,omitempty"`     // session cookie name (default "session")
+	ProtectedPaths []string `yaml:"protected_paths,omitempty"` // require auth (globs); default = everything not public
+	LoginPath      string   `yaml:"login_path,omitempty"`      // unauthenticated redirect target (default "/login")
+}
+
+// CFRateLimit configures KV-backed per-IP rate limiting. Counters live in the
+// KV namespace bound as KVBinding; the guard increments per fixed 60s window.
+type CFRateLimit struct {
+	KVBinding         string   `yaml:"kv_binding,omitempty"`          // KV binding name (default "RATE_LIMIT")
+	RequestsPerMinute int      `yaml:"requests_per_minute,omitempty"` // window allowance (default 60)
+	Paths             []string `yaml:"paths,omitempty"`               // limited paths (globs); default = all
 }
 
 type CFCustomDomain struct {
@@ -118,6 +164,7 @@ type CFTriggers struct {
 
 type CFBindings struct {
 	R2             []CFR2Binding         `yaml:"r2,omitempty"`
+	D1             []CFD1Binding         `yaml:"d1,omitempty"`
 	Hyperdrive     []CFHyperdriveBinding `yaml:"hyperdrive,omitempty"`
 	Queues         *CFQueueBindings      `yaml:"queues,omitempty"`
 	Vectorize      []CFVectorizeBinding  `yaml:"vectorize,omitempty"`
@@ -125,6 +172,28 @@ type CFBindings struct {
 	DurableObjects []CFDOBinding         `yaml:"durable_objects,omitempty"`
 	KV             []CFKVBinding         `yaml:"kv,omitempty"`
 	PlainText      []CFPlainTextBinding  `yaml:"plain_text,omitempty"`
+	// SecretsStore references secrets held in Cloudflare Secret Store instead of
+	// inlining secret_text values in the upload. Preferred for CF deployments:
+	// the secret value never travels through nextdeploy.yml or the script
+	// metadata — only a store_id + secret_name reference does.
+	SecretsStore []CFSecretStoreBinding `yaml:"secrets_store,omitempty"`
+}
+
+// CFSecretStoreBinding binds env.<Name> to a secret stored in Cloudflare Secret
+// Store. The value is resolved at the edge from the store, never embedded here.
+type CFSecretStoreBinding struct {
+	Name       string `yaml:"name"`        // JS variable name
+	StoreID    string `yaml:"store_id"`    // Secret Store ID
+	SecretName string `yaml:"secret_name"` // name of the secret within the store
+}
+
+// CFD1Binding wires a D1 (serverless SQLite) database to env.<Name>. Mirrors
+// the Hyperdrive pattern: supply an explicit ID, or a Ref pointing at an entry
+// in resources.d1 that the provisioner creates and resolves to a UUID.
+type CFD1Binding struct {
+	Name string `yaml:"name"`          // JS variable name (e.g. "DB")
+	ID   string `yaml:"id,omitempty"`  // CF D1 database UUID
+	Ref  string `yaml:"ref,omitempty"` // OR: name of a resource in resources.d1
 }
 
 type CFR2Binding struct {
@@ -181,7 +250,8 @@ type CFDOBinding struct {
 
 type CFKVBinding struct {
 	Name        string `yaml:"name"`
-	NamespaceID string `yaml:"namespace_id"`
+	NamespaceID string `yaml:"namespace_id,omitempty"` // explicit KV namespace UUID
+	Ref         string `yaml:"ref,omitempty"`          // OR: name of a resource in resources.kv
 }
 
 type CFPlainTextBinding struct {
@@ -214,12 +284,24 @@ type CFTransferredDO struct {
 // creates missing ones, updates drifted ones (mutable fields only), and
 // errors on immutable drift (e.g. Vectorize dims).
 type CFResources struct {
+	D1           []CFD1Resource         `yaml:"d1,omitempty"`
+	KV           []CFKVResource         `yaml:"kv,omitempty"`
 	Hyperdrive   []CFHyperdriveResource `yaml:"hyperdrive,omitempty"`
 	Queues       []CFQueueResource      `yaml:"queues,omitempty"`
 	Vectorize    []CFVectorizeResource  `yaml:"vectorize,omitempty"`
 	AIGateway    []CFAIGatewayResource  `yaml:"ai_gateway,omitempty"`
 	DNS          []CFDNSRecord          `yaml:"dns,omitempty"`
 	ZoneSettings *CFZoneSettings        `yaml:"zone_settings,omitempty"`
+}
+
+// CFD1Resource is a desired-state D1 database. The provisioner creates it if
+// missing (name is the unique key) and, when MigrationsDir is set, applies any
+// *.sql files not yet recorded in the _nextdeploy_migrations tracking table.
+// Forward-only, lexical order — compatible with drizzle-kit's numbered output.
+type CFD1Resource struct {
+	Name          string `yaml:"name"`                     // D1 database name
+	MigrationsDir string `yaml:"migrations_dir,omitempty"` // dir of *.sql migrations to apply
+	LocationHint  string `yaml:"location_hint,omitempty"`  // optional primary region (e.g. "weur")
 }
 
 type CFHyperdriveResource struct {
@@ -230,6 +312,13 @@ type CFHyperdriveResource struct {
 
 type CFQueueResource struct {
 	Name string `yaml:"name"` // whatsapp-inbound, whatsapp-inbound-dlq
+}
+
+// CFKVResource is a desired-state KV namespace. The provisioner creates it by
+// title if missing (titles are unique per account) and resolves a binding's
+// ref: to the resulting namespace UUID.
+type CFKVResource struct {
+	Name string `yaml:"name"` // KV namespace title (e.g. "app-rate-limit")
 }
 
 type CFVectorizeResource struct {

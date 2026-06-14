@@ -33,7 +33,11 @@
 //	 ExtractRuntimeForVersion + AssembleBundle → CompiledBundle
 package nextcompile
 
-import "time"
+import (
+	"time"
+
+	"github.com/aynaash/nextdeploy/shared/protection"
+)
 
 // Target selects which deploy surface the bundle is compiled for.
 // The same scan phase feeds every target; emit phases diverge.
@@ -99,6 +103,12 @@ type CompileOpts struct {
 
 	// Target picks the emit strategy. Defaults to TargetCloudflareWorker.
 	Target Target
+
+	// Protection is the normalized edge-guard policy (built by the adapter
+	// from nextdeploy.yml `cloudflare.protection`). Nil means no guard: the
+	// emitted protection.json becomes the literal `null` and the dispatcher
+	// skips guarding.
+	Protection *protection.Runtime
 
 	// Verbose toggles per-step timing logs.
 	Verbose bool

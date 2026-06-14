@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // embeddedRuntime is the hand-written JS runtime that ships inside every
@@ -39,6 +40,10 @@ func ExtractRuntime(outDir string) ([]string, error) {
 			return err
 		}
 		if d.IsDir() {
+			return nil
+		}
+		if isRuntimeTestFile(p) {
+			// Co-located *.test.mjs are dev-only; never ship them in a Worker.
 			return nil
 		}
 
@@ -82,10 +87,17 @@ func RuntimeSourceFiles() ([]string, error) {
 		if d.IsDir() {
 			return nil
 		}
-		if filepath.Ext(p) == ".mjs" {
+		if filepath.Ext(p) == ".mjs" && !isRuntimeTestFile(p) {
 			out = append(out, p)
 		}
 		return nil
 	})
 	return out, err
+}
+
+// isRuntimeTestFile reports whether p is a co-located unit test (e.g.
+// guard.test.mjs). These are embedded by `//go:embed all:` but must never be
+// extracted into a deployed Worker or counted in the runtime content hash.
+func isRuntimeTestFile(p string) bool {
+	return strings.HasSuffix(p, ".test.mjs")
 }

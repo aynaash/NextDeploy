@@ -4,7 +4,41 @@ import (
 	"github.com/aynaash/nextdeploy/shared/config"
 	"github.com/aynaash/nextdeploy/shared/nextcompile"
 	"github.com/aynaash/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/shared/protection"
 )
+
+// buildProtectionRuntime maps the YAML cloudflare.protection block onto the
+// decoupled protection.Config and normalizes it. Returns (nil, nil) when no
+// protection is declared (or it's disabled) — the compiler then emits a `null`
+// protection.json and the guard is a no-op.
+func buildProtectionRuntime(cfg *config.NextDeployConfig) (*protection.Runtime, error) {
+	if cfg == nil || cfg.Serverless == nil || cfg.Serverless.Cloudflare == nil || cfg.Serverless.Cloudflare.Protection == nil {
+		return nil, nil
+	}
+	p := cfg.Serverless.Cloudflare.Protection
+	c := &protection.Config{
+		Enabled:     p.Enabled,
+		PublicPaths: p.PublicPaths,
+		Allow:       p.Allow,
+		Deny:        p.Deny,
+	}
+	if p.Auth != nil {
+		c.Auth = &protection.Auth{
+			SecretEnv:      p.Auth.SecretEnv,
+			CookieName:     p.Auth.CookieName,
+			ProtectedPaths: p.Auth.ProtectedPaths,
+			LoginPath:      p.Auth.LoginPath,
+		}
+	}
+	if p.RateLimit != nil {
+		c.RateLimit = &protection.RateLimit{
+			KVBinding:         p.RateLimit.KVBinding,
+			RequestsPerMinute: p.RateLimit.RequestsPerMinute,
+			Paths:             p.RateLimit.Paths,
+		}
+	}
+	return protection.BuildRuntime(c)
+}
 
 // toCompilePayload translates nextcore.NextCorePayload (+ nextdeploy config)
 // into the shape nextcompile.Compile expects. The duplication is deliberate:

@@ -47,6 +47,22 @@ func (p *CloudflareProvider) ProvisionResources(ctx context.Context, cfg *config
 		p.provisioned = newResourceMap()
 	}
 
+	for _, d := range res.D1 {
+		id, err := p.ensureD1Database(ctx, d)
+		if err != nil {
+			return fmt.Errorf("d1 %q: %w", d.Name, err)
+		}
+		p.provisioned.set("d1", d.Name, id)
+	}
+
+	for _, k := range res.KV {
+		id, err := p.ensureKVNamespace(ctx, k.Name)
+		if err != nil {
+			return fmt.Errorf("kv %q: %w", k.Name, err)
+		}
+		p.provisioned.set("kv", k.Name, id)
+	}
+
 	for _, h := range res.Hyperdrive {
 		id, err := p.ensureHyperdrive(ctx, h)
 		if err != nil {

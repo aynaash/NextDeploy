@@ -73,6 +73,7 @@ func buildScriptMetadata(cf *config.CloudflareConfig, defaultBucket, entryName s
 		CompatibilityDate:  cloudflare.F(compatDate),
 		CompatibilityFlags: cloudflare.F(flags),
 		Bindings:           cloudflare.F(bindings),
+		Observability:      cloudflare.F(buildObservability(cf)),
 	}
 
 	if cf != nil && len(cf.Migrations) > 0 {
@@ -81,6 +82,37 @@ func buildScriptMetadata(cf *config.CloudflareConfig, defaultBucket, entryName s
 		)
 	}
 	return meta, nil
+}
+
+// buildObservability sets up Workers Logs for the script. Logs are ON by
+// default (NextDeploy provisions log infra out of the box) — the user must
+// explicitly set observability.enabled:false to opt out. head_sampling_rate
+// defaults to 1 (100%) and is clamped to [0,1].
+func buildObservability(cf *config.CloudflareConfig) workers.ScriptUpdateParamsMetadataObservability {
+	enabled := true
+	rate := 1.0
+	if cf != nil && cf.Observability != nil {
+		if cf.Observability.Enabled != nil {
+			enabled = *cf.Observability.Enabled
+		}
+		if cf.Observability.HeadSamplingRate > 0 {
+			rate = cf.Observability.HeadSamplingRate
+		}
+	}
+	if rate < 0 {
+		rate = 0
+	}
+	if rate > 1 {
+		rate = 1
+	}
+	return workers.ScriptUpdateParamsMetadataObservability{
+		Enabled:          cloudflare.F(enabled),
+		HeadSamplingRate: cloudflare.F(rate),
+		Logs: cloudflare.F(workers.ScriptUpdateParamsMetadataObservabilityLogs{
+			Enabled:        cloudflare.F(enabled),
+			InvocationLogs: cloudflare.F(enabled),
+		}),
+	}
 }
 
 // sortedKeys returns m's keys in ascending order. Used so binding emission
@@ -134,6 +166,25 @@ func buildBindings(cf *config.CloudflareConfig, defaultBucket string, resolveRef
 			Name:       cloudflare.F(r2.Name),
 			BucketName: cloudflare.F(bucket),
 			Type:       cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindR2BucketTypeR2Bucket),
+		})
+	}
+
+	for _, d := range b.D1 {
+		id := d.ID
+		if id == "" && d.Ref != "" {
+			resolved, ok := resolveRef("d1", d.Ref)
+			if !ok {
+				return nil, fmt.Errorf("d1 binding %q: ref %q not found in provisioned resources (run ProvisionResources first, or set id: explicitly)", d.Name, d.Ref)
+			}
+			id = resolved
+		}
+		if id == "" {
+			return nil, fmt.Errorf("d1 binding %q: id or ref required", d.Name)
+		}
+		out = append(out, workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindD1{
+			Name: cloudflare.F(d.Name),
+			ID:   cloudflare.F(id),
+			Type: cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindD1TypeD1),
 		})
 	}
 
@@ -202,9 +253,20 @@ func buildBindings(cf *config.CloudflareConfig, defaultBucket string, resolveRef
 	}
 
 	for _, kv := range b.KV {
+		id := kv.NamespaceID
+		if id == "" && kv.Ref != "" {
+			resolved, ok := resolveRef("kv", kv.Ref)
+			if !ok {
+				return nil, fmt.Errorf("kv binding %q: ref %q not found in provisioned resources (run ProvisionResources first, or set namespace_id: explicitly)", kv.Name, kv.Ref)
+			}
+			id = resolved
+		}
+		if id == "" {
+			return nil, fmt.Errorf("kv binding %q: namespace_id or ref required", kv.Name)
+		}
 		out = append(out, workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindKVNamespace{
 			Name:        cloudflare.F(kv.Name),
-			NamespaceID: cloudflare.F(kv.NamespaceID),
+			NamespaceID: cloudflare.F(id),
 			Type:        cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindKVNamespaceTypeKVNamespace),
 		})
 	}
@@ -214,6 +276,18 @@ func buildBindings(cf *config.CloudflareConfig, defaultBucket string, resolveRef
 			Name: cloudflare.F(pt.Name),
 			Text: cloudflare.F(pt.Value),
 			Type: cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindPlainTextTypePlainText),
+		})
+	}
+
+	for _, ss := range b.SecretsStore {
+		if ss.StoreID == "" || ss.SecretName == "" {
+			return nil, fmt.Errorf("secrets_store binding %q: store_id and secret_name are required", ss.Name)
+		}
+		out = append(out, workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindSecretsStoreSecret{
+			Name:       cloudflare.F(ss.Name),
+			StoreID:    cloudflare.F(ss.StoreID),
+			SecretName: cloudflare.F(ss.SecretName),
+			Type:       cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindSecretsStoreSecretTypeSecretsStoreSecret),
 		})
 	}
 

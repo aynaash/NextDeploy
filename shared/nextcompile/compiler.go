@@ -108,15 +108,21 @@ func Compile(ctx context.Context, opts CompileOpts) (*CompiledBundle, error) {
 		return nil, fmt.Errorf("emit action manifest: %w", err)
 	}
 
-	// Phase 12 — emit worker_entry.mjs (the esbuild entrypoint).
+	// Phase 12 — emit protection.json (edge-guard policy; `null` when unset).
+	protectionPath, err := EmitProtectionConfig(opts.Protection, opts.OutDir)
+	if err != nil {
+		return nil, fmt.Errorf("emit protection config: %w", err)
+	}
+
+	// Phase 13 — emit worker_entry.mjs (the esbuild entrypoint).
 	entryPath, err := EmitWorkerEntry(opts.OutDir)
 	if err != nil {
 		return nil, fmt.Errorf("emit worker entry: %w", err)
 	}
 
-	// Phase 13 — compute content hash over every generated/extracted file
+	// Phase 14 — compute content hash over every generated/extracted file
 	// in deterministic order. Adapter uses this to skip no-op redeploys.
-	hashInputs := append([]string{manifestPath, dispatchPath, actionManifestPath, entryPath}, runtimeFiles...)
+	hashInputs := append([]string{manifestPath, dispatchPath, actionManifestPath, protectionPath, entryPath}, runtimeFiles...)
 	if vendored != nil {
 		hashInputs = append(hashInputs, vendored.TargetPath)
 	}

@@ -54,7 +54,20 @@ export async function dispatch(request, env, ctx, tables) {
   const url = new URL(request.url);
   const pathname = stripBasePath(url.pathname, manifest.basePath);
 
+  // Expose the full binding set (KV, D1, R2, AI, secrets) to user proxy.ts /
+  // app code that can't import runtime internals at next-build time. Read it
+  // via globalThis.__nextdeployEnv (the scaffold ships a typed getEnv() helper).
+  globalThis.__nextdeployEnv = env;
+
   try {
+    // Protection guard runs before everything else (IP / rate-limit / auth),
+    // ahead of static assets, short-circuits, and the user middleware stack.
+    // No-op when protection.json is null.
+    if (tables.guard && tables.protection) {
+      const blocked = await tables.guard(request, env, ctx, tables.protection);
+      if (blocked) return blocked;
+    }
+
     const short = await tryShortCircuits(request, env, ctx, pathname, tables);
     if (short) return short;
 

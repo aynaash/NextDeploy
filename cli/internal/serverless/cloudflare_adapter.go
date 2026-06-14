@@ -59,11 +59,16 @@ func BuildWorkerBundle(
 	}
 
 	payload := toCompilePayload(meta, cfg)
+	prot, err := buildProtectionRuntime(cfg)
+	if err != nil {
+		return "", fmt.Errorf("protection config: %w", err)
+	}
 	bundle, err := nextcompile.Compile(ctx, nextcompile.CompileOpts{
 		StandaloneDir: standaloneDir,
 		Payload:       payload,
 		OutDir:        outDir,
 		Target:        nextcompile.TargetCloudflareWorker,
+		Protection:    prot,
 		Log:           log,
 	})
 	if err != nil {

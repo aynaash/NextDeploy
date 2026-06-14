@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/aynaash/nextdeploy/cli/internal/infrasniff"
+	"github.com/aynaash/nextdeploy/cli/internal/scaffold"
 	"github.com/aynaash/nextdeploy/shared"
 	"github.com/aynaash/nextdeploy/shared/config"
 	"github.com/aynaash/nextdeploy/shared/nextcore"
@@ -65,6 +67,12 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 		targetType = "serverless"
 	}
 
+	// Cloudflare has two paths: scaffold a fresh fullstack app, or sniff the
+	// existing app in this directory and prefill its bindings.
+	if targetType == "cloudflare" {
+		return runCloudflareInit(log, appName)
+	}
+
 	// Use the raw template to preserve comments
 	configContent := config.GetSampleConfigTemplate(targetType)
 	configContent = strings.ReplaceAll(configContent, "name: example-app", "name: "+appName)
@@ -77,5 +85,92 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	log.Info("- Review your nextdeploy.yml configuration")
 	log.Info("- Run 'nextdeploy prepare' to prepare a target server")
 
+	return nil
+}
+
+// runCloudflareInit drives the Cloudflare-specific init: scaffold a new
+// opinionated fullstack template, or use the current directory's app (sniffing
+// its infra to prefill nextdeploy.yml).
+func runCloudflareInit(log *shared.Logger, appName string) error {
+	var choice string
+	if err := survey.AskOne(&survey.Select{
+		Message: "Cloudflare deployment — how do you want to start?",
+		Options: []string{
+			"Scaffold deployment infra (nextdeploy.yml + proxy.ts + bindings + CI)",
+			"Use my existing app in this directory",
+		},
+	}, &choice); err != nil {
+		return fmt.Errorf("prompt failed: %w", err)
+	}
+
+	if strings.Contains(choice, "Scaffold") {
+		return runScaffold(log, appName)
+	}
+	return runSniffExisting(log, appName)
+}
+
+// runScaffold writes the opinionated fullstack starter into the cwd.
+func runScaffold(log *shared.Logger, appName string) error {
+	var dbChoice string
+	if err := survey.AskOne(&survey.Select{
+		Message: "Which database?",
+		Options: []string{
+			"Cloudflare D1 (native SQLite)",
+			"Bring my own Postgres/MySQL (via Hyperdrive)",
+		},
+	}, &dbChoice); err != nil {
+		return fmt.Errorf("prompt failed: %w", err)
+	}
+	variant := scaffold.DBD1
+	if strings.Contains(dbChoice, "Bring my own") {
+		variant = scaffold.DBBYO
+	}
+
+	written, skipped, err := scaffold.Scaffold(scaffold.Options{
+		AppName: appName, DBVariant: variant, Dir: ".",
+	})
+	if err != nil {
+		return fmt.Errorf("scaffold: %w", err)
+	}
+
+	log.Info("\n🎉 Scaffolded Cloudflare deployment infra (conventions by aynaash/Hersi).")
+	log.Info("  Wrote %d files (db=%s). This is a deploy pipeline, not your app — build that yourself.", len(written), variant)
+	for _, s := range skipped {
+		log.Warn("  Kept existing file (not overwritten): %s", s)
+	}
+	log.Info("\nNext steps:")
+	log.Info("  1. npm install  &  build your app in app/")
+	log.Info("  2. nextdeploy secrets set AUTH_SECRET \"$(openssl rand -hex 32)\"")
+	log.Info("  3. nextdeploy apply  (provision D1/KV/R2/Hyperdrive from nextdeploy.yml)")
+	log.Info("  4. nextdeploy ship")
+	return nil
+}
+
+// runSniffExisting scans the cwd app and prefills nextdeploy.yml.
+func runSniffExisting(log *shared.Logger, appName string) error {
+	res, err := infrasniff.Sniff(".")
+	if err != nil {
+		return fmt.Errorf("sniff infra: %w", err)
+	}
+
+	log.Info("\n🔎 %s", res.Summary())
+
+	configContent := res.RenderNextDeployYAML(appName)
+	if _, statErr := os.Stat("nextdeploy.yml"); statErr == nil {
+		log.Warn("nextdeploy.yml already exists — writing suggestion to nextdeploy.suggested.yml instead.")
+		if err := os.WriteFile("nextdeploy.suggested.yml", []byte(configContent), 0600); err != nil {
+			return fmt.Errorf("failed to save suggestion: %w", err)
+		}
+	} else if err := os.WriteFile("nextdeploy.yml", []byte(configContent), 0600); err != nil {
+		return fmt.Errorf("failed to save configuration: %w", err)
+	}
+
+	if secrets := res.SecretsChecklist(); len(secrets) > 0 {
+		log.Info("\nSet these server secrets before shipping:")
+		for _, s := range secrets {
+			log.Info("  nextdeploy secrets set %s <value>", s)
+		}
+	}
+	log.Info("\n🎉 Setup complete! Review nextdeploy.yml, then run 'nextdeploy ship'.")
 	return nil
 }
