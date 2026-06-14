@@ -140,6 +140,53 @@ const d = process.env.RESEND_API_KEY;`)
 	}
 }
 
+func TestSniff_ExcludesPackageManagerAndRuntimeEnvVars(t *testing.T) {
+	dir := t.TempDir()
+	// App code references a real secret plus runtime/PM plumbing.
+	write(t, dir, "app/page.tsx", `const a = process.env.STRIPE_SECRET_KEY;
+const b = process.env.NODE_ENV;
+const c = process.env.NODE_OPTIONS;
+const d = process.env.NEXT_RUNTIME;
+const e = process.env.PNP_DEBUG_LEVEL;
+const f = process.env.YARN_ZIP_DATA_EPILOGUE;
+const g = process.env.WATCH_REPORT_DEPENDENCIES;`)
+	// Yarn PnP runtime files (should be skipped wholesale).
+	write(t, dir, ".pnp.cjs", `process.env.PNP_ALWAYS_WARN_ON_FALLBACK; process.env.SNUCK_VIA_PNP;`)
+	write(t, dir, ".yarn/releases/yarn.cjs", `process.env.SNUCK_VIA_YARN_DIR;`)
+
+	res, err := Sniff(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(res.Secrets, "STRIPE_SECRET_KEY") {
+		t.Errorf("real secret dropped: %v", res.Secrets)
+	}
+	for _, noise := range []string{
+		"NODE_ENV", "NODE_OPTIONS", "NEXT_RUNTIME", "PNP_DEBUG_LEVEL",
+		"YARN_ZIP_DATA_EPILOGUE", "WATCH_REPORT_DEPENDENCIES",
+		"PNP_ALWAYS_WARN_ON_FALLBACK", "SNUCK_VIA_PNP", "SNUCK_VIA_YARN_DIR",
+	} {
+		if contains(res.Secrets, noise) {
+			t.Errorf("%s must not be treated as an app secret: %v", noise, res.Secrets)
+		}
+	}
+}
+
+func TestIsInfraEnvVar(t *testing.T) {
+	infra := []string{"PNP_DEBUG_LEVEL", "YARN_IS_TEST_ENV", "NPM_CONFIG_X", "NODE_ENV", "NODE_OPTIONS", "NEXT_RUNTIME", "WATCH_REPORT_DEPENDENCIES"}
+	for _, n := range infra {
+		if !isInfraEnvVar(n) {
+			t.Errorf("isInfraEnvVar(%q) = false, want true", n)
+		}
+	}
+	real := []string{"STRIPE_SECRET_KEY", "DATABASE_URL", "AUTH_SECRET", "NEXTAUTH_URL", "RESEND_API_KEY"}
+	for _, n := range real {
+		if isInfraEnvVar(n) {
+			t.Errorf("isInfraEnvVar(%q) = true, want false", n)
+		}
+	}
+}
+
 func TestSniff_SkipsNodeModulesAndBuildDirs(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "node_modules/pkg/index.js", `const x = R2Bucket; process.env.LEAKED_SECRET;`)

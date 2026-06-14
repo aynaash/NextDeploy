@@ -121,6 +121,34 @@ var sourceExts = map[string]bool{
 var skipDirs = map[string]bool{
 	"node_modules": true, ".next": true, ".git": true, "dist": true,
 	"build": true, "out": true, ".vercel": true, ".turbo": true,
+	".yarn": true, // Yarn Berry cache/runtime — generated, not app code
+}
+
+// infraEnvPrefixes are env-var name prefixes owned by package managers or the
+// JS runtime, never application secrets. They leak in when scanning generated
+// files like Yarn PnP's .pnp.cjs and must not be suggested as secrets to set.
+var infraEnvPrefixes = []string{"PNP_", "YARN_", "NPM_", "BERRY_", "WATCH_"}
+
+// infraEnvExact are specific runtime/build env vars to drop from secret discovery.
+var infraEnvExact = map[string]bool{
+	"NODE_ENV": true, "NODE_OPTIONS": true, "NODE_DEBUG": true,
+	"NODE_NO_WARNINGS": true, "NODE_PATH": true,
+	"NEXT_RUNTIME": true, "NEXT_TELEMETRY_DISABLED": true,
+	"CI": true, "PATH": true, "PWD": true, "HOME": true, "SHELL": true, "TERM": true,
+}
+
+// isInfraEnvVar reports whether an env-var name is package-manager/runtime
+// plumbing rather than an application secret the user needs to set.
+func isInfraEnvVar(name string) bool {
+	if infraEnvExact[name] {
+		return true
+	}
+	for _, p := range infraEnvPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // Sniff scans projectDir and returns the inferred infrastructure. Missing
@@ -194,6 +222,12 @@ func Sniff(projectDir string) (*Result, error) {
 		if !sourceExts[strings.ToLower(filepath.Ext(path))] {
 			return nil
 		}
+		// Skip generated package-manager runtime files (e.g. Yarn PnP's
+		// .pnp.cjs / .pnp.loader.mjs) — they reference dozens of PNP_/YARN_
+		// env vars that would otherwise pollute the discovered-secrets list.
+		if strings.HasPrefix(filepath.Base(path), ".pnp") {
+			return nil
+		}
 		data, err := os.ReadFile(path) // #nosec G304 — scanning the user's own project
 		if err != nil {
 			return nil
@@ -208,7 +242,7 @@ func Sniff(projectDir string) (*Result, error) {
 		}
 		for _, m := range envRef.FindAllStringSubmatch(src, -1) {
 			name := m[1]
-			if strings.HasPrefix(name, "NEXT_PUBLIC_") || bindingNames[name] {
+			if strings.HasPrefix(name, "NEXT_PUBLIC_") || bindingNames[name] || isInfraEnvVar(name) {
 				continue
 			}
 			secretSet[name] = true

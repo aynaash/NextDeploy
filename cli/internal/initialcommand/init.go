@@ -252,7 +252,17 @@ func runSniffExisting(log *shared.Logger, appName string) error {
 
 	log.Info("\n🔎 %s", res.Summary())
 
+	domainCfg, err := promptDomain()
+	if err != nil {
+		return fmt.Errorf("prompt failed: %w", err)
+	}
+
 	configContent := res.RenderNextDeployYAML(appName)
+	if domainCfg.Name != "" {
+		// Inject the domain block under `app:`, right after the name line.
+		anchor := "  name: " + appName + "\n"
+		configContent = strings.Replace(configContent, anchor, anchor+renderDomainYAML(domainCfg)+"\n", 1)
+	}
 	if _, statErr := os.Stat("nextdeploy.yml"); statErr == nil {
 		log.Warn("nextdeploy.yml already exists — writing suggestion to nextdeploy.suggested.yml instead.")
 		if err := os.WriteFile("nextdeploy.suggested.yml", []byte(configContent), 0600); err != nil {
