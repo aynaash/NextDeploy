@@ -96,3 +96,8 @@ release:
     name: NextDeploy
   draft: false
   prerelease: auto
+  # release-please creates the GitHub Release (with the CHANGELOG body) before
+  # GoReleaser runs, so append assets to it instead of failing on "already
+  # exists". `append` also creates the release if absent, so the manual
+  # release.yml escape hatch (where no release pre-exists) still works.
+  mode: append
