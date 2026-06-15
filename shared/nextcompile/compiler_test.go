@@ -1,6 +1,7 @@
 package nextcompile
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -369,7 +370,7 @@ func TestCompile_DeterministicHash(t *testing.T) {
 	// — those are the content-addressable pieces.
 	d1, _ := os.ReadFile(b1.DispatchPath) // #nosec G304
 	d2, _ := os.ReadFile(b2.DispatchPath) // #nosec G304
-	if string(d1) != string(d2) {
+	if !bytes.Equal(d1, d2) {
 		t.Errorf("dispatch.mjs not deterministic:\n%s\nvs\n%s", d1, d2)
 	}
 
@@ -384,7 +385,7 @@ func TestCompile_DeterministicHash(t *testing.T) {
 	m2.GeneratedAt = ""
 	j1, _ := json.Marshal(m1)
 	j2, _ := json.Marshal(m2)
-	if string(j1) != string(j2) {
+	if !bytes.Equal(j1, j2) {
 		t.Errorf("manifest not deterministic (ignoring GeneratedAt):\n%s\nvs\n%s", j1, j2)
 	}
 }

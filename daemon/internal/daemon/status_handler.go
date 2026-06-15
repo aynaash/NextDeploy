@@ -47,11 +47,12 @@ func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Respon
 	}
 	props := parseProps(string(out))
 	status := "Offline"
-	if props["ActiveState"] == "active" {
+	switch props["ActiveState"] {
+	case "active":
 		status = "Online"
-	} else if props["ActiveState"] == "failed" {
+	case "failed":
 		status = "Failed"
-	} else if props["ActiveState"] == "activating" {
+	case "activating":
 		status = "Starting..."
 	}
 

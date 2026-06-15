@@ -1,6 +1,7 @@
 package nextcompile
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -70,7 +71,7 @@ func TestBuildManifest_Deterministic(t *testing.T) {
 
 	ab, _ := json.Marshal(a)
 	bb, _ := json.Marshal(b)
-	if string(ab) != string(bb) {
+	if !bytes.Equal(ab, bb) {
 		t.Fatalf("not deterministic:\n%s\n%s", ab, bb)
 	}
 

@@ -111,7 +111,7 @@ func (cm *CaddyManager) commitFragmentSafely(appName string, content []byte) err
 	// #nosec G204
 	cmd := exec.Command(caddyPath, "validate", "--config", candidateMain, "--adapter", "caddyfile")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("caddy pre-flight validation failed for %s (fragment not committed): %v - %s", appName, err, string(out))
+		return fmt.Errorf("caddy pre-flight validation failed for %s (fragment not committed): %w - %s", appName, err, string(out))
 	}
 
 	// Validation passed — atomically install the fragment. CreateTemp in the
@@ -223,7 +223,7 @@ func (cm *CaddyManager) Reload() error {
 	fallbackCmd := exec.Command(caddyPath, "reload", "--config", mainCaddyfilePath, "--adapter", "caddyfile")
 	output, err = fallbackCmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("caddy reload failed (systemctl and fallback): %v - %s", err, string(output))
+		return fmt.Errorf("caddy reload failed (systemctl and fallback): %w - %s", err, string(output))
 	}
 
 	log.Println("Caddy reloaded successfully via direct fallback command.")
@@ -236,7 +236,7 @@ func (cm *CaddyManager) Validate() error {
 	cmd := exec.Command(caddyPath, "validate", "--config", mainCaddyfilePath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("caddy validation failed: %v - %s", err, string(output))
+		return fmt.Errorf("caddy validation failed: %w - %s", err, string(output))
 	}
 	return nil
 }

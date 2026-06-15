@@ -202,7 +202,7 @@ func copyStaticAssets() error {
 	})
 }
 
-// copyFile copies a file from src to dst
+// copyFile copies a file from src to dst.
 func copyFile(src, dst string) error {
 	// #nosec G304
 	source, err := os.Open(src)
@@ -250,7 +250,7 @@ func createBuildLock(metadata *NextCorePayload) error {
 	return os.WriteFile(BuildLockFileName, lockData, 0600)
 }
 
-// ValidateBuildState checks if the current git state matches the build lock
+// ValidateBuildState checks if the current git state matches the build lock.
 func ValidateBuildState() error {
 	lockPath := filepath.Join(".nextdeploy", "build.lock")
 	// #nosec G304
@@ -323,7 +323,7 @@ var assetExtensions = map[string]string{
 	".xml":  "document",
 }
 
-// ParseStaticAssets scans the project for static assets
+// ParseStaticAssets scans the project for static assets.
 func ParseStaticAssets(projectDir string, distDir string) (*StaticAssets, error) {
 	assets := &StaticAssets{}
 
@@ -377,7 +377,7 @@ func ParseStaticAssets(projectDir string, distDir string) (*StaticAssets, error)
 	return assets, nil
 }
 
-// scanDirectory recursively scans a directory for static assets
+// scanDirectory recursively scans a directory for static assets.
 func scanDirectory(dirPath, projectDir, publicPathPrefix string) ([]StaticAsset, error) {
 	var assets []StaticAsset
 
@@ -424,7 +424,7 @@ func scanDirectory(dirPath, projectDir, publicPathPrefix string) ([]StaticAsset,
 	return assets, err
 }
 
-// scanRootAssets scans for common static files in project root
+// scanRootAssets scans for common static files in project root.
 func scanRootAssets(projectDir string) ([]StaticAsset, error) {
 	var assets []StaticAsset
 
@@ -464,7 +464,7 @@ func scanRootAssets(projectDir string) ([]StaticAsset, error) {
 	return assets, nil
 }
 
-// ParseMiddleware parses Next.js middleware configuration
+// ParseMiddleware parses Next.js middleware configuration.
 func ParseMiddleware(projectDir string) (*MiddlewareConfig, error) {
 	config := &MiddlewareConfig{
 		Path:     filepath.Join(projectDir, "middleware.js"),
@@ -526,7 +526,7 @@ func ParseMiddleware(projectDir string) (*MiddlewareConfig, error) {
 	return config, nil
 }
 
-// parseMiddlewareMatchers extracts route matchers from middleware file
+// parseMiddlewareMatchers extracts route matchers from middleware file.
 func parseMiddlewareMatchers(content string) ([]MiddlewareRoute, error) {
 	var matchers []MiddlewareRoute
 
@@ -653,7 +653,7 @@ func parseMiddlewareMatchers(content string) ([]MiddlewareRoute, error) {
 	return matchers, nil
 }
 
-// parseUnstableFlag extracts unstable configuration flags
+// parseUnstableFlag extracts unstable configuration flags.
 func parseUnstableFlag(content string) string {
 	flagRegex := regexp.MustCompile(`unstable_(\w+):\s*true`)
 	matches := flagRegex.FindStringSubmatch(content)
@@ -789,7 +789,6 @@ func parseStaticImageImports(buildManifest map[string]interface{}, projectDir st
 	return images
 }
 func buildCommand(PackageManager string) (string, error) {
-
 	if PackageManager == "" {
 		PackageManager = "npm" // default to npm if not specified
 	}
@@ -806,5 +805,4 @@ func buildCommand(PackageManager string) (string, error) {
 	default:
 		return "npm run build", fmt.Errorf("unsupported package manager: %s", PackageManager)
 	}
-
 }

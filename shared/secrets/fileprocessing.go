@@ -48,7 +48,7 @@ func (sm *SecretManager) EncryptEnvFile(masterKey string) (map[string]string, er
 		encryptedFile := file + ".enc"
 		if err := sm.encryptToFile(file, encryptedFile, masterKey); err != nil {
 			SLogs.Error("Failed to encrypt file %s: %v", file, err)
-			return nil, fmt.Errorf("%w: %v", ErrEncryptionFailed, err)
+			return nil, fmt.Errorf("%w: %w", ErrEncryptionFailed, err)
 		}
 
 		results[file] = encryptedFile

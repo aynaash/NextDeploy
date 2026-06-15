@@ -202,7 +202,7 @@ func (l *Logger) Log(level LogLevel, msg string, args ...interface{}) {
 	formattedMsg = sensitive.Scrub(formattedMsg)
 
 	indent := strings.Repeat("  ", l.indentLevel)
-	formattedMsg = indent + strings.Replace(formattedMsg, "\n", "\n"+indent, -1)
+	formattedMsg = indent + strings.ReplaceAll(formattedMsg, "\n", "\n"+indent)
 
 	var logLine strings.Builder
 
@@ -217,7 +217,7 @@ func (l *Logger) Log(level LogLevel, msg string, args ...interface{}) {
 	logLine.WriteString(fmt.Sprintf("%s%s%s %s ", levelColor, levelName, resetColor, levelEmoji))
 
 	if pkgDisplay != "" {
-		logLine.WriteString(fmt.Sprintf("%s", pkgDisplay))
+		logLine.WriteString(pkgDisplay)
 	}
 
 	logLine.WriteString(formattedMsg)

@@ -1,6 +1,7 @@
 package protection
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -178,7 +179,7 @@ func TestRuntimeJSON_Deterministic(t *testing.T) {
 	rt2, _ := BuildRuntime(c)
 	j1, _ := rt1.JSON()
 	j2, _ := rt2.JSON()
-	if string(j1) != string(j2) {
+	if !bytes.Equal(j1, j2) {
 		t.Errorf("JSON not deterministic:\n%s\nvs\n%s", j1, j2)
 	}
 }

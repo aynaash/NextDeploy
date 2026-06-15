@@ -108,7 +108,7 @@ func GetGitCommitHash() (string, error) {
 	cmd.Stderr = &out
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("Failed to get Git commit hash: %v\n%s", err, out.String())
+		return "", fmt.Errorf("Failed to get Git commit hash: %w\n%s", err, out.String())
 	}
 
 	return strings.TrimSpace(out.String()), nil

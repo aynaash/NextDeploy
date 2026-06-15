@@ -12,7 +12,7 @@ const commonHeader = `
 # This YAML defines everything needed to build, deploy, monitor, and scale your app on a VPS/SERVERLESS using NextDeploy.
 # Think of it as your infrastructure-as-code for end-to-end delivery.
 
-# NOTE: DO NOT ADD YOUR SECRETS AS OF NOW WE WORKING ON SECRET MANAGMENT THIS IS HOW WE INTENT TO USE
+# NOTE: DO NOT ADD YOUR SECRETS AS OF NOW WE WORKING ON SECRET MANAGEMENT THIS IS HOW WE INTENT TO USE
 version: "1.0" # Config file versioning for forward compatibility with future NextDeploy updates
 `
 

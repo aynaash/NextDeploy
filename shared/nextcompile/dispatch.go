@@ -225,13 +225,12 @@ func renderLayoutLoaders(paths []string, importPrefix string) string {
 
 func writeOptionalRef(b *strings.Builder, name string, ref *ModuleRef, importPrefix string) {
 	if ref == nil {
-		b.WriteString(fmt.Sprintf("export const %s = null;\n", name))
+		fmt.Fprintf(b, "export const %s = null;\n", name)
 		return
 	}
-	b.WriteString(fmt.Sprintf(
+	fmt.Fprintf(b,
 		"export const %s = { compiled: %q, load: () => import(%s) };\n",
-		name, ref.CompiledPath, jsStringLiteral(importPath(ref.CompiledPath, importPrefix)),
-	))
+		name, ref.CompiledPath, jsStringLiteral(importPath(ref.CompiledPath, importPrefix)))
 }
 
 // partitionRefs splits scanned refs into static, dynamic, middleware, and

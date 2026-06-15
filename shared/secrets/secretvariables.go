@@ -22,5 +22,4 @@ func (sm *SecretManager) GetKey() string {
 		return "nokey"
 	}
 	return filepath.Join(homedir, ".nextdeploy", sm.cfg.App.Name, "master.key")
-
 }

@@ -18,13 +18,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// RevalidateMessage is the payload Next.js normally outputs to the SQS queue
+// RevalidateMessage is the payload Next.js normally outputs to the SQS queue.
 type RevalidateMessage struct {
 	Tag  string `json:"tag"`  // e.g. "post-123"
 	Path string `json:"path"` // e.g. "/blog/my-post"
 }
 
-// TagPathMap matches what's built by nextcore.BuildTagMap
+// TagPathMap matches what's built by nextcore.BuildTagMap.
 type TagPathMap struct {
 	Tags      map[string][]string `json:"tags"`
 	Intervals map[string]int      `json:"intervals"`

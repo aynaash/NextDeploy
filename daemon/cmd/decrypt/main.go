@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/aynaash/nextdeploy/shared/secrets"
 	"os"
+
+	"github.com/aynaash/nextdeploy/shared/secrets"
 )
 
 func main() {

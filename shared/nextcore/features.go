@@ -20,7 +20,7 @@ type DetectedFeatures struct {
 }
 
 // DetectFeatures inspects a NextConfig and returns what external services
-// the app uses — this drives the dynamic CSP generation in Caddy
+// the app uses — this drives the dynamic CSP generation in Caddy.
 func DetectFeatures(config *NextConfig) *DetectedFeatures {
 	if config == nil {
 		return &DetectedFeatures{
@@ -89,7 +89,7 @@ func DetectFeatures(config *NextConfig) *DetectedFeatures {
 }
 
 // detectWellKnownService checks a hostname against known services
-// and sets the relevant feature flag
+// and sets the relevant feature flag.
 func detectWellKnownService(f *DetectedFeatures, host string) {
 	h := strings.ToLower(host)
 
@@ -112,7 +112,7 @@ func detectWellKnownService(f *DetectedFeatures, host string) {
 }
 
 // BuildCSP generates a Content-Security-Policy header value
-// based on what the app actually uses
+// based on what the app actually uses.
 func BuildCSP(f *DetectedFeatures) string {
 	if f == nil || f.UserDefinedCSP {
 		return defaultCSP()

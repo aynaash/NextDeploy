@@ -2,8 +2,9 @@ package daemon
 
 import (
 	"context"
-	"github.com/aynaash/nextdeploy/daemon/internal/types"
 	"time"
+
+	"github.com/aynaash/nextdeploy/daemon/internal/types"
 )
 
 type HealthMonitor struct {

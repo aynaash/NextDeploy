@@ -29,7 +29,7 @@ func (sm *SecretManager) getCachedKey(name string) (string, error) {
 func (sm *SecretManager) GenerateMasterKey() ([]byte, error) {
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrKeyGenerationFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrKeyGenerationFailed, err)
 	}
 	return key, nil
 }

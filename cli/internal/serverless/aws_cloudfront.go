@@ -416,7 +416,6 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 		}
 		changed = true
 	} else {
-
 		dcb := dc.DefaultCacheBehavior
 		if *dcb.TargetOriginId != targetOrigin {
 			dcb.TargetOriginId = aws.String(targetOrigin)

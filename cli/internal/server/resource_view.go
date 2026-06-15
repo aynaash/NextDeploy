@@ -9,7 +9,7 @@ import (
 	"github.com/aynaash/nextdeploy/shared/config"
 )
 
-// VPSResourceMap holds the metadata for the visual report
+// VPSResourceMap holds the metadata for the visual report.
 type VPSResourceMap struct {
 	AppName        string
 	Environment    string
@@ -20,7 +20,7 @@ type VPSResourceMap struct {
 	DNSProvider    string // "namecheap", "cloudflare", "godaddy", "route53", "other"
 }
 
-// GenerateVPSResourceView creates a premium HTML report of the provisioned resources
+// GenerateVPSResourceView creates a premium HTML report of the provisioned resources.
 func GenerateVPSResourceView(appCfg *config.AppConfig, resMap VPSResourceMap) (string, error) {
 	// Re-using DNSProvider rules from serverless (internally they should be shared but for now we'll use a local logic or default)
 	providerName := "other"

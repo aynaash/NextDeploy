@@ -39,7 +39,6 @@ func GetNextJsVersion(packageJsonPath string) (string, error) {
 		return version, nil
 	}
 	return "", fmt.Errorf("Next.js dependency not found in package.json")
-
 }
 
 func ValidateNextJSProject(cmd *cobra.Command, args []string) error {

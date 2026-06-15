@@ -139,7 +139,7 @@ func probeOnce(ctx context.Context, client *http.Client, url string, opts SmokeO
 	for attempt := 1; attempt <= opts.MaxAttempts; attempt++ {
 		out.Attempts = attempt
 		attemptStart := time.Now()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 		if err != nil {
 			out.Err = err.Error()
 			break

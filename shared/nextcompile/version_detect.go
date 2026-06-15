@@ -125,12 +125,7 @@ func parseNextVersion(raw string) (NextVersion, error) {
 
 func parseReactVersion(raw string) (ReactVersion, error) {
 	nv, err := parseSemver(raw, "react")
-	return ReactVersion{
-		Major: nv.Major,
-		Minor: nv.Minor,
-		Patch: nv.Patch,
-		Raw:   nv.Raw,
-	}, err
+	return ReactVersion(nv), err
 }
 
 func parseSemver(raw, label string) (NextVersion, error) {
