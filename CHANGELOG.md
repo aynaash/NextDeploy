@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/aynaash/NextDeploy/compare/v0.13.0...v0.13.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* **updater:** let download retries recover from a partial file ([#21](https://github.com/aynaash/NextDeploy/issues/21)) ([85950fc](https://github.com/aynaash/NextDeploy/commit/85950fcfb29f4476d8e4e34f35b11cdaf5a8fef1))
+
 ## [0.13.0](https://github.com/aynaash/NextDeploy/compare/v0.12.2...v0.13.0) (2026-06-15)
 
 
