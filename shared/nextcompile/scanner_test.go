@@ -2,9 +2,60 @@ package nextcompile
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 )
+
+// extractRSCManifestJSON must pull the JSON payload out of Next 15's
+// side-effecting .js client-reference-manifest. If it returns nothing, the
+// manifest is never wired and "use client" pages throw a client-side exception.
+func TestExtractRSCManifestJSON(t *testing.T) {
+	js := []byte(`globalThis.__RSC_MANIFEST=(globalThis.__RSC_MANIFEST||{});` +
+		`globalThis.__RSC_MANIFEST["/(marketing)/page"]={"clientModules":{"x":1},"ssrModuleMapping":{}};`)
+	got, ok := extractRSCManifestJSON(js)
+	if !ok {
+		t.Fatal("expected to extract JSON from a Next 15 .js manifest")
+	}
+	if string(got) != `{"clientModules":{"x":1},"ssrModuleMapping":{}}` {
+		t.Errorf("payload = %s", got)
+	}
+
+	if _, ok := extractRSCManifestJSON([]byte("module.exports = {}")); ok {
+		t.Error("expected no extraction from a non-manifest module")
+	}
+}
+
+// attachClientManifests must wire the manifest from a Next 15 .js file by
+// materializing the .json the runtime imports — the fix for the client-side
+// hydration exception on Cloudflare.
+func TestAttachClientManifests_FromJS(t *testing.T) {
+	dir := t.TempDir()
+	pageDir := filepath.Join(dir, "server", "app", "(marketing)")
+	if err := os.MkdirAll(pageDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pageDir, "page.js"), []byte("//page"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `globalThis.__RSC_MANIFEST=(globalThis.__RSC_MANIFEST||{});` +
+		`globalThis.__RSC_MANIFEST["/(marketing)/page"]={"clientModules":{}}`
+	if err := os.WriteFile(filepath.Join(pageDir, "page_client-reference-manifest.js"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	refs := []ModuleRef{{
+		Kind:         RouteKindPage,
+		CompiledPath: filepath.ToSlash(filepath.Join("server", "app", "(marketing)", "page.js")),
+	}}
+	out := attachClientManifests(refs, dir, filepath.Join(dir, "server"))
+	if out[0].ClientManifestPath == "" {
+		t.Fatal("ClientManifestPath not set from a .js manifest — hydration would break")
+	}
+	if _, err := os.Stat(filepath.Join(dir, out[0].ClientManifestPath)); err != nil {
+		t.Errorf("materialized manifest not found at %s: %v", out[0].ClientManifestPath, err)
+	}
+}
 
 func TestRoutePathFromCompiled(t *testing.T) {
 	cases := []struct {
