@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.14.0](https://github.com/aynaash/NextDeploy/compare/v0.13.1...v0.14.0) (2026-06-15)
+
+
+### Features
+
+* **mage:** add dogfood target to ship a real app with the local build ([#24](https://github.com/aynaash/NextDeploy/issues/24)) ([ef01eed](https://github.com/aynaash/NextDeploy/commit/ef01eed76ecd53d1576ed0f0bbaf296f37105fef))
+* **ship:** auto-provision declared CF resources before deploying ([#27](https://github.com/aynaash/NextDeploy/issues/27)) ([807f3cc](https://github.com/aynaash/NextDeploy/commit/807f3cc58f0f43d6c0988538e687be2fd59e2cca))
+
+
+### Bug Fixes
+
+* **archive:** stop rejecting Next.js catch-all routes on extract ([#23](https://github.com/aynaash/NextDeploy/issues/23)) ([3c279fe](https://github.com/aynaash/NextDeploy/commit/3c279fe926b1039814fc5a85c53a8c6e0df7e587))
+* **cloudflare:** externalize critters / AMP / react-dom server.edge ([#26](https://github.com/aynaash/NextDeploy/issues/26)) ([6ac6433](https://github.com/aynaash/NextDeploy/commit/6ac6433e243672af10ff74fbaaca0e9361d70153))
+* **cloudflare:** override existing origin when attaching custom domain ([#28](https://github.com/aynaash/NextDeploy/issues/28)) ([ee88aea](https://github.com/aynaash/NextDeploy/commit/ee88aea57cbdbe168f2f23b43551ff51ef88b609))
+
+
+### Documentation
+
+* **cloudflare:** document App Router runtime limitations ([#29](https://github.com/aynaash/NextDeploy/issues/29)) ([4d87f85](https://github.com/aynaash/NextDeploy/commit/4d87f85943adbaed959b4cfe0024735cf3d5f40e))
+
 ## [0.13.1](https://github.com/aynaash/NextDeploy/compare/v0.13.0...v0.13.1) (2026-06-15)
 
 
