@@ -102,6 +102,11 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     needs: [modules]
+    # PR-only gate. only-new-issues diffs against the PR base, which has no
+    # meaning on a push to main (no base) — there it fails or dumps the whole
+    # backlog. Re-linting main on push is redundant anyway: it only advances via
+    # already-linted squash-merges. So lint PRs, not pushes.
+    if: github.event_name == 'pull_request'
     permissions:
       contents: read
       pull-requests: read
