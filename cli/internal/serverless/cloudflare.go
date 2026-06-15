@@ -1,7 +1,6 @@
 package serverless
 
 import (
-	"bytes"
 	"context"
 	"crypto/md5" // #nosec G501 — R2 ETag is content MD5; not used for security
 	"crypto/sha256"
@@ -624,6 +623,24 @@ func md5OfFile(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// sha256OfFile streams a file through SHA-256 and returns the raw digest.
+// Used to fingerprint the Worker bundle for the deploy-hash skip check
+// without reading the (multi-MB) bundle into memory.
+func sha256OfFile(path string) ([32]byte, error) {
+	var sum [32]byte
+	f, err := os.Open(path) // #nosec G304 — caller-validated path (packager output)
+	if err != nil {
+		return sum, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return sum, err
+	}
+	copy(sum[:], h.Sum(nil))
+	return sum, nil
+}
+
 func (p *CloudflareProvider) putToR2(ctx context.Context, bucket string, asset packaging.S3Asset) error {
 	f, err := os.Open(asset.LocalPath) // #nosec G304
 	if err != nil {
@@ -650,9 +667,11 @@ func (p *CloudflareProvider) putToR2(ctx context.Context, bucket string, asset p
 const deployHashTagPrefix = "nextdeploy-deploy-hash:"
 
 // computeDeployHash returns a hex SHA-256 over everything that would
-// change the running Worker: the bundle bytes, the binding metadata, and
-// the secret values. If any of these change, the hash changes; if the
-// hash matches the deployed one, re-uploading is a no-op and we skip.
+// change the running Worker: the bundle digest (bundleSum, computed by the
+// caller — streamed from disk in prod so the worker.mjs is never buffered
+// whole into memory), the binding metadata, and the secret values. If any of
+// these change, the hash changes; if the hash matches the deployed one,
+// re-uploading is a no-op and we skip.
 //
 // The metadata hash uses the SDK's JSON marshalling — same bytes the SDK
 // would send to /scripts/{name}, modulo field ordering which Stainless
@@ -660,11 +679,10 @@ const deployHashTagPrefix = "nextdeploy-deploy-hash:"
 // values don't end up in the metadata JSON before we hash it (they're
 // already in scriptMeta as secret_text bindings, but we double-hash them
 // to make the dependency explicit and keep tests deterministic).
-func computeDeployHash(scriptBytes []byte, meta workers.ScriptUpdateParamsMetadata, secrets map[string]string) string {
+func computeDeployHash(bundleSum [32]byte, meta workers.ScriptUpdateParamsMetadata, secrets map[string]string) string {
 	h := sha256.New()
 	h.Write([]byte("nextdeploy-deploy-hash/v1\n"))
 
-	bundleSum := sha256.Sum256(scriptBytes)
 	h.Write([]byte("bundle="))
 	h.Write([]byte(hex.EncodeToString(bundleSum[:])))
 	h.Write([]byte{'\n'})
@@ -804,24 +822,23 @@ func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.P
 		return fmt.Errorf("worker bundle build failed: %w", err)
 	}
 
-	scriptBytes, err := os.ReadFile(bundlePath) // #nosec G304
+	// Fingerprint the bundle by streaming it through SHA-256 — never read the
+	// (multi-MB, esbuild-bundled) worker.mjs into memory. The upload below
+	// re-opens the file and streams it too, so the whole bundle is only ever
+	// in flight 32KB at a time.
+	bundleSum, err := sha256OfFile(bundlePath)
 	if err != nil {
-		return fmt.Errorf("failed to read worker bundle: %w", err)
+		return fmt.Errorf("failed to fingerprint worker bundle: %w", err)
+	}
+	bundleInfo, err := os.Stat(bundlePath)
+	if err != nil {
+		return fmt.Errorf("failed to stat worker bundle: %w", err)
 	}
 
 	workerName := p.getWorkerName(cfg)
 	bucketName := p.getBucketName(cfg)
 
 	const entryName = "worker.mjs"
-	rawReader := bytes.NewReader(scriptBytes)
-	// Wrap the reader with a progress tracker so the operator sees live
-	// byte-counts during the multipart upload. Without this the CLI hangs
-	// silently for the duration of the upload — there's no way to tell
-	// "still streaming" from "stuck" — and we've watched 3MB Worker
-	// uploads run for several minutes on residential connections.
-	tracked := newProgressReader(rawReader, int64(len(scriptBytes)), p.log, "worker upload")
-	scriptReader := newNamedFile(tracked, entryName, "application/javascript+module")
-
 	var cfBlock *config.CloudflareConfig
 	if cfg.Serverless != nil {
 		cfBlock = cfg.Serverless.Cloudflare
@@ -838,7 +855,7 @@ func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.P
 		p.log.Info("Folding %d secret_text bindings into Worker upload", len(p.pendingSecrets))
 	}
 
-	deployHash := computeDeployHash(scriptBytes, scriptMeta, p.pendingSecrets)
+	deployHash := computeDeployHash(bundleSum, scriptMeta, p.pendingSecrets)
 	if p.workerAlreadyAtHash(ctx, workerName, deployHash) {
 		p.log.Info("Worker bundle and bindings unchanged (hash %s) — skipping upload", deployHash[:12])
 		// Still drop the secret stash even on skip — the deployed worker
@@ -846,6 +863,18 @@ func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.P
 		// fold them again on the next call.
 		p.pendingSecrets = nil
 	} else {
+		// Open the bundle for the upload stream. Wrap with a progress tracker
+		// so the operator sees live byte-counts during the multipart upload —
+		// without it the CLI looks hung, and we've watched 3MB Worker uploads
+		// run for several minutes on residential connections.
+		bundleFile, err := os.Open(bundlePath) // #nosec G304 — packager output path
+		if err != nil {
+			return fmt.Errorf("failed to open worker bundle: %w", err)
+		}
+		defer bundleFile.Close()
+		tracked := newProgressReader(bundleFile, bundleInfo.Size(), p.log, "worker upload")
+		scriptReader := newNamedFile(tracked, entryName, "application/javascript+module")
+
 		params := workers.ScriptUpdateParams{
 			AccountID: cloudflare.F(p.accountID),
 			Metadata:  cloudflare.F(scriptMeta),

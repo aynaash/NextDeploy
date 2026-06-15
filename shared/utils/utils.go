@@ -22,6 +22,11 @@ import (
 const (
 	maxInFlight        = 64
 	largeFileThreshold = 4 * 1024 * 1024 // 4MB
+	// maxPending caps how many files may be read-ahead (and thus buffered in
+	// the reorder heap) ahead of the tar writer. It bounds CreateTarball's
+	// peak memory to ~maxPending × largeFileThreshold instead of scaling with
+	// the whole bundle. Must be ≥ workerCount to keep every worker busy.
+	maxPending = 64
 )
 
 var workerCount = func() int {
@@ -416,6 +421,22 @@ func CreateTarball(sourceDir, targetTar, targetType string, payload *nextcore.Ne
 		New: func() interface{} { return make([]byte, 32*1024) },
 	}
 
+	// Bound look-ahead so the reorder heap can't accumulate the whole bundle
+	// in RAM. Workers read each file < largeFileThreshold fully into memory;
+	// the writer consumes them strictly in archive order, so any file whose
+	// turn hasn't come yet stays buffered. Without a cap, a single slow
+	// early-indexed file lets every later (already-read) file pile up in the
+	// heap — for a Next standalone with node_modules that's 100s of MB to GBs.
+	//
+	// `pending` gates the dispatcher: it may run at most maxPending files
+	// ahead of the write cursor (acquired before dispatch, released after the
+	// entry is written). This caps simultaneously-buffered content to
+	// maxPending × largeFileThreshold regardless of bundle size, while still
+	// keeping every worker fed (maxPending ≫ workerCount preserves read-ahead
+	// overlap with gzip). The head-of-line file is always among the
+	// dispatched set, so the writer can always make progress — no deadlock.
+	pending := make(chan struct{}, maxPending)
+
 	var wg sync.WaitGroup
 	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
@@ -434,6 +455,7 @@ func CreateTarball(sourceDir, targetTar, targetType string, payload *nextcore.Ne
 
 	go func() {
 		for _, job := range jobs {
+			pending <- struct{}{}
 			fileChan <- job
 		}
 		close(fileChan)
@@ -458,6 +480,9 @@ func CreateTarball(sourceDir, targetTar, targetType string, payload *nextcore.Ne
 			if err := writeTarEntry(tw, r, log); err != nil {
 				return err
 			}
+			// Release the look-ahead slot now this entry is on disk, letting
+			// the dispatcher submit one more file.
+			<-pending
 
 			nextExpected++
 			atomic.AddInt64(&processedFiles, 1)

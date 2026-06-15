@@ -436,11 +436,13 @@ func shortCommit(full string) string {
 	return full
 }
 
-// saveLambdaZipToS3 uploads the lambda zip under a versioned key and appends a
-// DeploymentEntry to the history manifest. The S3 key embeds the short git
-// commit so deployments are recognizable in the bucket listing. Returns the
-// S3 key of the uploaded zip.
-func (p *AWSProvider) saveLambdaZipToS3(ctx context.Context, bucketName, functionName string, zipContents []byte, meta *nextcore.NextCorePayload) (string, error) {
+// saveLambdaZipToS3 streams the lambda zip from disk to a versioned S3 key and
+// appends a DeploymentEntry to the history manifest. The zip is read straight
+// from the file (never buffered whole into memory — these run up to Lambda's
+// 250MB limit), and the returned key doubles as the deploy artifact the Lambda
+// is pointed at via FunctionCode.S3Key. The key embeds the short git commit so
+// deployments are recognizable in the bucket listing.
+func (p *AWSProvider) saveLambdaZipToS3(ctx context.Context, bucketName, functionName, zipPath string, meta *nextcore.NextCorePayload) (string, error) {
 	client := s3.NewFromConfig(p.cfg)
 
 	timestamp := time.Now().UTC().Format("20060102T150405Z")
@@ -453,11 +455,21 @@ func (p *AWSProvider) saveLambdaZipToS3(ctx context.Context, bucketName, functio
 	}
 	zipKey := fmt.Sprintf("deployments/%s/%s-%s.zip", functionName, timestamp, shortCommit(commit))
 
-	_, err := client.PutObject(ctx, &s3.PutObjectInput{
+	zipFile, err := os.Open(zipPath) // #nosec G304 — zipPath is the packager's own temp output
+	if err != nil {
+		return "", fmt.Errorf("failed to open lambda zip %s: %w", zipPath, err)
+	}
+	defer zipFile.Close()
+	info, err := zipFile.Stat()
+	if err != nil {
+		return "", fmt.Errorf("failed to stat lambda zip %s: %w", zipPath, err)
+	}
+
+	_, err = client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:        aws.String(bucketName),
 		Key:           aws.String(zipKey),
-		Body:          bytes.NewReader(zipContents),
-		ContentLength: aws.Int64(int64(len(zipContents))),
+		Body:          zipFile,
+		ContentLength: aws.Int64(info.Size()),
 		ContentType:   aws.String("application/zip"),
 	})
 	if err != nil {

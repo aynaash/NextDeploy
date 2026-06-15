@@ -1,6 +1,7 @@
 package serverless
 
 import (
+	"crypto/sha256"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,11 +10,15 @@ import (
 	"github.com/cloudflare/cloudflare-go/v6/workers"
 )
 
+// bundleSum mirrors how DeployCompute fingerprints the worker bundle (SHA-256
+// of its bytes) so the tests feed computeDeployHash the same shape prod does.
+func bundleSum(s string) [32]byte { return sha256.Sum256([]byte(s)) }
+
 // computeDeployHash determinism — same inputs in any order produce the same
 // digest. If this breaks, every redeploy will look "changed" and re-upload
 // for no reason, defeating the whole point.
 func TestComputeDeployHash_Deterministic(t *testing.T) {
-	bytes1 := []byte("worker bundle")
+	bytes1 := bundleSum("worker bundle")
 	meta1 := workers.ScriptUpdateParamsMetadata{
 		MainModule: cloudflare.F("worker.mjs"),
 	}
@@ -41,13 +46,13 @@ func TestComputeDeployHash_Deterministic(t *testing.T) {
 // computeDeployHash sensitivity — the three inputs must each independently
 // flip the hash, otherwise we'd skip uploads when we shouldn't.
 func TestComputeDeployHash_DetectsEachInputChange(t *testing.T) {
-	base := []byte("worker bundle")
+	base := bundleSum("worker bundle")
 	meta := workers.ScriptUpdateParamsMetadata{MainModule: cloudflare.F("worker.mjs")}
 	secrets := map[string]string{"K": "v"}
 
 	original := computeDeployHash(base, meta, secrets)
 
-	bundleChanged := computeDeployHash([]byte("worker bundle v2"), meta, secrets)
+	bundleChanged := computeDeployHash(bundleSum("worker bundle v2"), meta, secrets)
 	if bundleChanged == original {
 		t.Error("bundle change didn't flip hash — would cause stale-code skips")
 	}
