@@ -49,6 +49,22 @@ func TestRuntimeSourceFiles_ExcludesTestFilesIncludesGuard(t *testing.T) {
 	}
 }
 
+func TestRuntimeSourceFiles_ExcludesDevModules(t *testing.T) {
+	files, err := RuntimeSourceFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f, ".dev.mjs") {
+			t.Errorf("dev-only module leaked into runtime source list: %s", f)
+		}
+	}
+	// The trie example specifically must stay out of the shipped runtime.
+	if containsPath(files, "runtime_src/route_trie.dev.mjs") {
+		t.Error("route_trie.dev.mjs must not be a shipped runtime file")
+	}
+}
+
 func TestExtractRuntime_DoesNotShipTestFiles(t *testing.T) {
 	dir := t.TempDir()
 	written, err := ExtractRuntime(dir)
@@ -56,8 +72,8 @@ func TestExtractRuntime_DoesNotShipTestFiles(t *testing.T) {
 		t.Fatalf("ExtractRuntime: %v", err)
 	}
 	for _, w := range written {
-		if strings.HasSuffix(w, ".test.mjs") {
-			t.Errorf("test file extracted into worker runtime: %s", w)
+		if strings.HasSuffix(w, ".test.mjs") || strings.HasSuffix(w, ".dev.mjs") {
+			t.Errorf("dev-only file extracted into worker runtime: %s", w)
 		}
 	}
 	// guard.mjs (non-test) must ship.
