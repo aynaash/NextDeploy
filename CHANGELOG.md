@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.2](https://github.com/aynaash/NextDeploy/compare/v0.12.1...v0.12.2) (2026-06-15)
+
+
+### Bug Fixes
+
+* **cloudflare:** sanitize R2 bucket and Worker names to lowercase ([#17](https://github.com/aynaash/NextDeploy/issues/17)) ([b296c78](https://github.com/aynaash/NextDeploy/commit/b296c7855c9fb3348a795751f5244b68808fd9a8))
+* **updater:** match GoReleaser's lowercase asset names ([#16](https://github.com/aynaash/NextDeploy/issues/16)) ([a80e3dc](https://github.com/aynaash/NextDeploy/commit/a80e3dca0c71c4fe1625563cec8ec3bea3e6d9eb))
+
 ## [0.12.1](https://github.com/aynaash/NextDeploy/compare/v0.12.0...v0.12.1) (2026-06-15)
 
 
