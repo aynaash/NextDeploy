@@ -21,7 +21,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var shipVerbose bool
+var (
+	shipVerbose     bool
+	shipNoProvision bool
+)
 
 var shipCmd = &cobra.Command{
 	Use:     "ship",
@@ -74,7 +77,7 @@ func shipServerless(log *shared.Logger, cfg *config.NextDeployConfig, meta *next
 		log.Error("Inferred 'serverless' target but 'serverless' config block is missing.")
 		os.Exit(1)
 	}
-	if err := serverless.Deploy(context.Background(), cfg, meta, shipVerbose); err != nil {
+	if err := serverless.Deploy(context.Background(), cfg, meta, shipVerbose, !shipNoProvision); err != nil {
 		log.Error("Serverless deployment failed: %v", err)
 		os.Exit(1)
 	}
@@ -194,5 +197,6 @@ func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow
 
 func init() {
 	shipCmd.Flags().BoolVarP(&shipVerbose, "verbose", "v", false, "Print detailed deployment logs (S3 uploads, Lambda steps, CloudFront status)")
+	shipCmd.Flags().BoolVar(&shipNoProvision, "no-provision", false, "Skip reconciling declared Cloudflare resources (KV/Hyperdrive/D1) before deploying")
 	rootCmd.AddCommand(shipCmd)
 }
