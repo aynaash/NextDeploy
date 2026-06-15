@@ -95,3 +95,28 @@ func TestExtractTarGz_RejectsSymlinkEscape(t *testing.T) {
 		t.Fatal("expected escaping symlink to be rejected")
 	}
 }
+
+// Next.js catch-all route directories like "[...slug]" contain "..", which a
+// naive strings.Contains(name, "..") check wrongly rejected ("unsafe archive
+// entry path"). They must extract fine; genuine traversal is still blocked by
+// withinDir (see TestExtractTarGz_RejectsTraversal).
+func TestExtractTarGz_AllowsNextCatchAllRoute(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "next.tar.gz")
+	const file = "app/(docs)/docs/[...slug]/page.js"
+	writeTarGz(t, src,
+		[]tar.Header{
+			{Name: "app/(docs)/docs/[...slug]", Typeflag: tar.TypeDir, Mode: 0o755},
+			{Name: file, Typeflag: tar.TypeReg, Mode: 0o644},
+		},
+		map[string]string{file: "export default Page"},
+	)
+
+	dest := filepath.Join(dir, "out")
+	if err := ExtractTarGz(src, dest); err != nil {
+		t.Fatalf("catch-all route path must extract, got: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "app", "(docs)", "docs", "[...slug]", "page.js")); err != nil {
+		t.Fatalf("expected extracted catch-all file: %v", err)
+	}
+}

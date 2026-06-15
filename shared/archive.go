@@ -62,8 +62,12 @@ func ExtractTarGz(src, dest string) error {
 			return fmt.Errorf("read tar entry: %w", err)
 		}
 
-		// Reject absolute paths and any ".." traversal up front.
-		if filepath.IsAbs(hdr.Name) || strings.Contains(hdr.Name, "..") {
+		// Reject absolute paths. Do NOT do a naive strings.Contains(name, "..")
+		// here: Next.js catch-all route directories like "[...slug]" legitimately
+		// contain "..", and a substring check false-rejects them. Real traversal
+		// is caught by withinDir below, which joins+cleans the path (resolving any
+		// genuine ".." segments) and verifies the result stays inside destAbs.
+		if filepath.IsAbs(hdr.Name) {
 			return fmt.Errorf("unsafe archive entry path: %q", hdr.Name)
 		}
 		target := filepath.Join(destAbs, hdr.Name)
