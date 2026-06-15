@@ -24,7 +24,7 @@ func TestAttemptDownload_OverwritesLeftoverPartialFile(t *testing.T) {
 	defer srv.Close()
 
 	dest := filepath.Join(t.TempDir(), "nextdeploy.tar.gz")
-	if err := os.WriteFile(dest, []byte("partial-junk-from-a-failed-attempt"), 0o644); err != nil {
+	if err := os.WriteFile(dest, []byte("partial-junk-from-a-failed-attempt"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
