@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.1](https://github.com/aynaash/NextDeploy/compare/v0.12.0...v0.12.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* **security:** resolve both open Dependabot alerts ([abed562](https://github.com/aynaash/NextDeploy/commit/abed562e8353dec4cf4d37594b00f1de5ef7c5b2))
+* **security:** resolve both open Dependabot alerts ([a5a8f0f](https://github.com/aynaash/NextDeploy/commit/a5a8f0fe0c4861fe921e94029d0c26857dd3e5cb))
+
 ## v0.9.0 — Cloudflare deployment pipeline
 
 A complete, turnkey Cloudflare Workers deployment pipeline: resource
