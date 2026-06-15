@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/aynaash/NextDeploy/compare/v0.12.2...v0.13.0) (2026-06-15)
+
+
+### Features
+
+* **telemetry:** anonymous, signed "apps shipped" counter ([#18](https://github.com/aynaash/NextDeploy/issues/18)) ([4622e63](https://github.com/aynaash/NextDeploy/commit/4622e630bfde1168ea5a94d6147ce4065db234aa))
+
 ## [0.12.2](https://github.com/aynaash/NextDeploy/compare/v0.12.1...v0.12.2) (2026-06-15)
 
 
