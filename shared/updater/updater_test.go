@@ -2,10 +2,43 @@ package updater
 
 import (
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 )
+
+// A previous attempt that timed out mid-download leaves a partial file in the
+// temp dir. The retry must overwrite it, not fail with "file exists" (the bug
+// that wedged `nextdeploy update` after one network hiccup).
+func TestAttemptDownload_OverwritesLeftoverPartialFile(t *testing.T) {
+	const body = "the-real-binary-bytes"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprint(len(body)))
+		_, _ = io.WriteString(w, body)
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "nextdeploy.tar.gz")
+	if err := os.WriteFile(dest, []byte("partial-junk-from-a-failed-attempt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := attemptDownload(srv.URL, dest, "nextdeploy", DefaultUpdateOptions()); err != nil {
+		t.Fatalf("retry over a leftover partial file must succeed, got: %v", err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != body {
+		t.Errorf("file content = %q, want fully overwritten %q", got, body)
+	}
+}
 
 // detectArchiveName must match GoReleaser's lowercase {{ .Os }} naming exactly.
 // If it title-cases the OS, the checksums.txt lookup (a literal string match)
