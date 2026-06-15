@@ -159,12 +159,37 @@ func NewCloudflareProvider() *CloudflareProvider {
 	}
 }
 
+// sanitizeCFName coerces s into a valid Cloudflare resource name (Worker script
+// or R2 bucket): lowercase, only [a-z0-9-], no leading/trailing or repeated
+// hyphens, capped at 63 chars. R2 rejects anything else with error 10005 ("The
+// specified bucket name is not valid"), and Worker script names share the same
+// constraint — so an app named e.g. "NextDeploy" must be folded to "nextdeploy".
+func sanitizeCFName(s string) string {
+	var b strings.Builder
+	lastHyphen := false
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+			lastHyphen = false
+		case b.Len() > 0 && !lastHyphen:
+			b.WriteByte('-')
+			lastHyphen = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if len(out) > 63 {
+		out = strings.Trim(out[:63], "-")
+	}
+	return out
+}
+
 func (p *CloudflareProvider) workerName(appName string) string {
 	env := p.environment
 	if env == "" {
 		env = "production"
 	}
-	return fmt.Sprintf("%s-%s", appName, env)
+	return sanitizeCFName(fmt.Sprintf("%s-%s", appName, env))
 }
 
 func (p *CloudflareProvider) bucketNameFromApp(appName string) string {
@@ -172,7 +197,7 @@ func (p *CloudflareProvider) bucketNameFromApp(appName string) string {
 	if env == "" {
 		env = "production"
 	}
-	return fmt.Sprintf("nextdeploy-%s-%s-assets", appName, env)
+	return sanitizeCFName(fmt.Sprintf("nextdeploy-%s-%s-assets", appName, env))
 }
 
 // Initialize wires up the Cloudflare SDK client and verifies the API token.
