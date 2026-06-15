@@ -13,7 +13,7 @@ import (
 	"github.com/aynaash/nextdeploy/shared/config"
 )
 
-// ServerlessResourceMap holds the metadata for the visual report
+// ServerlessResourceMap holds the metadata for the visual report.
 type ServerlessResourceMap struct {
 	AppName           string
 	Environment       string
@@ -31,7 +31,7 @@ type ServerlessResourceMap struct {
 	DNSProvider       string // "namecheap", "cloudflare", "godaddy", "route53", "other"
 }
 
-// ProviderRules holds DNS provider-specific display instructions
+// ProviderRules holds DNS provider-specific display instructions.
 type ProviderRules struct {
 	Name         string
 	Icon         string
@@ -43,7 +43,7 @@ type ProviderRules struct {
 	ProxyWarning string
 }
 
-// DNSProviderRules maps provider names to their specific instructions
+// DNSProviderRules maps provider names to their specific instructions.
 var DNSProviderRules = map[string]ProviderRules{
 	"namecheap": {
 		Name:       "Namecheap",
@@ -106,7 +106,7 @@ var DNSProviderRules = map[string]ProviderRules{
 	},
 }
 
-// templateData is the struct passed into the HTML template — all fields are named, no %s juggling
+// templateData is the struct passed into the HTML template — all fields are named, no %s juggling.
 type templateData struct {
 	AppName           string
 	Region            string
@@ -692,7 +692,7 @@ var reportTemplate = template.Must(template.New("report").Parse(`<!DOCTYPE html>
 </html>
 `))
 
-// GenerateResourceView creates a premium HTML report of the provisioned resources
+// GenerateResourceView creates a premium HTML report of the provisioned resources.
 func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap) (string, error) {
 	provider := getProviderRules(resMap.DNSProvider)
 
@@ -821,7 +821,7 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
 	return reportPath, nil
 }
 
-// getProviderRules returns DNS provider rules, falling back to "other"
+// getProviderRules returns DNS provider rules, falling back to "other".
 func getProviderRules(provider string) ProviderRules {
 	if rules, exists := DNSProviderRules[provider]; exists {
 		return rules
@@ -829,7 +829,7 @@ func getProviderRules(provider string) ProviderRules {
 	return DNSProviderRules["other"]
 }
 
-// GenerateQuickReference creates a markdown quick reference
+// GenerateQuickReference creates a markdown quick reference.
 func GenerateQuickReference(resMap ServerlessResourceMap) string {
 	var sb strings.Builder
 

@@ -145,7 +145,7 @@ func (sm *SecretManager) GetSecret(name string) (string, error) {
 
 	decrypted, err := Decrypt([]byte(secret.Value), []byte(key))
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrDecryptionFailed, err)
+		return "", fmt.Errorf("%w: %w", ErrDecryptionFailed, err)
 	}
 
 	return string(decrypted), nil

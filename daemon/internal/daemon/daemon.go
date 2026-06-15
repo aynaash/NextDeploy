@@ -71,7 +71,6 @@ func NewNextDeployDaemon(configPath string, socketPathOverride string) (*NextDep
 		commandHandler: commandHandler,
 		logger:         logger,
 	}, nil
-
 }
 
 func (d *NextDeployDaemon) Start() error {

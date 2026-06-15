@@ -228,7 +228,7 @@ func convertMatchers(in []MiddlewareMatcher) []ManifestMiddleMat {
 	}
 	out := make([]ManifestMiddleMat, len(in))
 	for i, m := range in {
-		out[i] = ManifestMiddleMat{Pathname: m.Pathname, Pattern: m.Pattern}
+		out[i] = ManifestMiddleMat(m)
 	}
 	return out
 }
@@ -239,12 +239,7 @@ func convertRemotePatterns(in []ImageRemotePattern) []ManifestImagePat {
 	}
 	out := make([]ManifestImagePat, len(in))
 	for i, p := range in {
-		out[i] = ManifestImagePat{
-			Protocol: p.Protocol,
-			Hostname: p.Hostname,
-			Port:     p.Port,
-			Pathname: p.Pathname,
-		}
+		out[i] = ManifestImagePat(p)
 	}
 	return out
 }

@@ -49,7 +49,7 @@ func DeserializeFromJSON(jsonStr string, data interface{}) error {
 	return nil
 }
 
-// validate key id
+// validate key id.
 func ValidateKeyID(keyID string) error {
 	if len(keyID) != 64 {
 		return errors.New("invalid key ID length, must be 64 characters")

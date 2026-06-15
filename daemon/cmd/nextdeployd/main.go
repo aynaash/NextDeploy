@@ -380,7 +380,7 @@ func acquireLock() error {
 	fileLock := flock.New(lockPath)
 	locked, err := fileLock.TryLock()
 	if err != nil {
-		return fmt.Errorf("error acquiring lock: %v", err)
+		return fmt.Errorf("error acquiring lock: %w", err)
 	}
 	if !locked {
 		return fmt.Errorf("another instance of nextdeployd is already running")
@@ -390,7 +390,7 @@ func acquireLock() error {
 	// #nosec G306 G703
 	if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0600); err != nil {
 		_ = fileLock.Unlock() // #nosec G104
-		return fmt.Errorf("error writing PID file: %v", err)
+		return fmt.Errorf("error writing PID file: %w", err)
 	}
 
 	return nil

@@ -49,7 +49,7 @@ func Decrypt(ciphertext []byte, key []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
-// GenerateKey creates a SHA-256 hash of the provided key
+// GenerateKey creates a SHA-256 hash of the provided key.
 func DeriveKey(key string) ([]byte, error) {
 	if key == "" {
 		return nil, errors.New("key cannot be empty")

@@ -110,7 +110,7 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 }
 
 func (cm *CaddyManager) GetConfig(ctx context.Context) (*Config, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", cm.adminAPI+"/config/", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", cm.adminAPI+"/config/", http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

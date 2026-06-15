@@ -83,13 +83,15 @@ var logsCmd = &cobra.Command{
 
 		if showAudit {
 			journalCmd := "tail -f -n 50 /var/log/nextdeployd/audit.log"
-			_, err = srv.ExecuteCommand(ctx, deploymentServer, "sudo "+journalCmd, agg.GetWriter(logs.SourceAudit))
+			// Streaming tail runs until ctx cancel; errors are ignored here, as
+			// in the showAll branch above.
+			_, _ = srv.ExecuteCommand(ctx, deploymentServer, "sudo "+journalCmd, agg.GetWriter(logs.SourceAudit))
 			return
 		}
 
 		if showDaemon {
 			journalCmd := "tail -f -n 50 /var/log/nextdeployd/nextdeployd.log"
-			_, err = srv.ExecuteCommand(ctx, deploymentServer, "sudo "+journalCmd, agg.GetWriter(logs.SourceDaemon))
+			_, _ = srv.ExecuteCommand(ctx, deploymentServer, "sudo "+journalCmd, agg.GetWriter(logs.SourceDaemon))
 			return
 		}
 

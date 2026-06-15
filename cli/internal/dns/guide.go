@@ -13,21 +13,21 @@ const (
 	docsURL       = "https://nextdeploy.org/docs"
 )
 
-// ValidationRecord represents an SSL validation CNAME record
+// ValidationRecord represents an SSL validation CNAME record.
 type ValidationRecord struct {
 	Name   string // The host/subdomain part (e.g., "_5f2eb7..." or "_5ab8c33.www")
 	Value  string // The target validation URL
 	Domain string // The full domain this record is for
 }
 
-// RoutingRecord represents a traffic routing record
+// RoutingRecord represents a traffic routing record.
 type RoutingRecord struct {
 	Host  string // "@", "www", or subdomain
 	Value string // Target (CloudFront domain or IP)
 	Type  string // "CNAME" or "A"
 }
 
-// Provider-specific formatting rules
+// Provider-specific formatting rules.
 type ProviderRules struct {
 	Name             string
 	HostFormat       func(host string) string // How to format the host field
@@ -36,7 +36,7 @@ type ProviderRules struct {
 }
 
 var (
-	// Namecheap specific rules
+	// Namecheap specific rules.
 	NamecheapRules = ProviderRules{
 		Name: "Namecheap",
 		HostFormat: func(host string) string {
@@ -58,7 +58,7 @@ var (
 		},
 	}
 
-	// Cloudflare specific rules
+	// Cloudflare specific rules.
 	CloudflareRules = ProviderRules{
 		Name: "Cloudflare",
 		HostFormat: func(host string) string {
@@ -71,7 +71,7 @@ var (
 		},
 	}
 
-	// GoDaddy specific rules
+	// GoDaddy specific rules.
 	GoDaddyRules = ProviderRules{
 		Name: "GoDaddy",
 		HostFormat: func(host string) string {
@@ -85,7 +85,7 @@ var (
 	}
 )
 
-// GenerateServerlessGuide creates a comprehensive dns.md file for AWS Serverless deployments
+// GenerateServerlessGuide creates a comprehensive dns.md file for AWS Serverless deployments.
 func GenerateServerlessGuide(domain string, cfDomain string, records []ValidationRecord) error {
 	f, err := os.Create("dns.md")
 	if err != nil {
@@ -118,7 +118,7 @@ func GenerateServerlessGuide(domain string, cfDomain string, records []Validatio
 	return nil
 }
 
-// GenerateVPSGuide creates a dns.md file for VPS deployments
+// GenerateVPSGuide creates a dns.md file for VPS deployments.
 func GenerateVPSGuide(domain string, serverIP string) error {
 	f, err := os.Create("dns.md")
 	if err != nil {
@@ -337,7 +337,7 @@ func writeFinalSteps(f *os.File) {
 	fmt.Fprintf(f, "*Need help? Visit [nextdeploy.org/docs](%s) or run `nextdeploy support`*\n", docsURL)
 }
 
-// Helper function to determine record purpose
+// Helper function to determine record purpose.
 func getRecordPurpose(record ValidationRecord, domain string) string {
 	if strings.Contains(record.Name, ".www") {
 		return fmt.Sprintf("Validates www.%s", domain)
@@ -345,12 +345,12 @@ func getRecordPurpose(record ValidationRecord, domain string) string {
 	return fmt.Sprintf("Validates %s (root domain)", domain)
 }
 
-// FormatHostForProvider formats a host value according to provider rules
+// FormatHostForProvider formats a host value according to provider rules.
 func FormatHostForProvider(provider ProviderRules, host string) string {
 	return provider.HostFormat(host)
 }
 
-// GenerateQuickReference generates a quick reference table for all records
+// GenerateQuickReference generates a quick reference table for all records.
 func GenerateQuickReference(domain string, cfDomain string, records []ValidationRecord) string {
 	var sb strings.Builder
 

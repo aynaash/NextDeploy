@@ -2,10 +2,11 @@ package nextcore
 
 import (
 	"fmt"
-	"github.com/aynaash/nextdeploy/shared"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/aynaash/nextdeploy/shared"
 )
 
 type PackageManager string

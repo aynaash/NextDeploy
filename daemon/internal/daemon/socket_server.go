@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -185,7 +186,8 @@ func (ss *SocketServer) acceptOnListener(l net.Listener) {
 	for {
 		conn, err := l.Accept()
 		if err != nil {
-			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			var ne net.Error
+			if errors.As(err, &ne) {
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}

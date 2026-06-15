@@ -138,7 +138,7 @@ func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 	if knownHostsPath == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return fmt.Errorf("failed to get home directory: %v", err)
+			return fmt.Errorf("failed to get home directory: %w", err)
 		}
 		knownHostsPath = filepath.Join(home, ".ssh", "known_hosts")
 	}
@@ -146,7 +146,7 @@ func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 	sshDir := filepath.Dir(knownHostsPath)
 	if _, err := os.Stat(sshDir); os.IsNotExist(err) {
 		if err := os.Mkdir(sshDir, 0700); err != nil {
-			return fmt.Errorf("failed to create .ssh directory: %v", err)
+			return fmt.Errorf("failed to create .ssh directory: %w", err)
 		}
 	}
 
@@ -156,7 +156,7 @@ func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 	cmd.Stdout = &out
 	err := cmd.Run()
 	if err != nil {
-		return fmt.Errorf("ssh-keyscan failed: %v", err)
+		return fmt.Errorf("ssh-keyscan failed: %w", err)
 	}
 
 	hostKey := strings.TrimSpace(out.String())
@@ -167,12 +167,12 @@ func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 	// #nosec G304
 	f, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
-		return fmt.Errorf("failed to open known_hosts file: %v", err)
+		return fmt.Errorf("failed to open known_hosts file: %w", err)
 	}
 	defer f.Close()
 
 	if _, err := f.WriteString(hostKey + "\n"); err != nil {
-		return fmt.Errorf("failed to write to known_hosts file: %v", err)
+		return fmt.Errorf("failed to write to known_hosts file: %w", err)
 	}
 
 	return nil
@@ -267,7 +267,8 @@ func getAuthMethods(cfg config.ServerConfig) ([]ssh.AuthMethod, error) {
 
 	signer, err := ssh.ParsePrivateKey(key)
 	if err != nil {
-		if _, ok := err.(*ssh.PassphraseMissingError); ok && cfg.KeyPassphrase != "" {
+		passphraseMissingError := &ssh.PassphraseMissingError{}
+		if errors.As(err, &passphraseMissingError) {
 			signer, err = ssh.ParsePrivateKeyWithPassphrase(key, []byte(cfg.KeyPassphrase))
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse SSH private key with passphrase: %w", err)
@@ -365,9 +366,7 @@ func getHostKeyCallback() (ssh.HostKeyCallback, error) {
 }
 
 func (s *ServerStruct) BasicCaddySetup(ctx context.Context, serverName string, stream io.Writer) error {
-
 	return nil
-
 }
 
 func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command string, stream io.Writer) (string, error) {
@@ -401,7 +400,7 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 	}
 	stdoutMulti := io.MultiWriter(stdoutWriters...)
 
-	var stderrDst io.Writer = io.Discard
+	var stderrDst = io.Discard
 	if stream != nil {
 		stderrDst = stream
 	}

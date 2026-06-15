@@ -116,7 +116,7 @@ func formatAuditJSON(line string) string {
 	return line
 }
 
-// SourceWriter implements io.Writer for a specific source
+// SourceWriter implements io.Writer for a specific source.
 type SourceWriter struct {
 	agg    *LogAggregator
 	source LogSource

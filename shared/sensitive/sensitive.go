@@ -112,17 +112,17 @@ func mightContainPattern(s string) bool {
 
 // Print scrubs and writes to stdout. Mirrors fmt.Print signature.
 func Print(a ...any) (int, error) {
-	return io.WriteString(os.Stdout, Scrub(fmt.Sprint(a...)))
+	return os.Stdout.WriteString(Scrub(fmt.Sprint(a...)))
 }
 
 // Println scrubs and writes to stdout with a trailing newline.
 func Println(a ...any) (int, error) {
-	return io.WriteString(os.Stdout, Scrub(fmt.Sprintln(a...)))
+	return os.Stdout.WriteString(Scrub(fmt.Sprintln(a...)))
 }
 
 // Printf scrubs and writes to stdout. Mirrors fmt.Printf signature.
 func Printf(format string, a ...any) (int, error) {
-	return io.WriteString(os.Stdout, Scrub(fmt.Sprintf(format, a...)))
+	return os.Stdout.WriteString(Scrub(fmt.Sprintf(format, a...)))
 }
 
 // Fprint scrubs and writes to w. Mirrors fmt.Fprint signature.

@@ -4,13 +4,14 @@
 package sanitizer
 
 import (
+	"errors"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode"
 )
 
-// DockerImageName sanitizes a Docker image name for use in command execution
+// DockerImageName sanitizes a Docker image name for use in command execution.
 func DockerImageName(name string) string {
 	// Remove any potentially dangerous characters
 	reg := regexp.MustCompile(`[^a-zA-Z0-9_\-\.\/:]`)
@@ -24,7 +25,7 @@ func DockerImageName(name string) string {
 	return sanitized
 }
 
-// ContainerName sanitizes a Docker container name
+// ContainerName sanitizes a Docker container name.
 func ContainerName(name string) string {
 	// Container names can only contain [a-zA-Z0-9][a-zA-Z0-9_.-]
 	reg := regexp.MustCompile(`[^a-zA-Z0-9_\.\-]`)
@@ -43,7 +44,7 @@ func ContainerName(name string) string {
 	return sanitized
 }
 
-// FilePath sanitizes a file path to prevent directory traversal attacks
+// FilePath sanitizes a file path to prevent directory traversal attacks.
 func FilePath(path string, allowedBaseDir string) (string, error) {
 	// Clean the path to remove any ../ or ./
 	cleanPath := filepath.Clean(path)
@@ -67,7 +68,7 @@ func FilePath(path string, allowedBaseDir string) (string, error) {
 	return absPath, nil
 }
 
-// CommandArgument sanitizes a single command line argument
+// CommandArgument sanitizes a single command line argument.
 func CommandArgument(arg string) string {
 	// Remove any characters that could be used for command injection
 	reg := regexp.MustCompile(`[;&|$()\` + "`" + `'"\t\n\r]`)
@@ -82,7 +83,7 @@ func CommandArgument(arg string) string {
 	return sanitized
 }
 
-// URL sanitizes a URL for HTTP requests
+// URL sanitizes a URL for HTTP requests.
 func URL(url string) string {
 	// Basic URL validation - you might want to use net/url for more robust validation
 	reg := regexp.MustCompile(`[^a-zA-Z0-9_\-\.:/?#@!$&'()*+,;=%]`)
@@ -96,20 +97,20 @@ func URL(url string) string {
 	return sanitized
 }
 
-// Password sanitizes a password string (removes dangerous characters)
+// Password sanitizes a password string (removes dangerous characters).
 func Password(password string) string {
 	// Remove characters that could be used for command injection
 	reg := regexp.MustCompile(`[;&|$()\` + "`" + `'"\t\n\r]`)
 	return reg.ReplaceAllString(password, "")
 }
 
-// Alphanumeric removes all non-alphanumeric characters
+// Alphanumeric removes all non-alphanumeric characters.
 func Alphanumeric(input string) string {
 	reg := regexp.MustCompile(`[^a-zA-Z0-9]`)
 	return reg.ReplaceAllString(input, "")
 }
 
-// Filename sanitizes a filename to prevent path traversal and other issues
+// Filename sanitizes a filename to prevent path traversal and other issues.
 func Filename(filename string) string {
 	// Remove directory traversal attempts and other dangerous patterns
 	reg := regexp.MustCompile(`\.\./|\.\.\\|/|\\|[:*?"<>|]`)
@@ -127,7 +128,7 @@ func Filename(filename string) string {
 	return sanitized
 }
 
-// ShellCommand sanitizes a shell command for safe execution
+// ShellCommand sanitizes a shell command for safe execution.
 func ShellCommand(command string) string {
 	// This is a very restrictive sanitizer for shell commands
 	// Consider using exec.Command with individual arguments instead
@@ -140,7 +141,7 @@ func ShellCommand(command string) string {
 	return strings.TrimSpace(sanitized)
 }
 
-// SafeExecArgs prepares arguments for exec.Command with validation
+// SafeExecArgs prepares arguments for exec.Command with validation.
 func SafeExecArgs(command string, args []string) (string, []string, error) {
 	// Validate the base command
 	safeCommand := Alphanumeric(command)
@@ -160,7 +161,7 @@ func SafeExecArgs(command string, args []string) (string, []string, error) {
 	return safeCommand, safeArgs, nil
 }
 
-// SecurityError represents a security-related error
+// SecurityError represents a security-related error.
 type SecurityError struct {
 	Message string
 }
@@ -169,8 +170,9 @@ func (e *SecurityError) Error() string {
 	return "security error: " + e.Message
 }
 
-// IsSecurityError checks if an error is a SecurityError
+// IsSecurityError checks if an error is a SecurityError.
 func IsSecurityError(err error) bool {
-	_, ok := err.(*SecurityError)
+	securityError := &SecurityError{}
+	ok := errors.As(err, &securityError)
 	return ok
 }

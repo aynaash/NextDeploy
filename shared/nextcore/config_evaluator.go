@@ -2,12 +2,13 @@ package nextcore
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 )
 
-// evaluateConfigViaRuntime uses Node or Bun to safely load and evaluate next.config.js/mjs
+// evaluateConfigViaRuntime uses Node or Bun to safely load and evaluate next.config.js/mjs.
 func evaluateConfigViaRuntime(configPath string) (map[string]interface{}, error) {
 	// Simple JS script to import the config and print it as JSON
 	// We handle default exports, promises, and functions that return config objects.
@@ -53,7 +54,8 @@ load();
 	out, err := cmd.Output()
 	if err != nil {
 		var stderrStr string
-		if ee, ok := err.(*exec.ExitError); ok {
+		ee := &exec.ExitError{}
+		if errors.As(err, &ee) {
 			stderrStr = string(ee.Stderr)
 		}
 		return nil, fmt.Errorf("failed to evaluate config via %s: %w\nOutput: %s\nStderr: %s", runtime, err, string(out), stderrStr)

@@ -3,15 +3,16 @@ package nextdeploy
 import (
 	"errors"
 	"fmt"
-	"github.com/aynaash/nextdeploy/shared"
 	"os"
 	"path/filepath"
+
+	"github.com/aynaash/nextdeploy/shared"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Config represents the structure of a nextdeploy.yml file
-// New creates a new Config with default values
+// New creates a new Config with default values.
 var (
 	ylogger = shared.PackageLogger("YAML", "↪ YAML")
 )
@@ -73,7 +74,7 @@ func New() *Config {
 	}
 }
 
-// Load reads a nextdeploy.yml file and returns a Config struct
+// Load reads a nextdeploy.yml file and returns a Config struct.
 func Load(filename string) (*Config, error) {
 	// #nosec G304
 	data, err := os.ReadFile(filename)
@@ -91,7 +92,7 @@ func Load(filename string) (*Config, error) {
 	return config, nil
 }
 
-// Save writes the Config to a nextdeploy.yml file
+// Save writes the Config to a nextdeploy.yml file.
 func (c *Config) Save(filename string) error {
 	data, err := yaml.Marshal(c)
 	if err != nil {
@@ -114,7 +115,7 @@ func (c *Config) Save(filename string) error {
 	return nil
 }
 
-// UpdateApp updates the app configuration
+// UpdateApp updates the app configuration.
 func (c *Config) UpdateApp(name, environment, domain string, port int) {
 	c.App.Name = name
 	c.App.Environment = environment
@@ -122,7 +123,7 @@ func (c *Config) UpdateApp(name, environment, domain string, port int) {
 	c.App.Port = port
 }
 
-// UpdateRepository updates the repository configuration
+// UpdateRepository updates the repository configuration.
 func (c *Config) UpdateRepository(url, branch string, autoDeploy bool, webhookSecret string) {
 	c.Repository.URL = url
 	c.Repository.Branch = branch
@@ -130,7 +131,7 @@ func (c *Config) UpdateRepository(url, branch string, autoDeploy bool, webhookSe
 	c.Repository.WebhookSecret = webhookSecret
 }
 
-// AddDockerBuildArg adds or updates a Docker build argument
+// AddDockerBuildArg adds or updates a Docker build argument.
 func (c *Config) AddDockerBuildArg(key, value string) {
 	if c.Docker.Build.Args == nil {
 		c.Docker.Build.Args = make(map[string]string)
@@ -138,12 +139,12 @@ func (c *Config) AddDockerBuildArg(key, value string) {
 	c.Docker.Build.Args[key] = value
 }
 
-// RemoveDockerBuildArg removes a Docker build argument
+// RemoveDockerBuildArg removes a Docker build argument.
 func (c *Config) RemoveDockerBuildArg(key string) {
 	delete(c.Docker.Build.Args, key)
 }
 
-// AddContainerVolume adds a volume to the container configuration
+// AddContainerVolume adds a volume to the container configuration.
 func (c *Config) AddContainerVolume(volume string) error {
 	for _, v := range c.Deployment.Container.Volumes {
 		if v == volume {
@@ -154,7 +155,7 @@ func (c *Config) AddContainerVolume(volume string) error {
 	return nil
 }
 
-// RemoveContainerVolume removes a volume from the container configuration
+// RemoveContainerVolume removes a volume from the container configuration.
 func (c *Config) RemoveContainerVolume(volume string) error {
 	for i, v := range c.Deployment.Container.Volumes {
 		if v == volume {
@@ -165,7 +166,7 @@ func (c *Config) RemoveContainerVolume(volume string) error {
 	return errors.New("volume not found")
 }
 
-// AddContainerPort adds a port mapping to the container configuration
+// AddContainerPort adds a port mapping to the container configuration.
 func (c *Config) AddContainerPort(port string) error {
 	for _, p := range c.Deployment.Container.Ports {
 		if p == port {
@@ -176,7 +177,7 @@ func (c *Config) AddContainerPort(port string) error {
 	return nil
 }
 
-// RemoveContainerPort removes a port mapping from the container configuration
+// RemoveContainerPort removes a port mapping from the container configuration.
 func (c *Config) RemoveContainerPort(port string) error {
 	for i, p := range c.Deployment.Container.Ports {
 		if p == port {
@@ -187,12 +188,12 @@ func (c *Config) RemoveContainerPort(port string) error {
 	return errors.New("port not found")
 }
 
-// AddSuccessWebhook adds a webhook to be triggered on successful deployment
+// AddSuccessWebhook adds a webhook to be triggered on successful deployment.
 func (c *Config) AddSuccessWebhook(url string) {
 	c.Webhook.OnSuccess = append(c.Webhook.OnSuccess, url)
 }
 
-// RemoveSuccessWebhook removes a webhook from the success list
+// RemoveSuccessWebhook removes a webhook from the success list.
 func (c *Config) RemoveSuccessWebhook(url string) error {
 	for i, u := range c.Webhook.OnSuccess {
 		if u == url {
@@ -203,12 +204,12 @@ func (c *Config) RemoveSuccessWebhook(url string) error {
 	return errors.New("webhook not found")
 }
 
-// AddFailureWebhook adds a webhook to be triggered on failed deployment
+// AddFailureWebhook adds a webhook to be triggered on failed deployment.
 func (c *Config) AddFailureWebhook(url string) {
 	c.Webhook.OnFailure = append(c.Webhook.OnFailure, url)
 }
 
-// RemoveFailureWebhook removes a webhook from the failure list
+// RemoveFailureWebhook removes a webhook from the failure list.
 func (c *Config) RemoveFailureWebhook(url string) error {
 	for i, u := range c.Webhook.OnFailure {
 		if u == url {
@@ -219,7 +220,7 @@ func (c *Config) RemoveFailureWebhook(url string) error {
 	return errors.New("webhook not found")
 }
 
-// Validate checks if the configuration is valid
+// Validate checks if the configuration is valid.
 func (c *Config) Validate(Config *Config) error {
 	if Config.App.Name == "" {
 		return errors.New("app name is required")

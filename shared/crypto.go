@@ -163,7 +163,6 @@ func GenerateKeyPair() (*KeyPair, error) {
 		SignPublic:  signPublic,
 		KeyID:       hex.EncodeToString(KeyID),
 	}, nil
-
 }
 func RunCryptoHealthChecks() error {
 	// TODO:Test ECDH key exchange
@@ -243,7 +242,6 @@ func Sign(data []byte, privateKey ed25519.PrivateKey) ([]byte, error) {
 }
 
 func Verify(data []byte, signature []byte, publicKey ed25519.PublicKey) (bool, error) {
-
 	if len(publicKey) != ed25519.PrivateKeySize {
 		SharedLogger.Error("Invalid public key size: expected %d, got %d", ed25519.PrivateKeySize, len(publicKey))
 		return false, fmt.Errorf("invalid public key size: expected %d, got %d", ed25519.PrivateKeySize, len(publicKey))

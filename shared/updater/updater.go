@@ -56,7 +56,7 @@ type Release struct {
 	HTMLURL string `json:"html_url"`
 }
 
-// UpdateOptions configures the update process
+// UpdateOptions configures the update process.
 type UpdateOptions struct {
 	Force       bool          // Force downgrade if current is newer
 	Timeout     time.Duration // Overall update timeout
@@ -65,7 +65,7 @@ type UpdateOptions struct {
 	SkipService bool          // Skip service restart
 }
 
-// DefaultUpdateOptions returns sensible defaults
+// DefaultUpdateOptions returns sensible defaults.
 func DefaultUpdateOptions() *UpdateOptions {
 	return &UpdateOptions{
 		Force:       false,
@@ -106,7 +106,7 @@ func LatestRelease() (Release, error) {
 	}
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+		req, err := http.NewRequest(http.MethodGet, apiURL, http.NoBody)
 		if err != nil {
 			lastErr = fmt.Errorf("failed to create request: %w", err)
 			continue
@@ -186,7 +186,7 @@ func LatestRelease() (Release, error) {
 	}
 }
 
-// parseUnixTime parses GitHub's X-RateLimit-Reset header
+// parseUnixTime parses GitHub's X-RateLimit-Reset header.
 func parseUnixTime(s string) (time.Time, error) {
 	var sec int64
 	if _, err := fmt.Sscanf(s, "%d", &sec); err != nil {
@@ -195,7 +195,7 @@ func parseUnixTime(s string) (time.Time, error) {
 	return time.Unix(sec, 0), nil
 }
 
-// CheckAndPrint checks for updates and prints a message if available
+// CheckAndPrint checks for updates and prints a message if available.
 func CheckAndPrint(current string) {
 	if current == "dev" || current == "" {
 		return
@@ -214,24 +214,24 @@ func CheckAndPrint(current string) {
 	}
 }
 
-// SelfUpdate performs an atomic update of the nextdeploy binary
+// SelfUpdate performs an atomic update of the nextdeploy binary.
 func SelfUpdate(current string) error {
 	return SelfUpdateWithOptions(current, DefaultUpdateOptions())
 }
 
-// SelfUpdateDaemon performs an atomic update of the nextdeployd daemon
+// SelfUpdateDaemon performs an atomic update of the nextdeployd daemon.
 func SelfUpdateDaemon(current string) error {
 	opts := DefaultUpdateOptions()
 	opts.SkipService = false
 	return selfUpdateWithOptions(current, "nextdeployd", opts)
 }
 
-// SelfUpdateWithOptions performs an update with custom options
+// SelfUpdateWithOptions performs an update with custom options.
 func SelfUpdateWithOptions(current string, opts *UpdateOptions) error {
 	return selfUpdateWithOptions(current, "nextdeploy", opts)
 }
 
-// selfUpdateWithOptions is the core update logic with all improvements
+// selfUpdateWithOptions is the core update logic with all improvements.
 func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) error {
 	// Validate options
 	if opts == nil {
@@ -420,7 +420,7 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 					Stage:       "critical",
 					Message:     "update failed AND backup restore failed",
 					Recoverable: false,
-					Err:         fmt.Errorf("original: %w, restore: %v", err, restoreErr),
+					Err:         fmt.Errorf("original: %w, restore: %w", err, restoreErr),
 				}
 			}
 		}
@@ -474,7 +474,7 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 	return nil
 }
 
-// detectArchiveName returns the correct archive name based on GoReleaser naming
+// detectArchiveName returns the correct archive name based on GoReleaser naming.
 func detectArchiveName(version, binaryBase string) string {
 	osStr := runtime.GOOS
 	arch := runtime.GOARCH
@@ -502,7 +502,7 @@ func detectArchiveName(version, binaryBase string) string {
 	return fmt.Sprintf("%s_%s_%s_%s%s", binaryBase, cleanVersion, osStr, arch, ext)
 }
 
-// isMusl checks if the system uses musl libc
+// isMusl checks if the system uses musl libc.
 func isMusl() bool {
 	if _, err := os.Stat("/lib/libc.musl-x86_64.so.1"); err == nil {
 		return true
@@ -519,14 +519,14 @@ func isMusl() bool {
 	return false
 }
 
-// downloadChecksums downloads and parses the checksums file
+// downloadChecksums downloads and parses the checksums file.
 func downloadChecksums(url, destPath string) (map[string]string, error) {
 	checksums := make(map[string]string)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -564,7 +564,7 @@ func downloadChecksums(url, destPath string) (map[string]string, error) {
 	return checksums, nil
 }
 
-// verifyBinaryIntegrity checks the binary against its checksum
+// verifyBinaryIntegrity checks the binary against its checksum.
 func verifyBinaryIntegrity(binPath, binaryName string, checksums map[string]string) error {
 	if checksums == nil {
 		fmt.Println("  No checksums available, skipping integrity check")
@@ -601,12 +601,12 @@ func verifyBinaryIntegrity(binPath, binaryName string, checksums map[string]stri
 	return nil
 }
 
-// DownloadBinaryForCLI is an exported wrapper for CLI tools
+// DownloadBinaryForCLI is an exported wrapper for CLI tools.
 func DownloadBinaryForCLI(version, binaryName, destPath string, opts *UpdateOptions) error {
 	return downloadBinary(version, binaryName, destPath, opts)
 }
 
-// downloadBinary downloads the binary with progress and retries
+// downloadBinary downloads the binary with progress and retries.
 func downloadBinary(version, binaryName, destPath string, opts *UpdateOptions) error {
 	downloadURL := fmt.Sprintf(
 		"https://github.com/%s/%s/releases/download/%s/%s",
@@ -636,12 +636,12 @@ func downloadBinary(version, binaryName, destPath string, opts *UpdateOptions) e
 	}
 }
 
-// attemptDownload performs a single download attempt
+// attemptDownload performs a single download attempt.
 func attemptDownload(url, destPath, binaryName string, opts *UpdateOptions) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return err
 	}
@@ -709,7 +709,7 @@ func attemptDownload(url, destPath, binaryName string, opts *UpdateOptions) erro
 	return nil
 }
 
-// formatBytes converts bytes to human readable format
+// formatBytes converts bytes to human readable format.
 func formatBytes(bytes int64) string {
 	const unit = 1024
 	if bytes < unit {
@@ -723,7 +723,7 @@ func formatBytes(bytes int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
-// progressWriter shows download progress
+// progressWriter shows download progress.
 type progressWriter struct {
 	total      int64
 	current    int64
@@ -750,7 +750,7 @@ func (p *progressWriter) Read(b []byte) (int, error) {
 	return n, err
 }
 
-// verifyBinary ensures the downloaded binary works
+// verifyBinary ensures the downloaded binary works.
 func verifyBinary(binPath string) error {
 	cmd := exec.Command(binPath, "version")
 	output, err := cmd.CombinedOutput()
@@ -760,7 +760,7 @@ func verifyBinary(binPath string) error {
 	return nil
 }
 
-// getVersionFromBinary extracts version from binary
+// getVersionFromBinary extracts version from binary.
 func getVersionFromBinary(binPath string) (string, error) {
 	cmd := exec.Command(binPath, "version")
 	output, err := cmd.Output()
@@ -774,7 +774,7 @@ func getVersionFromBinary(binPath string) (string, error) {
 	return "", fmt.Errorf("unexpected version output: %s", output)
 }
 
-// isProcessRunning checks if a process with the given name is running
+// isProcessRunning checks if a process with the given name is running.
 func isProcessRunning(name string) bool {
 	cmd := exec.Command("pgrep", "-f", name)
 	if err := cmd.Run(); err == nil {
@@ -783,7 +783,7 @@ func isProcessRunning(name string) bool {
 	return false
 }
 
-// copyFileWithSudo copies a file, using sudo if necessary
+// copyFileWithSudo copies a file, using sudo if necessary.
 func copyFileWithSudo(src, dst string) error {
 	if err := copyFile(src, dst); err == nil {
 		return nil
@@ -791,7 +791,7 @@ func copyFileWithSudo(src, dst string) error {
 	return runCommand("sudo", "cp", src, dst)
 }
 
-// copyFile performs a regular file copy
+// copyFile performs a regular file copy.
 func copyFile(src, dst string) error {
 	source, err := os.Open(src)
 	if err != nil {
@@ -809,7 +809,7 @@ func copyFile(src, dst string) error {
 	return err
 }
 
-// atomicReplace performs an atomic file replacement
+// atomicReplace performs an atomic file replacement.
 func atomicReplace(src, dst string) error {
 	// Try direct rename first
 	if err := os.Rename(src, dst); err == nil {
@@ -825,7 +825,7 @@ func atomicReplace(src, dst string) error {
 	return runCommand("sudo", "mv", src, dst)
 }
 
-// setPermissions sets proper executable permissions
+// setPermissions sets proper executable permissions.
 func setPermissions(path string) error {
 	if err := os.Chmod(path, 0755); err == nil {
 		return nil
@@ -833,12 +833,12 @@ func setPermissions(path string) error {
 	return runCommand("sudo", "chmod", "755", path)
 }
 
-// restartService restarts a systemd service
+// restartService restarts a systemd service.
 func restartService(service string) error {
 	return runCommand("sudo", "systemctl", "restart", service)
 }
 
-// runCommand executes a command with output
+// runCommand executes a command with output.
 func runCommand(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = os.Stdout
@@ -846,7 +846,7 @@ func runCommand(name string, args ...string) error {
 	return cmd.Run()
 }
 
-// clearCommandCache clears shell command cache
+// clearCommandCache clears shell command cache.
 func clearCommandCache() {
 	// Try bash hash -r
 	ignoreErr(exec.Command("bash", "-c", "hash -r 2>/dev/null").Run())
@@ -854,7 +854,7 @@ func clearCommandCache() {
 	ignoreErr(exec.Command("zsh", "-c", "rehash 2>/dev/null").Run())
 }
 
-// Version comparison functions
+// Version comparison functions.
 func isNewer(candidate, current string) bool {
 	return compareVersions(candidate, current) > 0
 }
@@ -938,7 +938,7 @@ func removeAllBestEffort(path string) {
 	ignoreErr(os.RemoveAll(path))
 }
 
-// ExtractBinaryForCLI is an exported wrapper for CLI tools
+// ExtractBinaryForCLI is an exported wrapper for CLI tools.
 func ExtractBinaryForCLI(archivePath, binaryName, destPath string) error {
 	return extractBinary(archivePath, binaryName, destPath)
 }

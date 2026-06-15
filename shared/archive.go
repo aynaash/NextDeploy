@@ -173,7 +173,7 @@ func CreateTarGz(srcDir, targetTar string) error {
 	// #nosec G204
 	cmd := exec.Command(tarPath, "-czf", absTarget, "-C", absSrc, ".")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("tar creation failed: %v - %s", err, string(out))
+		return fmt.Errorf("tar creation failed: %w - %s", err, string(out))
 	}
 	return nil
 }

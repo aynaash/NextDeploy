@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Semantic color functions
+// Semantic color functions.
 var (
 	title     = color.New(color.FgHiBlue, color.Bold).SprintFunc()
 	success   = color.New(color.FgHiGreen).SprintFunc()
@@ -24,7 +24,7 @@ var (
 	highlight = color.New(color.Bold).SprintFunc()
 )
 
-// rootCmd is the main command
+// rootCmd is the main command.
 var rootCmd = &cobra.Command{
 	Use:     "nextdeploy",
 	Version: shared.Version,
@@ -91,7 +91,6 @@ func Execute() {
 }
 
 func init() {
-
 	rootCmd.SetHelpTemplate(fmt.Sprintf(`%s
 {{if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}`,
 		title("✨ NextDeploy CLI Toolkit"),

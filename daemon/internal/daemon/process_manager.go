@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -23,7 +24,7 @@ func processAlive(pidStr string) bool {
 		return false
 	}
 	err = syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 type ProcessManager struct {
@@ -231,7 +232,7 @@ func (pm *ProcessManager) reloadDaemon() error {
 	// #nosec G204
 	cmd := exec.Command(systemctl, "daemon-reload")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to reload systemd daemon: %v - %s", err, out)
+		return fmt.Errorf("failed to reload systemd daemon: %w - %s", err, out)
 	}
 	log.Printf("[process] systemctl daemon-reload succeeded")
 	return nil
@@ -250,7 +251,7 @@ func (pm *ProcessManager) StartService(serviceName string) error {
 	// #nosec G204
 	cmd = exec.Command(systemctl, "start", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to start service %s: %v - %s", serviceName, err, string(out))
+		return fmt.Errorf("failed to start service %s: %w - %s", serviceName, err, string(out))
 	}
 
 	log.Printf("[process] Started systemd service %s", serviceName)
@@ -294,7 +295,7 @@ func (pm *ProcessManager) StopService(serviceName string) error {
 	// #nosec G204
 	cmd = exec.Command(systemctl, "disable", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "not loaded") {
-		return fmt.Errorf("failed to disable service %s: %v - %s", serviceName, err, string(out))
+		return fmt.Errorf("failed to disable service %s: %w - %s", serviceName, err, string(out))
 	}
 
 	return nil
@@ -309,7 +310,7 @@ func (pm *ProcessManager) RestartService(serviceName string) error {
 	// #nosec G204
 	cmd := exec.Command(systemctl, "restart", serviceName)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to restart service %s: %v - %s", serviceName, err, out)
+		return fmt.Errorf("failed to restart service %s: %w - %s", serviceName, err, out)
 	}
 	log.Printf("Restarted systemd service %s", serviceName)
 	return nil
