@@ -604,6 +604,55 @@ func DevDaemon() error {
 	return sh.RunV("air", "-c", ".air.daemon.toml")
 }
 
+// ── dogfood ──────────────────────────────────────────────────────────────────
+
+// dogfoodDir is the real app NextDeploy deploys to dogfood itself. Override with
+// NEXTDEPLOY_DOGFOOD_DIR (default: ../nextdeployfrontend, a sibling checkout).
+func dogfoodDir() string {
+	if d := os.Getenv("NEXTDEPLOY_DOGFOOD_DIR"); d != "" {
+		return d
+	}
+	return filepath.Join("..", "nextdeployfrontend")
+}
+
+// runInDir runs cmd+args in dir, streaming stdio (so interactive prompts and
+// live deploy logs pass straight through).
+func runInDir(dir, cmd string, args ...string) error {
+	c := exec.Command(cmd, args...) // #nosec G204 -- dev tooling; cmd/args are workflow-controlled
+	c.Dir = dir
+	c.Stdout, c.Stderr, c.Stdin = os.Stdout, os.Stderr, os.Stdin
+	return c.Run()
+}
+
+// Dogfood builds the CLI from the current source and ships dogfoodDir() with it
+// — the inner-loop "does my change actually deploy a real app?" check.
+//
+//	mage dogfood                               # ship ../nextdeployfrontend
+//	NEXTDEPLOY_DOGFOOD_DIR=../myapp mage dogfood
+//
+// Secrets go through `doppler run` when doppler is on PATH (matching how the app
+// ships in practice); set NEXTDEPLOY_DOGFOOD_NO_DOPPLER=1 to skip it.
+func Dogfood() error {
+	mg.Deps(BuildCLIDev)
+	absBin, err := filepath.Abs(filepath.Join(devBinDir(), "nextdeploy"))
+	if err != nil {
+		return err
+	}
+	dir := dogfoodDir()
+	if _, err := os.Stat(dir); err != nil {
+		return fmt.Errorf("dogfood dir %q not found — set NEXTDEPLOY_DOGFOOD_DIR: %w", dir, err)
+	}
+
+	cmd, args := absBin, []string{"ship"}
+	if os.Getenv("NEXTDEPLOY_DOGFOOD_NO_DOPPLER") == "" {
+		if _, lookErr := exec.LookPath("doppler"); lookErr == nil {
+			cmd, args = "doppler", []string{"run", "--", absBin, "ship"}
+		}
+	}
+	fmt.Printf("Dogfood: shipping %s with %s\n", dir, absBin)
+	return runInDir(dir, cmd, args...)
+}
+
 // ── docker ───────────────────────────────────────────────────────────────────
 
 // DockerBuild builds a local Docker image tagged with the current version.
