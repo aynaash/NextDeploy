@@ -8,6 +8,6 @@
   },
   "devDependencies": {
     "miniflare": "^3.20240909.0",
-    "vitest": "^2.1.0"
+    "vitest": "^3.2.6"
   }
 }
