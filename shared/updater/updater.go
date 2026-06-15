@@ -675,9 +675,8 @@ func attemptDownload(url, destPath, binaryName string, opts *UpdateOptions) erro
 	// O_TRUNC, not O_EXCL: a previous attempt that failed mid-download (e.g. a
 	// network timeout) leaves a partial file in the temp dir. O_EXCL would make
 	// every subsequent retry fail with "file exists", defeating the retry loop —
-	// truncate and re-download instead. #nosec G302 -- the artifact is an
-	// executable binary and must keep its exec bit.
-	f, err := os.OpenFile(destPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o755)
+	// truncate and re-download instead.
+	f, err := os.OpenFile(destPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o755) // #nosec G302 -- downloaded artifact is an executable binary; needs its exec bit
 	if err != nil {
 		return err
 	}
