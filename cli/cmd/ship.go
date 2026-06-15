@@ -16,6 +16,7 @@ import (
 	"github.com/aynaash/nextdeploy/shared/config"
 	"github.com/aynaash/nextdeploy/shared/git"
 	"github.com/aynaash/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/shared/telemetry"
 
 	"github.com/spf13/cobra"
 )
@@ -58,9 +59,12 @@ var shipCmd = &cobra.Command{
 
 		if result.EffectiveTarget == "serverless" {
 			shipServerless(log, cfg, &result.Payload)
+			// Reached only on success — shipServerless exits the process on failure.
+			telemetry.RecordShipSuccess(cfg.Serverless.Provider, shared.Version)
 			return
 		}
 		shipVPS(log, cfg, result)
+		telemetry.RecordShipSuccess("vps", shared.Version)
 	},
 }
 
