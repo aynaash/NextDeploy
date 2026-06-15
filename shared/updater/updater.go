@@ -475,30 +475,25 @@ func selfUpdateWithOptions(current, binaryBase string, opts *UpdateOptions) erro
 }
 
 // detectArchiveName returns the correct archive name based on GoReleaser naming.
+//
+// GoReleaser's name_template uses {{ .Os }}, which is the lowercase runtime.GOOS
+// (e.g. "linux", "darwin", "windows"). The name must match exactly: the download
+// URL tolerates case differences, but the checksums.txt lookup is a literal
+// string match, so a title-cased name silently skips integrity verification.
 func detectArchiveName(version, binaryBase string) string {
 	osStr := runtime.GOOS
 	arch := runtime.GOARCH
 
-	// Format OS title case (e.g. Linux, Darwin, Windows)
-	switch osStr {
-	case "linux":
-		osStr = "Linux"
-	case "darwin":
-		osStr = "Darwin"
-	case "windows":
-		osStr = "Windows"
-	}
-
 	// Windows uses zip, others use tar.gz
 	ext := ".tar.gz"
-	if osStr == "Windows" {
+	if osStr == "windows" {
 		ext = ".zip"
 	}
 
 	// Remove leading v from version for the GoReleaser asset
 	cleanVersion := stripV(version)
 
-	// e.g. nextdeploy_0.6.0_Linux_amd64.tar.gz
+	// e.g. nextdeploy_0.12.1_linux_amd64.tar.gz
 	return fmt.Sprintf("%s_%s_%s_%s%s", binaryBase, cleanVersion, osStr, arch, ext)
 }
 
