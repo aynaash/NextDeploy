@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdaTypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
 
@@ -260,21 +260,25 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 	functionName := p.getLambdaFunctionName(appCfg)
 	p.verboseLog("  Lambda function name: %s", functionName)
 
-	// Use pre-built zip from packager
+	// Use pre-built zip from packager. We never read it into memory: it's
+	// streamed to S3 below and Lambda is pointed at the S3 object via
+	// FunctionCode.S3Key. This keeps a 250MB-class zip off the heap and also
+	// sidesteps the 50MB ceiling on direct ZipFile uploads.
 	zipPath := pkg.LambdaZipPath
-	zipContents, err := os.ReadFile(zipPath)
-	if err != nil {
-		return fmt.Errorf("failed to read lambda zip package: %w", err)
-	}
-	p.verboseLog("  Lambda zip size: %s (%s)", formatBytes(int64(len(zipContents))), zipPath)
+	p.verboseLog("  Lambda zip size: %s (%s)", formatBytes(pkg.LambdaZipSize), zipPath)
 
-	// 3a. Save zip to S3 for rollback history (non-fatal)
+	// 3a. Stream the zip to S3. This is the deploy artifact (CreateFunction /
+	// UpdateFunctionCode reference it) AND the rollback-history entry, so a
+	// failure here is fatal — unlike the old best-effort history save.
 	bucketForHistory := p.getS3BucketName(appCfg)
-	if s3ZipKey, saveErr := p.saveLambdaZipToS3(ctx, bucketForHistory, functionName, zipContents, meta); saveErr != nil {
-		p.log.Warn("Could not save deployment zip to S3 history (rollback may not work): %v", saveErr)
-	} else {
-		p.log.Info("Deployment zip saved for rollback: %s", s3ZipKey)
+	if err := p.ensureBucketExists(ctx, s3.NewFromConfig(p.cfg), bucketForHistory, appCfg.Serverless.Region); err != nil {
+		return fmt.Errorf("failed to ensure deploy bucket exists: %w", err)
 	}
+	s3ZipKey, err := p.saveLambdaZipToS3(ctx, bucketForHistory, functionName, zipPath, meta)
+	if err != nil {
+		return fmt.Errorf("failed to stage lambda zip in S3: %w", err)
+	}
+	p.log.Info("Deployment zip staged: s3://%s/%s", bucketForHistory, s3ZipKey)
 	// 4. Ensure Log Group and Alarms exist for observability
 	if err := p.ensureLogGroupExists(ctx, functionName); err != nil {
 		p.log.Warn("Failed to ensure Log Group: %v", err)
@@ -284,7 +288,7 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 	}
 
 	// 5. Ensure Lambda function exists (provision if missing).
-	functionJustCreated, err := p.ensureLambdaFunctionExists(ctx, client, functionName, appCfg.App.Name, appCfg.Serverless, zipContents)
+	functionJustCreated, err := p.ensureLambdaFunctionExists(ctx, client, functionName, appCfg.App.Name, appCfg.Serverless, bucketForHistory, s3ZipKey)
 	if err != nil {
 		return err
 	}
@@ -414,7 +418,8 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 		p.log.Info("Updating Lambda function code...")
 		_, err := client.UpdateFunctionCode(ctx, &lambda.UpdateFunctionCodeInput{
 			FunctionName: aws.String(functionName),
-			ZipFile:      zipContents,
+			S3Bucket:     aws.String(bucketForHistory),
+			S3Key:        aws.String(s3ZipKey),
 		})
 		if err != nil {
 			return fmt.Errorf("failed to update Lambda code: %w", err)
@@ -600,7 +605,7 @@ func (p *AWSProvider) Rollback(ctx context.Context, appCfg *cfgTypes.NextDeployC
 	return nil
 }
 
-func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *lambda.Client, name, appName string, sCfg *cfgTypes.ServerlessConfig, zipContents []byte) (justCreated bool, err error) {
+func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *lambda.Client, name, appName string, sCfg *cfgTypes.ServerlessConfig, s3Bucket, s3Key string) (justCreated bool, err error) {
 	_, err = client.GetFunction(ctx, &lambda.GetFunctionInput{
 		FunctionName: aws.String(name),
 	})
@@ -657,7 +662,8 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 
 	createInput := &lambda.CreateFunctionInput{
 		Code: &lambdaTypes.FunctionCode{
-			ZipFile: zipContents,
+			S3Bucket: aws.String(s3Bucket),
+			S3Key:    aws.String(s3Key),
 		},
 		FunctionName: aws.String(name),
 		Role:         aws.String(roleArn),
