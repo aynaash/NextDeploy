@@ -52,7 +52,7 @@ export async function serveRootPublicFromR2(env, pathname) {
   const last = pathname.slice(pathname.lastIndexOf("/") + 1);
   if (!last.includes(".")) return null;
 
-  const obj = await env.ASSETS.get(pathname.slice(1));
+  const obj = await env.ASSETS.get(safeDecode(pathname.slice(1)));
   if (!obj) return null;
 
   const headers = new Headers();
@@ -87,14 +87,31 @@ export async function serveSSGFromR2(env, htmlKey) {
 }
 
 function r2KeyForStatic(pathname) {
+  let key;
   if (pathname.startsWith("/_next/static/")) {
-    return pathname.slice(1); // drop leading slash
+    key = pathname.slice(1); // drop leading slash
+  } else if (pathname.startsWith("/public/")) {
+    key = pathname.slice("/public/".length);
+  } else {
+    // Next also serves public/* at root — these only reach here via a
+    // caller that hinted "this is a public asset". Keep the contract tight:
+    // return null so we don't accidentally 200 on non-static paths.
+    return null;
   }
-  if (pathname.startsWith("/public/")) {
-    return pathname.slice("/public/".length);
+  // R2 keys are stored decoded (literal "[", "]", spaces, …), but browsers
+  // request route-group / dynamic-segment chunk paths URL-encoded
+  // (".../[...slug]/page.js" → ".../%5B...slug%5D/page.js"). Decode so the GET
+  // matches the stored key — otherwise the chunk 404s and the page throws a
+  // ChunkLoadError ("Application error: a client-side exception").
+  return safeDecode(key);
+}
+
+// safeDecode URL-decodes a key, falling back to the raw value on a malformed
+// escape sequence (never throws — a bad %xx must not 500 the asset path).
+function safeDecode(s) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
   }
-  // Next also serves public/* at root — these only reach here via a
-  // caller that hinted "this is a public asset". Keep the contract tight:
-  // return null so we don't accidentally 200 on non-static paths.
-  return null;
 }
