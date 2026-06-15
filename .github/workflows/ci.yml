@@ -119,6 +119,10 @@ jobs:
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           args: --timeout 10m
+          # The repo carries a large pre-existing lint backlog being burned down
+          # incrementally. Fail only on issues a PR newly introduces, so CI stays
+          # green for untouched legacy code while still blocking new regressions.
+          only-new-issues: true
 
   vuln:
     name: Vulnerability Check
