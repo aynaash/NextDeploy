@@ -1045,7 +1045,16 @@ func (p *CloudflareProvider) ensureCustomDomain(ctx context.Context, workerName 
 	default:
 		params.ZoneName = cloudflare.F(zoneNameFromHostname(cd.Hostname))
 	}
-	if _, err := p.cf.Workers.Domains.Update(ctx, params); err != nil {
+	// Re-point the hostname to THIS worker even if it's already bound to another
+	// one (e.g. a prior deploy under a different worker name). Without these, the
+	// API returns 409 "already in use by other custom domain" and the domain
+	// keeps serving the stale worker — the "my domain won't update" trap. The
+	// SDK's typed params don't expose these yet, so set them on the request body.
+	overrides := []option.RequestOption{
+		option.WithJSONSet("override_existing_origin", true),
+		option.WithJSONSet("override_existing_dns_record", true),
+	}
+	if _, err := p.cf.Workers.Domains.Update(ctx, params, overrides...); err != nil {
 		return err
 	}
 	p.log.Info("Custom domain attached: %s → %s", cd.Hostname, workerName)
