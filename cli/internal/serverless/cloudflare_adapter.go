@@ -264,6 +264,13 @@ func shortenInputPath(p string) string {
 // remove it from this list.
 var optionalExternalPackages = []string{
 	"@opentelemetry/api", // Next's tracer fallback when tracing isn't enabled
+	"critters",           // CSS inlining; only required when experimental.optimizeCss is on
+	"next/dist/compiled/@ampproject/toolbox-optimizer", // AMP optimizer; only for AMP pages
+	// Required inside Next's *pages* runtime (pages.runtime.prod.js). App-Router
+	// apps never invoke that runtime, and the matching export isn't resolvable
+	// under the workerd/worker conditions anyway. The app-page runtime resolves
+	// react-dom/server.edge on its own, so externalizing here is safe.
+	"react-dom/server.edge",
 }
 
 // runEsbuild invokes `npx esbuild` against the generated entrypoint. Flags
