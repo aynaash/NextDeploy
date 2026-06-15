@@ -23,7 +23,6 @@ require (
 	github.com/aws/smithy-go v1.24.2
 	github.com/boyter/scc v2.12.0+incompatible
 	github.com/cloudflare/cloudflare-go/v6 v6.9.0
-	github.com/disintegration/imaging v1.6.2
 	github.com/fatih/color v1.18.0
 	github.com/gofrs/flock v0.13.0
 	github.com/golangci/golangci-lint v1.64.8
@@ -34,6 +33,7 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/zalando/go-keyring v0.2.6
 	golang.org/x/crypto v0.53.0
+	golang.org/x/image v0.42.0
 	golang.org/x/sync v0.21.0
 	golang.org/x/sys v0.46.0
 	golang.org/x/vuln v1.2.0
@@ -254,7 +254,6 @@ require (
 	go.uber.org/zap v1.24.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20250210185358-939b2ce775ac // indirect
-	golang.org/x/image v0.38.0 // indirect
 	golang.org/x/mod v0.36.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260508192327-42602be52be6 // indirect

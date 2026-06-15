@@ -9,6 +9,7 @@ import (
 	"image"
 	"image/jpeg"
 	"image/png"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -20,7 +21,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/disintegration/imaging"
+	xdraw "golang.org/x/image/draw"
 )
 
 type ImageOptConfig struct {
@@ -110,7 +111,7 @@ func handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.AP
 
 	// 2. Resize to requested width, preserve aspect ratio
 	if width > 0 {
-		src = imaging.Resize(src, width, 0, imaging.Lanczos)
+		src = resizeToWidth(src, width)
 	}
 
 	// 3. Encode (fallback to JPEG/PNG since pure go webp encoding is complex for this scope)
@@ -140,6 +141,27 @@ func handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.AP
 		},
 		Body: base64.StdEncoding.EncodeToString(buf.Bytes()),
 	}, nil
+}
+
+// resizeToWidth scales src to the requested width, preserving aspect ratio
+// (height derived from the source ratio, matching the old imaging.Resize(w, 0)
+// behaviour). CatmullRom is a high-quality bicubic resampler — a close stand-in
+// for Lanczos for downscaling. Replacing imaging here also drops the
+// unmaintained github.com/disintegration/imaging dependency and, with it, the
+// transitively-registered TIFF/BMP decoders (GHSA-q7pp-wcgr-pffx): a crafted
+// TIFF now fails to decode instead of being able to crash the function.
+func resizeToWidth(src image.Image, width int) image.Image {
+	b := src.Bounds()
+	if width <= 0 || b.Dx() <= 0 || b.Dy() <= 0 {
+		return src
+	}
+	height := int(math.Round(float64(b.Dy()) * float64(width) / float64(b.Dx())))
+	if height < 1 {
+		height = 1
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, width, height))
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, b, xdraw.Over, nil)
+	return dst
 }
 
 func fetchImage(ctx context.Context, rawURL string) (image.Image, string, error) {
