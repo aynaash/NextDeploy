@@ -31,13 +31,54 @@ func New(providerName string, verbose bool) (Provider, error) {
 	}
 }
 
+// resourceProvisioner is implemented by providers that can reconcile declared
+// infra (KV, Hyperdrive, D1, …) before deploying. CloudflareProvider implements
+// it; AWS doesn't (and doesn't need to).
+type resourceProvisioner interface {
+	ProvisionResources(ctx context.Context, cfg *config.NextDeployConfig) error
+}
+
+// hintCloudflarePermissions augments a raw Cloudflare auth failure with the
+// missing-token-scope guidance users actually need.
+func hintCloudflarePermissions(err error) error {
+	s := err.Error()
+	if strings.Contains(s, "403") || strings.Contains(s, "Authentication error") || strings.Contains(s, `"code":10000`) {
+		return fmt.Errorf("%w\n  → the Cloudflare API token is likely missing a permission for the resource above "+
+			"(e.g. Hyperdrive:Edit, Workers KV Storage:Edit, D1:Edit, Workers AI:Read). "+
+			"Add it at https://dash.cloudflare.com/profile/api-tokens", err)
+	}
+	return err
+}
+
+// maybeProvisionResources reconciles declared infra before deploying, when the
+// provider supports it and provisioning isn't disabled. Idempotent — existing
+// resources are skipped — so it's safe to run on every ship.
+func maybeProvisionResources(ctx context.Context, p Provider, cfg *config.NextDeployConfig, provision bool, log *shared.Logger) error {
+	if !provision {
+		return nil
+	}
+	rp, ok := p.(resourceProvisioner)
+	if !ok {
+		return nil
+	}
+	log.Info("Reconciling declared Cloudflare resources...")
+	if err := rp.ProvisionResources(ctx, cfg); err != nil {
+		return fmt.Errorf("provisioning declared resources failed "+
+			"(pass --no-provision to skip, or `nextdeploy apply` to review the plan): %w",
+			hintCloudflarePermissions(err))
+	}
+	return nil
+}
+
 // Deploy orchestrates the full serverless deployment pipeline:
 //  1. Discovers the build artifact (app.tar.gz)
 //  2. Fetches local secrets via SecretManager and pushes them to the cloud secret store
 //  3. Uploads static assets to CDN/Storage
 //  4. Deploys the compute layer (Lambda, Workers, etc.)
 //  5. Invalidates the CDN cache
-func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload, verbose bool) error {
+//
+//nolint:gocognit,gocyclo,cyclop,funlen // top-level orchestrator with pre-existing complexity; this change only delegates provisioning to a helper.
+func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload, verbose, provision bool) error {
 	log := shared.PackageLogger("serverless", "☁️  SERVERLESS")
 
 	if err := validateProviderConsistency(cfg, log); err != nil {
@@ -52,6 +93,11 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 
 	if err := p.Initialize(ctx, cfg); err != nil {
 		return fmt.Errorf("provider initialization failed: %w", err)
+	}
+
+	// ── 1b. Provision declared resources (idempotent; --no-provision opts out) ─
+	if err := maybeProvisionResources(ctx, p, cfg, provision, log); err != nil {
+		return err
 	}
 
 	// ── 2. Run Packaging ───────────────────────────────────────────────────
