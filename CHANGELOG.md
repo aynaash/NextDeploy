@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.1](https://github.com/aynaash/NextDeploy/compare/v0.14.0...v0.14.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* **nextcompile:** wire Next 15 .js client-reference-manifests ([#30](https://github.com/aynaash/NextDeploy/issues/30)) ([251a86b](https://github.com/aynaash/NextDeploy/commit/251a86bdafb6f911750a7558562bf23f43e19837))
+
+
+### Documentation
+
+* **cloudflare:** mark client-component hydration resolved ([#32](https://github.com/aynaash/NextDeploy/issues/32)) ([aac13fb](https://github.com/aynaash/NextDeploy/commit/aac13fbbe0ff8dafd65db21035e6cdcc5f9f3b70))
+
 ## [0.14.0](https://github.com/aynaash/NextDeploy/compare/v0.13.1...v0.14.0) (2026-06-15)
 
 
