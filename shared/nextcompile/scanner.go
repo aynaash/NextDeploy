@@ -2,6 +2,7 @@ package nextcompile
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -101,22 +102,66 @@ func attachClientManifests(refs []ModuleRef, standaloneDir, classifyRoot string)
 			continue
 		}
 		// Sibling convention: for .../<route>/page.js, look for
-		// .../<route>/page_client-reference-manifest.json.
+		// .../<route>/page_client-reference-manifest.{json,js}.
 		abs := filepath.Join(standaloneDir, r.CompiledPath)
 		dir := filepath.Dir(abs)
 		base := filepath.Base(abs)
 		stem := strings.TrimSuffix(base, filepath.Ext(base))
-		candidate := filepath.Join(dir, stem+"_client-reference-manifest.json")
-		if _, err := os.Stat(candidate); err != nil {
-			continue
+		jsonPath := filepath.Join(dir, stem+"_client-reference-manifest.json")
+
+		// Older Next emits a .json we can import as data directly. Next 15 instead
+		// emits a side-effecting .js module that assigns the manifest to a global:
+		//   globalThis.__RSC_MANIFEST["<key>"]={...json...}
+		// When only the .js exists, extract its JSON payload into the .json
+		// sibling so the runtime's `import(..., {type:"json"})` keeps working.
+		// Without this the manifest is never wired (loadClientManifest: null) and
+		// "use client" boundaries fail to hydrate — a client-side exception on
+		// every page that ships interactive components.
+		if _, err := os.Stat(jsonPath); err != nil {
+			jsPath := filepath.Join(dir, stem+"_client-reference-manifest.js")
+			data, readErr := os.ReadFile(jsPath) // #nosec G304 — reading our own build output
+			if readErr != nil {
+				continue
+			}
+			payload, ok := extractRSCManifestJSON(data)
+			if !ok {
+				continue
+			}
+			if writeErr := os.WriteFile(jsonPath, payload, 0o600); writeErr != nil {
+				continue
+			}
 		}
-		rel, err := filepath.Rel(standaloneDir, candidate)
+
+		rel, err := filepath.Rel(standaloneDir, jsonPath)
 		if err != nil {
 			continue
 		}
 		r.ClientManifestPath = filepath.ToSlash(rel)
 	}
 	return refs
+}
+
+// extractRSCManifestJSON pulls the JSON manifest object out of a Next.js 15
+// page_client-reference-manifest.js, whose shape is:
+//
+//	globalThis.__RSC_MANIFEST=(globalThis.__RSC_MANIFEST||{});globalThis.__RSC_MANIFEST["<key>"]={...}
+//
+// The JSON object is everything after the first `]=` (the key bracket close).
+// JSON has no `=` outside string values, so the first `]=` reliably marks the
+// start of the payload.
+func extractRSCManifestJSON(js []byte) ([]byte, bool) {
+	s := string(js)
+	i := strings.Index(s, "]=")
+	if i < 0 {
+		return nil, false
+	}
+	payload := strings.TrimSpace(s[i+2:])
+	payload = strings.TrimSuffix(strings.TrimSpace(payload), ";")
+	payload = strings.TrimSpace(payload)
+	if !json.Valid([]byte(payload)) {
+		return nil, false
+	}
+	return []byte(payload), true
 }
 
 // attachLayoutChains walks the App Router tree for each page ref and
