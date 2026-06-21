@@ -24,7 +24,7 @@ type MessageHeader struct {
 	SessionID string `json:"session_id"`
 }
 
-func EncryptMessage(key []byte, sequence uint64, payload any) ([]byte, error) {
+func EncryptMessage(key []byte, sequence uint64, payload interface{}) ([]byte, error) {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal payload: %w", err)

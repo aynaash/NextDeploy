@@ -161,7 +161,7 @@ func (l *Logger) Indent() *Logger {
 	}
 }
 
-func (l *Logger) Log(level LogLevel, msg string, args ...any) {
+func (l *Logger) Log(level LogLevel, msg string, args ...interface{}) {
 	if level < l.minLevel {
 		return
 	}
@@ -230,32 +230,32 @@ func (l *Logger) Log(level LogLevel, msg string, args ...any) {
 	l.logger.Println(logLine.String())
 }
 
-func (l *Logger) Trace(msg string, args ...any) {
+func (l *Logger) Trace(msg string, args ...interface{}) {
 	l.Log(LevelTrace, msg, args...)
 }
 
-func (l *Logger) Debug(msg string, args ...any) {
+func (l *Logger) Debug(msg string, args ...interface{}) {
 	l.Log(LevelDebug, msg, args...)
 }
 
-func (l *Logger) Info(msg string, args ...any) {
+func (l *Logger) Info(msg string, args ...interface{}) {
 	l.Log(LevelInfo, msg, args...)
 }
 
-func (l *Logger) Warn(msg string, args ...any) {
+func (l *Logger) Warn(msg string, args ...interface{}) {
 	l.Log(LevelWarn, msg, args...)
 }
 
-func (l *Logger) Error(msg string, args ...any) {
+func (l *Logger) Error(msg string, args ...interface{}) {
 	l.Log(LevelError, msg, args...)
 }
 
-func (l *Logger) Fatal(msg string, args ...any) {
+func (l *Logger) Fatal(msg string, args ...interface{}) {
 	l.Log(LevelFatal, msg, args...)
 	os.Exit(1)
 }
 
-func (l *Logger) Success(msg string, args ...any) {
+func (l *Logger) Success(msg string, args ...interface{}) {
 	l.Log(LevelSuccess, msg, args...)
 }
 
@@ -325,7 +325,7 @@ func (l *Logger) Timed(label string, fn func()) {
 	l.Info("%s completed in %s", label, duration)
 }
 
-func (l *Logger) JSON(level LogLevel, data any) {
+func (l *Logger) JSON(level LogLevel, data interface{}) {
 	if level < l.minLevel {
 		return
 	}

@@ -722,15 +722,15 @@ func findPublicImages(publicDir, projectDir string) ([]ImageAsset, error) {
 	return images, err
 }
 
-func parseImagesManifest(manifest map[string]any, projectDir string, distDir string) []ImageAsset {
+func parseImagesManifest(manifest map[string]interface{}, projectDir string, distDir string) []ImageAsset {
 	if distDir == "" {
 		distDir = ".next"
 	}
 	var images []ImageAsset
 
-	if imagesMap, ok := manifest["images"].(map[string]any); ok {
+	if imagesMap, ok := manifest["images"].(map[string]interface{}); ok {
 		for _, img := range imagesMap {
-			if imgMap, ok := img.(map[string]any); ok {
+			if imgMap, ok := img.(map[string]interface{}); ok {
 				path, _ := imgMap["path"].(string)
 				format, _ := imgMap["format"].(string)
 
@@ -760,9 +760,9 @@ func parseImagesManifest(manifest map[string]any, projectDir string, distDir str
 func parseStaticImageImports(buildManifest map[string]any, projectDir string) []ImageAsset {
 	var images []ImageAsset
 
-	if files, ok := buildManifest["staticImageImports"].(map[string]any); ok {
+	if files, ok := buildManifest["staticImageImports"].(map[string]interface{}); ok {
 		for path, data := range files {
-			if dataMap, ok := data.(map[string]any); ok {
+			if dataMap, ok := data.(map[string]interface{}); ok {
 				format := strings.TrimPrefix(filepath.Ext(path), ".")
 
 				asset := ImageAsset{

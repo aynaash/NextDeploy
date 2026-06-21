@@ -44,11 +44,11 @@ func parseEdgeRegions(content string) []string {
 	return nil
 }
 
-func parseConfigObject(config map[string]any) (*NextConfig, error) {
+func parseConfigObject(config map[string]interface{}) (*NextConfig, error) {
 	result := &NextConfig{
 		Env:                 make(map[string]string),
-		PublicRuntimeConfig: make(map[string]any),
-		ServerRuntimeConfig: make(map[string]any),
+		PublicRuntimeConfig: make(map[string]interface{}),
+		ServerRuntimeConfig: make(map[string]interface{}),
 	}
 
 	getString := func(key string) string {
@@ -66,7 +66,7 @@ func parseConfigObject(config map[string]any) (*NextConfig, error) {
 	}
 
 	getStringSlice := func(key string) []string {
-		if arr, ok := config[key].([]any); ok {
+		if arr, ok := config[key].([]interface{}); ok {
 			var res []string
 			for _, v := range arr {
 				if s, ok := v.(string); ok {
@@ -101,7 +101,7 @@ func parseConfigObject(config map[string]any) (*NextConfig, error) {
 	result.MdxRs = getBool("mdxRs")
 	result.EdgeRuntime = getString("edgeRuntime")
 
-	if images, ok := config["images"].(map[string]any); ok {
+	if images, ok := config["images"].(map[string]interface{}); ok {
 		result.Images = &ImageConfig{
 			Domains:               getStringSliceFromMap(images, "domains"),
 			Formats:               getStringSliceFromMap(images, "formats"),
@@ -114,9 +114,9 @@ func parseConfigObject(config map[string]any) (*NextConfig, error) {
 			Unoptimized:           getBoolFromMap(images, "unoptimized"),
 			ContentSecurityPolicy: getStringFromMap(images, "contentSecurityPolicy"),
 		}
-		if patterns, ok := images["remotePatterns"].([]any); ok {
+		if patterns, ok := images["remotePatterns"].([]interface{}); ok {
 			for _, p := range patterns {
-				if pattern, ok := p.(map[string]any); ok {
+				if pattern, ok := p.(map[string]interface{}); ok {
 					result.Images.RemotePatterns = append(result.Images.RemotePatterns, ImageRemotePattern{
 						Protocol: getStringFromMap(pattern, "protocol"),
 						Hostname: getStringFromMap(pattern, "hostname"),
@@ -128,7 +128,7 @@ func parseConfigObject(config map[string]any) (*NextConfig, error) {
 		}
 	}
 
-	if experimental, ok := config["experimental"].(map[string]any); ok {
+	if experimental, ok := config["experimental"].(map[string]interface{}); ok {
 		result.Experimental = &ExperimentalConfig{
 			AppDir:                            getBoolFromMap(experimental, "appDir"),
 			CaseSensitiveRoutes:               getBoolFromMap(experimental, "caseSensitiveRoutes"),
@@ -166,11 +166,11 @@ func parseConfigObject(config map[string]any) (*NextConfig, error) {
 		}
 	}
 
-	if i18n, ok := config["i18n"].(map[string]any); ok {
+	if i18n, ok := config["i18n"].(map[string]interface{}); ok {
 		var domains []Domain
-		if i18nDomains, ok := i18n["domains"].([]any); ok {
+		if i18nDomains, ok := i18n["domains"].([]interface{}); ok {
 			for _, d := range i18nDomains {
-				if domain, ok := d.(map[string]any); ok {
+				if domain, ok := d.(map[string]interface{}); ok {
 					domains = append(domains, Domain{
 						Domain:        getStringFromMap(domain, "domain"),
 						Locales:       getStringSliceFromMap(domain, "locales"),
@@ -187,7 +187,7 @@ func parseConfigObject(config map[string]any) (*NextConfig, error) {
 		}
 	}
 
-	if env, ok := config["env"].(map[string]any); ok {
+	if env, ok := config["env"].(map[string]interface{}); ok {
 		for k, v := range env {
 			if s, ok := v.(string); ok {
 				result.Env[k] = s
@@ -195,23 +195,23 @@ func parseConfigObject(config map[string]any) (*NextConfig, error) {
 		}
 	}
 
-	if headers, ok := config["headers"].([]any); ok {
+	if headers, ok := config["headers"].([]interface{}); ok {
 		result.Headers = headers
 	}
 
-	if redirects, ok := config["redirects"].([]any); ok {
+	if redirects, ok := config["redirects"].([]interface{}); ok {
 		result.Redirects = redirects
 	}
 
-	if rewrites, ok := config["rewrites"].([]any); ok {
+	if rewrites, ok := config["rewrites"].([]interface{}); ok {
 		result.Rewrites = rewrites
 	}
 
-	if publicRuntimeConfig, ok := config["publicRuntimeConfig"].(map[string]any); ok {
+	if publicRuntimeConfig, ok := config["publicRuntimeConfig"].(map[string]interface{}); ok {
 		result.PublicRuntimeConfig = publicRuntimeConfig
 	}
 
-	if serverRuntimeConfig, ok := config["serverRuntimeConfig"].(map[string]any); ok {
+	if serverRuntimeConfig, ok := config["serverRuntimeConfig"].(map[string]interface{}); ok {
 		result.ServerRuntimeConfig = serverRuntimeConfig
 	}
 
@@ -227,21 +227,21 @@ func parseConfigObject(config map[string]any) (*NextConfig, error) {
 	return result, nil
 }
 
-func getStringFromMap(m map[string]any, key string) string {
+func getStringFromMap(m map[string]interface{}, key string) string {
 	if val, ok := m[key].(string); ok {
 		return val
 	}
 	return ""
 }
 
-func getBoolFromMap(m map[string]any, key string) bool {
+func getBoolFromMap(m map[string]interface{}, key string) bool {
 	if val, ok := m[key].(bool); ok {
 		return val
 	}
 	return false
 }
 
-func getIntFromMap(m map[string]any, key string) int {
+func getIntFromMap(m map[string]interface{}, key string) int {
 	if num, ok := m[key].(json.Number); ok {
 		if val, err := num.Int64(); err == nil {
 			return int(val)
@@ -256,7 +256,7 @@ func getIntFromMap(m map[string]any, key string) int {
 	return 0
 }
 
-func getFloat64FromMap(m map[string]any, key string) float64 {
+func getFloat64FromMap(m map[string]interface{}, key string) float64 {
 	if num, ok := m[key].(json.Number); ok {
 		if val, err := num.Float64(); err == nil {
 			return val
@@ -268,8 +268,8 @@ func getFloat64FromMap(m map[string]any, key string) float64 {
 	return 0
 }
 
-func getStringSliceFromMap(m map[string]any, key string) []string {
-	if arr, ok := m[key].([]any); ok {
+func getStringSliceFromMap(m map[string]interface{}, key string) []string {
+	if arr, ok := m[key].([]interface{}); ok {
 		var result []string
 		for _, v := range arr {
 			if s, ok := v.(string); ok {
@@ -281,8 +281,8 @@ func getStringSliceFromMap(m map[string]any, key string) []string {
 	return nil
 }
 
-func getIntSliceFromMap(m map[string]any, key string) []int {
-	if arr, ok := m[key].([]any); ok {
+func getIntSliceFromMap(m map[string]interface{}, key string) []int {
+	if arr, ok := m[key].([]interface{}); ok {
 		var result []int
 		for _, v := range arr {
 			if num, ok := v.(json.Number); ok {
@@ -300,15 +300,15 @@ func getIntSliceFromMap(m map[string]any, key string) []int {
 	return nil
 }
 
-func toMap(value any) map[string]any {
-	if m, ok := value.(map[string]any); ok {
+func toMap(value interface{}) map[string]interface{} {
+	if m, ok := value.(map[string]interface{}); ok {
 		return m
 	}
-	return make(map[string]any)
+	return make(map[string]interface{})
 }
 
-func toSlice(value any) []any {
-	if s, ok := value.([]any); ok {
+func toSlice(value interface{}) []interface{} {
+	if s, ok := value.([]interface{}); ok {
 		return s
 	}
 	return nil

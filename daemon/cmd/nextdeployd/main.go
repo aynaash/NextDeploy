@@ -388,7 +388,7 @@ func acquireLock() error {
 
 	pidPath := strings.TrimSuffix(lockPath, ".lock") + ".pid"
 	// #nosec G306 G703
-	if err := os.WriteFile(pidPath, fmt.Appendf(nil, "%d\n", os.Getpid()), 0600); err != nil {
+	if err := os.WriteFile(pidPath, fmt.Appendf(nil, "%d\n", os.Getpid()), 0o600); err != nil {
 		_ = fileLock.Unlock() // #nosec G104
 		return fmt.Errorf("error writing PID file: %w", err)
 	}

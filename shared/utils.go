@@ -34,14 +34,14 @@ func HasRequiredRole(role Identity, Role string) bool {
 	return false
 }
 
-func SerializeToJSON(data any) (string, error) {
+func SerializeToJSON(data interface{}) (string, error) {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return "", fmt.Errorf("failed to serialize to JSON: %w", err)
 	}
 	return string(jsonData), nil
 }
-func DeserializeFromJSON(jsonStr string, data any) error {
+func DeserializeFromJSON(jsonStr string, data interface{}) error {
 	err := json.Unmarshal([]byte(jsonStr), data)
 	if err != nil {
 		return fmt.Errorf("failed to deserialize from JSON: %w", err)
