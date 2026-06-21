@@ -38,9 +38,9 @@ var workerCount = func() int {
 }()
 
 type logger interface {
-	Info(msg string, args ...interface{})
-	Warn(msg string, args ...interface{})
-	Error(msg string, args ...interface{})
+	Info(msg string, args ...any)
+	Warn(msg string, args ...any)
+	Error(msg string, args ...any)
 }
 
 type fileJob struct {
@@ -59,11 +59,11 @@ type fileResult struct {
 
 type resultHeap []fileResult
 
-func (h resultHeap) Len() int            { return len(h) }
-func (h resultHeap) Less(i, j int) bool  { return h[i].job.index < h[j].job.index }
-func (h resultHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *resultHeap) Push(x interface{}) { *h = append(*h, x.(fileResult)) }
-func (h *resultHeap) Pop() interface{} {
+func (h resultHeap) Len() int           { return len(h) }
+func (h resultHeap) Less(i, j int) bool { return h[i].job.index < h[j].job.index }
+func (h resultHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *resultHeap) Push(x any)        { *h = append(*h, x.(fileResult)) }
+func (h *resultHeap) Pop() any {
 	old := *h
 	n := len(old)
 	x := old[n-1]
@@ -418,7 +418,7 @@ func CreateTarball(sourceDir, targetTar, targetType string, payload *nextcore.Ne
 	fileChan := make(chan fileJob, maxInFlight)
 	resultChan := make(chan fileResult, maxInFlight)
 	readBufPool := &sync.Pool{
-		New: func() interface{} { return make([]byte, 32*1024) },
+		New: func() any { return make([]byte, 32*1024) },
 	}
 
 	// Bound look-ahead so the reorder heap can't accumulate the whole bundle

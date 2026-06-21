@@ -158,7 +158,7 @@ func TestRuntimeJSON_ShapeAndKeys(t *testing.T) {
 		t.Fatalf("JSON: %v", err)
 	}
 	// Must be valid JSON and round-trip back to the same camelCase keys guard.mjs reads.
-	var back map[string]interface{}
+	var back map[string]any
 	if err := json.Unmarshal(raw, &back); err != nil {
 		t.Fatalf("emitted invalid JSON: %v\n%s", err, raw)
 	}

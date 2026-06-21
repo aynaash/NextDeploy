@@ -448,7 +448,7 @@ func (d *DomainConfig) UnmarshalYAML(value *yaml.Node) error {
 
 // MarshalYAML emits the compact scalar form when only the name is set, so
 // simple configs round-trip cleanly instead of expanding into a block.
-func (d DomainConfig) MarshalYAML() (interface{}, error) {
+func (d DomainConfig) MarshalYAML() (any, error) {
 	if d.Provider == "" && d.DNS == "" && d.Zone == "" {
 		return d.Name, nil
 	}

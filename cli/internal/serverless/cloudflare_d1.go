@@ -203,10 +203,10 @@ func pendingMigrations(files []string, applied map[string]bool) []string {
 
 // parseAppliedMigrations extracts the "name" column from D1 query result rows.
 // Rows arrive as []interface{} of map[string]interface{} (JSON object per row).
-func parseAppliedMigrations(rows []interface{}) map[string]bool {
+func parseAppliedMigrations(rows []any) map[string]bool {
 	out := map[string]bool{}
 	for _, row := range rows {
-		m, ok := row.(map[string]interface{})
+		m, ok := row.(map[string]any)
 		if !ok {
 			continue
 		}

@@ -15,19 +15,19 @@ func getRoutesFromManifests(buildMeta *NextBuildMetadata, distDir string) (*Rout
 		ISRRoutes:      make(map[string]string),
 		FallbackRoutes: make(map[string]string),
 	}
-	if routesManifest, ok := buildMeta.RoutesManifest.(map[string]interface{}); ok {
-		if staticRoutes, ok := routesManifest["staticRoutes"].([]interface{}); ok {
+	if routesManifest, ok := buildMeta.RoutesManifest.(map[string]any); ok {
+		if staticRoutes, ok := routesManifest["staticRoutes"].([]any); ok {
 			for _, route := range staticRoutes {
-				if routeMap, ok := route.(map[string]interface{}); ok {
+				if routeMap, ok := route.(map[string]any); ok {
 					if page, ok := routeMap["page"].(string); ok {
 						info.StaticRoutes = append(info.StaticRoutes, page)
 					}
 				}
 			}
 		}
-		if dynamicRoutes, ok := routesManifest["dynamicRoutes"].([]interface{}); ok {
+		if dynamicRoutes, ok := routesManifest["dynamicRoutes"].([]any); ok {
 			for _, route := range dynamicRoutes {
-				if routeMap, ok := route.(map[string]interface{}); ok {
+				if routeMap, ok := route.(map[string]any); ok {
 					if page, ok := routeMap["page"].(string); ok {
 						info.DynamicRoutes = append(info.DynamicRoutes, page)
 					}
@@ -35,10 +35,10 @@ func getRoutesFromManifests(buildMeta *NextBuildMetadata, distDir string) (*Rout
 			}
 		}
 	}
-	if prerenderManifest, ok := buildMeta.PrerenderManifest.(map[string]interface{}); ok {
-		if routes, ok := prerenderManifest["routes"].(map[string]interface{}); ok {
+	if prerenderManifest, ok := buildMeta.PrerenderManifest.(map[string]any); ok {
+		if routes, ok := prerenderManifest["routes"].(map[string]any); ok {
 			for route, details := range routes {
-				detailMap, ok := details.(map[string]interface{})
+				detailMap, ok := details.(map[string]any)
 				if !ok {
 					continue
 				}
@@ -78,7 +78,7 @@ func getRoutesFromManifests(buildMeta *NextBuildMetadata, distDir string) (*Rout
 						Revalidate: int(revalSecs),
 						Tags:       []string{route},
 					}
-					if routeTagsIfc, hasTags := detailMap["tags"].([]interface{}); hasTags {
+					if routeTagsIfc, hasTags := detailMap["tags"].([]any); hasTags {
 						for _, t := range routeTagsIfc {
 							if tagStr, isStr := t.(string); isStr {
 								isrRoute.Tags = append(isrRoute.Tags, tagStr)
@@ -93,9 +93,9 @@ func getRoutesFromManifests(buildMeta *NextBuildMetadata, distDir string) (*Rout
 				}
 			}
 		}
-		if dynamicRoutes, ok := prerenderManifest["dynamicRoutes"].(map[string]interface{}); ok {
+		if dynamicRoutes, ok := prerenderManifest["dynamicRoutes"].(map[string]any); ok {
 			for route, details := range dynamicRoutes {
-				if detailMap, ok := details.(map[string]interface{}); ok {
+				if detailMap, ok := details.(map[string]any); ok {
 					if fallback, ok := detailMap["fallback"].(string); ok && fallback != "" {
 						info.FallbackRoutes[route] = fallback
 					}
@@ -104,8 +104,8 @@ func getRoutesFromManifests(buildMeta *NextBuildMetadata, distDir string) (*Rout
 		}
 	}
 
-	if buildManifest, ok := buildMeta.BuildManifest.(map[string]interface{}); ok {
-		if middleware, ok := buildManifest["middleware"].(map[string]interface{}); ok {
+	if buildManifest, ok := buildMeta.BuildManifest.(map[string]any); ok {
+		if middleware, ok := buildManifest["middleware"].(map[string]any); ok {
 			for route := range middleware {
 				info.MiddlewareRoutes = append(info.MiddlewareRoutes, route)
 			}

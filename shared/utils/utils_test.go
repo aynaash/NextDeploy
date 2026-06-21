@@ -17,9 +17,9 @@ import (
 // printing — CreateTarball is chatty and the test only cares about output.
 type silentLogger struct{}
 
-func (silentLogger) Info(string, ...interface{})  {}
-func (silentLogger) Warn(string, ...interface{})  {}
-func (silentLogger) Error(string, ...interface{}) {}
+func (silentLogger) Info(string, ...any)  {}
+func (silentLogger) Warn(string, ...any)  {}
+func (silentLogger) Error(string, ...any) {}
 
 // readTarGz returns name→content for every regular file in a gzipped tar.
 func readTarGz(t *testing.T, path string) map[string]string {

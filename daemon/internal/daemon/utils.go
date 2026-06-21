@@ -52,7 +52,7 @@ func validateDomain(domain string) error {
 	return nil
 }
 
-func StringArg(args map[string]interface{}, key string) (string, bool) {
+func StringArg(args map[string]any, key string) (string, bool) {
 	v, ok := args[key]
 	if !ok {
 		return "", false

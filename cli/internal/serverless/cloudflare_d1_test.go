@@ -81,12 +81,12 @@ func TestPendingMigrations_AllAppliedReturnsEmpty(t *testing.T) {
 }
 
 func TestParseAppliedMigrations(t *testing.T) {
-	rows := []interface{}{
-		map[string]interface{}{"name": "0000_init.sql"},
-		map[string]interface{}{"name": "0001_users.sql"},
-		map[string]interface{}{"name": ""},   // skipped: empty
-		map[string]interface{}{"other": "x"}, // skipped: no name
-		"not-a-row",                          // skipped: wrong type
+	rows := []any{
+		map[string]any{"name": "0000_init.sql"},
+		map[string]any{"name": "0001_users.sql"},
+		map[string]any{"name": ""},   // skipped: empty
+		map[string]any{"other": "x"}, // skipped: no name
+		"not-a-row",                  // skipped: wrong type
 	}
 	got := parseAppliedMigrations(rows)
 	if len(got) != 2 || !got["0000_init.sql"] || !got["0001_users.sql"] {
@@ -208,10 +208,10 @@ func (m *d1Mock) handler() http.HandlerFunc {
 			m.querySQLs = append(m.querySQLs, body.Sql)
 			m.mu.Unlock()
 
-			var rows []map[string]interface{}
+			var rows []map[string]any
 			if strings.Contains(body.Sql, "SELECT name FROM") {
 				for _, n := range m.appliedNames {
-					rows = append(rows, map[string]interface{}{"name": n})
+					rows = append(rows, map[string]any{"name": n})
 				}
 			}
 			writeQueryEnvelope(w, rows)
@@ -221,28 +221,28 @@ func (m *d1Mock) handler() http.HandlerFunc {
 	}
 }
 
-func writeEnvelopeArray(w http.ResponseWriter, result interface{}) {
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+func writeEnvelopeArray(w http.ResponseWriter, result any) {
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"success": true, "errors": []any{}, "messages": []any{},
 		"result":      result,
 		"result_info": map[string]int{"page": 1, "per_page": 100, "count": 1, "total_count": 1},
 	})
 }
 
-func writeEnvelopeObject(w http.ResponseWriter, result interface{}) {
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+func writeEnvelopeObject(w http.ResponseWriter, result any) {
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"success": true, "errors": []any{}, "messages": []any{}, "result": result,
 	})
 }
 
-func writeQueryEnvelope(w http.ResponseWriter, rows []map[string]interface{}) {
+func writeQueryEnvelope(w http.ResponseWriter, rows []map[string]any) {
 	if rows == nil {
-		rows = []map[string]interface{}{}
+		rows = []map[string]any{}
 	}
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"success": true, "errors": []any{}, "messages": []any{},
-		"result": []map[string]interface{}{
-			{"success": true, "meta": map[string]interface{}{}, "results": rows},
+		"result": []map[string]any{
+			{"success": true, "meta": map[string]any{}, "results": rows},
 		},
 	})
 }

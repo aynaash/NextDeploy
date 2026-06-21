@@ -214,7 +214,7 @@ func (cm *CaddyManager) ValidateConfig(ctx context.Context, config *Config) erro
 	return nil
 }
 
-func (cm *CaddyManager) PatchConfig(ctx context.Context, path string, config interface{}) error {
+func (cm *CaddyManager) PatchConfig(ctx context.Context, path string, config any) error {
 	jsonData, err := json.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)

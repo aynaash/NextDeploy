@@ -9,12 +9,12 @@ import (
 )
 
 type AuditEntry struct {
-	Timestamp      time.Time   `json:"timestamp"`
-	CommandType    string      `json:"command_type"`
-	ClientIdentity string      `json:"client_identity"`
-	Result         string      `json:"result"`
-	ErrorDetails   string      `json:"error_details,omitempty"`
-	Args           interface{} `json:"args,omitempty"`
+	Timestamp      time.Time `json:"timestamp"`
+	CommandType    string    `json:"command_type"`
+	ClientIdentity string    `json:"client_identity"`
+	Result         string    `json:"result"`
+	ErrorDetails   string    `json:"error_details,omitempty"`
+	Args           any       `json:"args,omitempty"`
 }
 
 type AuditLogger struct {

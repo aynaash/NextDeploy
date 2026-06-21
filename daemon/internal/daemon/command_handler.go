@@ -136,7 +136,7 @@ func (ch *CommandHandler) HandleCommand(cmd types.Command, clientIdentity string
 	// 3. Signature Verification
 	// We marshal the type, args, timestamp and nonce to verify the signature.
 	// These four fields must match exactly what the client signed in client.go.
-	payload, _ := json.Marshal(map[string]interface{}{
+	payload, _ := json.Marshal(map[string]any{
 		"type":      cmd.Type,
 		"args":      cmd.Args,
 		"timestamp": cmd.Timestamp,
@@ -194,13 +194,13 @@ func (ch *CommandHandler) HandleCommand(cmd types.Command, clientIdentity string
 	return resp
 }
 
-func (ch *CommandHandler) stopDaemon(args map[string]interface{}) types.Response {
+func (ch *CommandHandler) stopDaemon(args map[string]any) types.Response {
 	log.Println("Stopping daemon...")
 	ch.Shutdown()
 	return types.Response{Success: true, Message: "daemon stopped"}
 }
 
-func (ch *CommandHandler) restartDaemon(args map[string]interface{}) types.Response {
+func (ch *CommandHandler) restartDaemon(args map[string]any) types.Response {
 	log.Println("Restarting daemon...")
 
 	execPath, err := os.Executable()
@@ -243,7 +243,7 @@ func (ch *CommandHandler) Shutdown() {
 	}
 }
 
-func (ch *CommandHandler) setUpCaddy(args map[string]interface{}) types.Response {
+func (ch *CommandHandler) setUpCaddy(args map[string]any) types.Response {
 	setup, ok := args["setup"].(bool)
 	if !ok || !setup {
 		return types.Response{
@@ -294,7 +294,7 @@ func (ch *CommandHandler) setUpCaddy(args map[string]interface{}) types.Response
 	return types.Response{Success: true, Message: "Caddy configured and running"}
 }
 
-func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response {
+func (ch *CommandHandler) handleShip(args map[string]any) types.Response {
 	// Auto-update check before processing deployment
 	// This ensures the daemon updates itself when a new version is available
 	go func() {
@@ -593,7 +593,7 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 	}
 }
 
-func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Response {
+func (ch *CommandHandler) handleRollback(args map[string]any) types.Response {
 	appName, ok := StringArg(args, "appName")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
@@ -954,7 +954,7 @@ func (ch *CommandHandler) ensureDirPermissions(root string) {
 		log.Printf("[ship] Warning: failed to chmod files in %s: %v - %s", root, err, string(out))
 	}
 }
-func (ch *CommandHandler) handleDestroy(args map[string]interface{}) types.Response {
+func (ch *CommandHandler) handleDestroy(args map[string]any) types.Response {
 	appName, ok := StringArg(args, "appName")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
@@ -1041,7 +1041,7 @@ func (ch *CommandHandler) handleDestroy(args map[string]interface{}) types.Respo
 	return types.Response{Success: true, Message: fmt.Sprintf("app %s successfully destroyed with deep cleanup", appName)}
 }
 
-func (ch *CommandHandler) handleStopApp(args map[string]interface{}) types.Response {
+func (ch *CommandHandler) handleStopApp(args map[string]any) types.Response {
 	appName, ok := StringArg(args, "appName")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'appName' argument"}

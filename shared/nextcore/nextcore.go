@@ -675,14 +675,14 @@ func detectImageAssets(buildMeta *NextBuildMetadata, projectDir string, distDir 
 	}
 
 	if buildMeta.ImagesManifest != nil {
-		if imagesManifest, ok := buildMeta.ImagesManifest.(map[string]interface{}); ok {
+		if imagesManifest, ok := buildMeta.ImagesManifest.(map[string]any); ok {
 			manifestImages := parseImagesManifest(imagesManifest, projectDir, distDir)
 			assets.OptimizedImages = append(assets.OptimizedImages, manifestImages...)
 		}
 	}
 
 	if buildMeta.BuildManifest != nil {
-		if buildManifest, ok := buildMeta.BuildManifest.(map[string]interface{}); ok {
+		if buildManifest, ok := buildMeta.BuildManifest.(map[string]any); ok {
 			assets.StaticImports = parseStaticImageImports(buildManifest, projectDir)
 		}
 	}
@@ -722,15 +722,15 @@ func findPublicImages(publicDir, projectDir string) ([]ImageAsset, error) {
 	return images, err
 }
 
-func parseImagesManifest(manifest map[string]interface{}, projectDir string, distDir string) []ImageAsset {
+func parseImagesManifest(manifest map[string]any, projectDir string, distDir string) []ImageAsset {
 	if distDir == "" {
 		distDir = ".next"
 	}
 	var images []ImageAsset
 
-	if imagesMap, ok := manifest["images"].(map[string]interface{}); ok {
+	if imagesMap, ok := manifest["images"].(map[string]any); ok {
 		for _, img := range imagesMap {
-			if imgMap, ok := img.(map[string]interface{}); ok {
+			if imgMap, ok := img.(map[string]any); ok {
 				path, _ := imgMap["path"].(string)
 				format, _ := imgMap["format"].(string)
 
@@ -757,12 +757,12 @@ func parseImagesManifest(manifest map[string]interface{}, projectDir string, dis
 	return images
 }
 
-func parseStaticImageImports(buildManifest map[string]interface{}, projectDir string) []ImageAsset {
+func parseStaticImageImports(buildManifest map[string]any, projectDir string) []ImageAsset {
 	var images []ImageAsset
 
-	if files, ok := buildManifest["staticImageImports"].(map[string]interface{}); ok {
+	if files, ok := buildManifest["staticImageImports"].(map[string]any); ok {
 		for path, data := range files {
-			if dataMap, ok := data.(map[string]interface{}); ok {
+			if dataMap, ok := data.(map[string]any); ok {
 				format := strings.TrimPrefix(filepath.Ext(path), ".")
 
 				asset := ImageAsset{

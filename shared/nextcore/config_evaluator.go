@@ -9,7 +9,7 @@ import (
 )
 
 // evaluateConfigViaRuntime uses Node or Bun to safely load and evaluate next.config.js/mjs.
-func evaluateConfigViaRuntime(configPath string) (map[string]interface{}, error) {
+func evaluateConfigViaRuntime(configPath string) (map[string]any, error) {
 	// Simple JS script to import the config and print it as JSON
 	// We handle default exports, promises, and functions that return config objects.
 	scriptContent := `
@@ -61,7 +61,7 @@ load();
 		return nil, fmt.Errorf("failed to evaluate config via %s: %w\nOutput: %s\nStderr: %s", runtime, err, string(out), stderrStr)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	// Use UseNumber to avoid float64 precision issues for ints
 	decoder := json.NewDecoder(strings.NewReader(string(out)))
 	decoder.UseNumber()

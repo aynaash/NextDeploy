@@ -76,7 +76,7 @@ func NewAWSProvider(verbose bool) *AWSProvider {
 }
 
 // verboseLog logs a message only when --verbose is enabled.
-func (p *AWSProvider) verboseLog(msg string, args ...interface{}) {
+func (p *AWSProvider) verboseLog(msg string, args ...any) {
 	if p.verbose {
 		p.log.Info(msg, args...)
 	}

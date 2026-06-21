@@ -48,15 +48,15 @@ type wBinding struct {
 }
 
 type wranglerRaw struct {
-	Name         string                 `json:"name" toml:"name"`
-	D1Databases  []wBinding             `json:"d1_databases" toml:"d1_databases"`
-	KVNamespaces []wBinding             `json:"kv_namespaces" toml:"kv_namespaces"`
-	R2Buckets    []wBinding             `json:"r2_buckets" toml:"r2_buckets"`
-	Hyperdrive   []wBinding             `json:"hyperdrive" toml:"hyperdrive"`
-	Vectorize    []wBinding             `json:"vectorize" toml:"vectorize"`
-	Queues       *wQueues               `json:"queues" toml:"queues"`
-	AI           *wAI                   `json:"ai" toml:"ai"`
-	Vars         map[string]interface{} `json:"vars" toml:"vars"`
+	Name         string         `json:"name" toml:"name"`
+	D1Databases  []wBinding     `json:"d1_databases" toml:"d1_databases"`
+	KVNamespaces []wBinding     `json:"kv_namespaces" toml:"kv_namespaces"`
+	R2Buckets    []wBinding     `json:"r2_buckets" toml:"r2_buckets"`
+	Hyperdrive   []wBinding     `json:"hyperdrive" toml:"hyperdrive"`
+	Vectorize    []wBinding     `json:"vectorize" toml:"vectorize"`
+	Queues       *wQueues       `json:"queues" toml:"queues"`
+	AI           *wAI           `json:"ai" toml:"ai"`
+	Vars         map[string]any `json:"vars" toml:"vars"`
 }
 
 type wQueues struct {

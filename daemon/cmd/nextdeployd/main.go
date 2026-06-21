@@ -172,7 +172,7 @@ func handleShipSubcommand() {
 		fmt.Fprintln(os.Stderr, "Error: --tarball is required")
 		os.Exit(1)
 	}
-	args := map[string]interface{}{"tarball": tarball}
+	args := map[string]any{"tarball": tarball}
 	if dopplerToken != "" {
 		args["dopplerToken"] = dopplerToken
 	}
@@ -196,7 +196,7 @@ func handleSecretsSubcommand() {
 			value = strings.Trim(value, "\"'")
 		}
 	}
-	args := map[string]interface{}{
+	args := map[string]any{
 		"action":  action,
 		"appName": appName,
 		"key":     key,
@@ -212,7 +212,7 @@ func handleStatusSubcommand() {
 			appName = strings.TrimPrefix(arg, "--appName=")
 		}
 	}
-	sendDaemonCommand(daemontypes.Command{Type: "status", Args: map[string]interface{}{"appName": appName}})
+	sendDaemonCommand(daemontypes.Command{Type: "status", Args: map[string]any{"appName": appName}})
 }
 
 func handleLogsSubcommand() {
@@ -222,7 +222,7 @@ func handleLogsSubcommand() {
 			appName = strings.TrimPrefix(arg, "--appName=")
 		}
 	}
-	sendDaemonCommand(daemontypes.Command{Type: "logs", Args: map[string]interface{}{"appName": appName}})
+	sendDaemonCommand(daemontypes.Command{Type: "logs", Args: map[string]any{"appName": appName}})
 }
 
 func handleRollbackSubcommand() {
@@ -250,7 +250,7 @@ func handleRollbackSubcommand() {
 		fmt.Fprintln(os.Stderr, "Error: --appName is required")
 		os.Exit(1)
 	}
-	args := map[string]interface{}{"appName": appName}
+	args := map[string]any{"appName": appName}
 	if dopplerToken != "" {
 		args["dopplerToken"] = dopplerToken
 	}
@@ -275,7 +275,7 @@ func handleStopSubcommand() {
 		fmt.Fprintln(os.Stderr, "Error: --appName is required")
 		os.Exit(1)
 	}
-	sendDaemonCommand(daemontypes.Command{Type: "stop", Args: map[string]interface{}{"appName": appName}})
+	sendDaemonCommand(daemontypes.Command{Type: "stop", Args: map[string]any{"appName": appName}})
 }
 
 func handleHelpSubcommand() {
@@ -309,7 +309,7 @@ func handleDestroySubcommand() {
 		fmt.Fprintln(os.Stderr, "Error: --appName is required")
 		os.Exit(1)
 	}
-	sendDaemonCommand(daemontypes.Command{Type: "destroy", Args: map[string]interface{}{"appName": appName}})
+	sendDaemonCommand(daemontypes.Command{Type: "destroy", Args: map[string]any{"appName": appName}})
 }
 
 func daemonize() {

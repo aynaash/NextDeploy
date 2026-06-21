@@ -19,7 +19,7 @@ const (
 	errLoadSecrets = "failed to load secrets: %v"
 )
 
-func (ch *CommandHandler) handleSecrets(args map[string]interface{}) types.Response {
+func (ch *CommandHandler) handleSecrets(args map[string]any) types.Response {
 	action, ok := StringArg(args, "action")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'action' argument"}
@@ -47,7 +47,7 @@ func (ch *CommandHandler) handleSecrets(args map[string]interface{}) types.Respo
 	}
 }
 
-func (ch *CommandHandler) setSecret(appName string, args map[string]interface{}) types.Response {
+func (ch *CommandHandler) setSecret(appName string, args map[string]any) types.Response {
 	key, ok := StringArg(args, "key")
 	if !ok {
 		return types.Response{Success: false, Message: errMissingKey}
@@ -75,7 +75,7 @@ func (ch *CommandHandler) setSecret(appName string, args map[string]interface{})
 	return types.Response{Success: true, Message: fmt.Sprintf("secret %s set successfully", key)}
 }
 
-func (ch *CommandHandler) getSecret(appName string, args map[string]interface{}) types.Response {
+func (ch *CommandHandler) getSecret(appName string, args map[string]any) types.Response {
 	key, ok := StringArg(args, "key")
 	if !ok {
 		return types.Response{Success: false, Message: errMissingKey}
@@ -94,7 +94,7 @@ func (ch *CommandHandler) getSecret(appName string, args map[string]interface{})
 	return types.Response{Success: true, Message: value}
 }
 
-func (ch *CommandHandler) unsetSecret(appName string, args map[string]interface{}) types.Response {
+func (ch *CommandHandler) unsetSecret(appName string, args map[string]any) types.Response {
 	key, ok := StringArg(args, "key")
 	if !ok {
 		return types.Response{Success: false, Message: errMissingKey}
