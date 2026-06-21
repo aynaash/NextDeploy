@@ -95,7 +95,7 @@ func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow
 		if domain != "" {
 			caddyPlan := caddy.GenerateCaddyfile(meta.AppName, domain, string(meta.OutputMode), meta.Config.Port, "/opt/nextdeploy/apps/"+meta.AppName+"/current", meta.DetectedFeatures, meta.DistDir, meta.ExportDir)
 			log.Info("  Caddy Configuration Plan Preview:")
-			for _, line := range strings.Split(caddyPlan, "\n") {
+			for line := range strings.SplitSeq(caddyPlan, "\n") {
 				if strings.TrimSpace(line) != "" {
 					log.Info("  %s", line)
 				}

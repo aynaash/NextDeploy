@@ -132,8 +132,8 @@ func (ch *CommandHandler) handleLogs(args map[string]any) types.Response {
 
 func parseProps(input string) map[string]string {
 	props := make(map[string]string)
-	lines := strings.Split(input, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(input, "\n")
+	for line := range lines {
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) == 2 {
 			props[parts[0]] = parts[1]

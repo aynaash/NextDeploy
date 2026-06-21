@@ -438,7 +438,7 @@ func CreateTarball(sourceDir, targetTar, targetType string, payload *nextcore.Ne
 	pending := make(chan struct{}, maxPending)
 
 	var wg sync.WaitGroup
-	for i := 0; i < workerCount; i++ {
+	for i := range workerCount {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()

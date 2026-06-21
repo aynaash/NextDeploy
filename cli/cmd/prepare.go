@@ -183,7 +183,6 @@ func ensureAnsible(out io.Writer) error {
 
 	var chosen *ansibleInstallMethod
 	for _, m := range ansibleInstallMethods() {
-		m := m
 		if _, err := exec.LookPath(m.prereq); err == nil {
 			chosen = &m
 			break

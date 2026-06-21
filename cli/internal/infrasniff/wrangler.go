@@ -181,7 +181,7 @@ func removeTrailingCommas(in []byte) []byte {
 	out := make([]byte, 0, len(in))
 	inString := false
 	escaped := false
-	for i := 0; i < len(in); i++ {
+	for i := range in {
 		c := in[i]
 		if inString {
 			out = append(out, c)

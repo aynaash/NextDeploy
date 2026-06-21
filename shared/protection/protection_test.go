@@ -3,6 +3,7 @@ package protection
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -187,12 +188,7 @@ func TestRuntimeJSON_Deterministic(t *testing.T) {
 // --- helpers -----------------------------------------------------------------
 
 func contains(ss []string, want string) bool {
-	for _, s := range ss {
-		if s == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ss, want)
 }
 
 func sortedAsc(ss []string) bool {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -55,7 +56,7 @@ func (p *AWSProvider) ensureACMCertificateExists(ctx context.Context, domain str
 	p.log.Info("ACM certificate requested: %s", certARN)
 
 	// Poll until ACM populates DomainValidationOptions (usually 2-10s)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		time.Sleep(5 * time.Second)
 		desc, err := client.DescribeCertificate(ctx, &acm.DescribeCertificateInput{
 			CertificateArn: aws.String(certARN),
@@ -92,10 +93,8 @@ func (p *AWSProvider) findExistingCertificate(ctx context.Context, client *acm.C
 			}
 			// Also check SANs
 			if cert.SubjectAlternativeNameSummaries != nil {
-				for _, san := range cert.SubjectAlternativeNameSummaries {
-					if san == domain {
-						return *cert.CertificateArn, nil
-					}
+				if slices.Contains(cert.SubjectAlternativeNameSummaries, domain) {
+					return *cert.CertificateArn, nil
 				}
 			}
 		}

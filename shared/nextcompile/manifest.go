@@ -3,6 +3,7 @@ package nextcompile
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -261,9 +262,7 @@ func copyMap(m map[string]string) map[string]string {
 		return map[string]string{}
 	}
 	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
+	maps.Copy(out, m)
 	return out
 }
 

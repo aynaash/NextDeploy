@@ -123,7 +123,7 @@ func Preflight(in PreflightInput) []string {
 // files. Accepts the raw file content; returns false when env files could be
 // committed (so the caller can warn).
 func GitignoreCovered(gitignore string) bool {
-	for _, line := range strings.Split(gitignore, "\n") {
+	for line := range strings.SplitSeq(gitignore, "\n") {
 		switch strings.TrimSpace(line) {
 		case ".env", ".env*", "*.env", ".env.*", ".env.local":
 			return true

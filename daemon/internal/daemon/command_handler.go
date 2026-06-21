@@ -522,7 +522,7 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 
 	// Port file for Caddy and other discovery tools (write after health check passes)
 	portFilePath := filepath.Join(appsDir, ctx.AppName, "port")
-	if err := os.WriteFile(portFilePath, []byte(fmt.Sprintf("%d", port)), 0644); err != nil {
+	if err := os.WriteFile(portFilePath, fmt.Appendf(nil, "%d", port), 0644); err != nil {
 		log.Printf("[activate] Warning: failed to write port file to %s: %v", portFilePath, err)
 	}
 

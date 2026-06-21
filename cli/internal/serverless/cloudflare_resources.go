@@ -3,6 +3,7 @@ package serverless
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -43,9 +44,7 @@ func (r *resourceMap) snapshot() map[string]string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make(map[string]string, len(r.m))
-	for k, v := range r.m {
-		out[k] = v
-	}
+	maps.Copy(out, r.m)
 	return out
 }
 

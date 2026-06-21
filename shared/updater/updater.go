@@ -542,8 +542,8 @@ func downloadChecksums(url, destPath string) (map[string]string, error) {
 		return nil, err
 	}
 
-	lines := strings.Split(string(body), "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(string(body), "\n")
+	for line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

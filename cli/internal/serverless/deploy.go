@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -528,9 +529,7 @@ func shouldHarvestEnvKey(k string) bool {
 
 // mergeInto copies src into dst, overwriting existing keys.
 func mergeInto(dst, src map[string]string) {
-	for k, v := range src {
-		dst[k] = v
-	}
+	maps.Copy(dst, src)
 }
 
 // validateProviderConsistency rejects configurations where the legacy

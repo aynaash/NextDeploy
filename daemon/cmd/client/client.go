@@ -101,8 +101,8 @@ func handleDaemonCommand() {
 	foreground := false
 
 	for _, arg := range os.Args[2:] {
-		if strings.HasPrefix(arg, "--config=") {
-			configPath = strings.TrimPrefix(arg, "--config=")
+		if after, ok := strings.CutPrefix(arg, "--config="); ok {
+			configPath = after
 		} else if arg == "--foreground" {
 			foreground = true
 		}

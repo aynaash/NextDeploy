@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -90,13 +91,7 @@ func handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.AP
 
 	// Validate width against configured device sizes
 	if width > 0 && len(imageConfig.DeviceSizes) > 0 {
-		validWidth := false
-		for _, size := range imageConfig.DeviceSizes {
-			if width == size {
-				validWidth = true
-				break
-			}
-		}
+		validWidth := slices.Contains(imageConfig.DeviceSizes, width)
 		if !validWidth {
 			return errResponse(400, fmt.Sprintf("Invalid width %d", width)), nil
 		}
@@ -155,10 +150,7 @@ func resizeToWidth(src image.Image, width int) image.Image {
 	if width <= 0 || b.Dx() <= 0 || b.Dy() <= 0 {
 		return src
 	}
-	height := int(math.Round(float64(b.Dy()) * float64(width) / float64(b.Dx())))
-	if height < 1 {
-		height = 1
-	}
+	height := max(int(math.Round(float64(b.Dy())*float64(width)/float64(b.Dx()))), 1)
 	dst := image.NewRGBA(image.Rect(0, 0, width, height))
 	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, b, xdraw.Over, nil)
 	return dst

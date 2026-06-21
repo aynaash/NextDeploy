@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -556,7 +558,6 @@ func (p *CloudflareProvider) DeployStatic(ctx context.Context, pkg *packaging.Pa
 	var uploaded, skipped atomic.Int64
 
 	for _, asset := range pkg.S3Assets {
-		asset := asset
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
@@ -743,12 +744,7 @@ func (p *CloudflareProvider) workerAlreadyAtHash(ctx context.Context, workerName
 		return false
 	}
 	want := deployHashTagPrefix + hash
-	for _, t := range settings.Tags {
-		if t == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(settings.Tags, want)
 }
 
 // tagWorkerDeployHash writes our deploy-hash tag onto the Worker,
@@ -1119,9 +1115,7 @@ func (p *CloudflareProvider) UpdateSecrets(ctx context.Context, appName string, 
 		return nil
 	}
 	staged := make(map[string]string, len(secrets))
-	for k, v := range secrets {
-		staged[k] = v
-	}
+	maps.Copy(staged, secrets)
 	p.pendingSecrets = staged
 	p.log.Info("Staged %d secrets to fold into the next Worker upload", len(staged))
 	return nil

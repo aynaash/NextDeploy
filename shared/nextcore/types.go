@@ -22,7 +22,7 @@ type NextCorePayload struct {
 	GitCommit         string            `json:"git_commit,omitempty"`
 	GitDirty          bool              `json:"git_dirty,omitempty"`
 	GeneratedAt       string            `json:"generated_at,omitempty"`
-	Config            config.SafeConfig `json:"config,omitempty"`
+	Config            config.SafeConfig `json:"config"`
 	ImageAssets       ImageAssets       `json:"image_assets"`
 	RouteInfo         RouteInfo         `json:"route_info"`
 	DetectedFeatures  *DetectedFeatures `json:"detected_features,omitempty"`

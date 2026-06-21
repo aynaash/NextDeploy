@@ -128,10 +128,7 @@ func invalidatePaths(ctx context.Context, paths []string) error {
 
 	// Bound the conversion so a pathological path count can't overflow int32
 	// (gosec G115). Invalidation batches are tiny in practice.
-	n := len(paths)
-	if n > math.MaxInt32 {
-		n = math.MaxInt32
-	}
+	n := min(len(paths), math.MaxInt32)
 	quantity := int32(n)
 	req := &cloudfront.CreateInvalidationInput{
 		DistributionId: aws.String(distributionID),

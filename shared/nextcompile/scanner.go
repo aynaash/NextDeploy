@@ -151,11 +151,11 @@ func attachClientManifests(refs []ModuleRef, standaloneDir, classifyRoot string)
 // start of the payload.
 func extractRSCManifestJSON(js []byte) ([]byte, bool) {
 	s := string(js)
-	i := strings.Index(s, "]=")
-	if i < 0 {
+	_, after, ok := strings.Cut(s, "]=")
+	if !ok {
 		return nil, false
 	}
-	payload := strings.TrimSpace(s[i+2:])
+	payload := strings.TrimSpace(after)
 	payload = strings.TrimSuffix(strings.TrimSpace(payload), ";")
 	payload = strings.TrimSpace(payload)
 	if !json.Valid([]byte(payload)) {
@@ -432,8 +432,8 @@ func pagesRouteFromPath(rel string) string {
 	if rel == "index" {
 		return "/"
 	}
-	if strings.HasSuffix(rel, "/index") {
-		rel = strings.TrimSuffix(rel, "/index")
+	if before, ok := strings.CutSuffix(rel, "/index"); ok {
+		rel = before
 	}
 	return "/" + rel
 }

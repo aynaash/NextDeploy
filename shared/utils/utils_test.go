@@ -65,7 +65,7 @@ func TestCreateTarballRoundTrip(t *testing.T) {
 	want := map[string]string{}
 	// 3× maxPending small files forces the dispatcher to block on `pending`
 	// and the writer to drain it repeatedly.
-	for i := 0; i < maxPending*3; i++ {
+	for i := range maxPending * 3 {
 		name := fmt.Sprintf("file_%04d.txt", i)
 		content := fmt.Sprintf("content of file %d\n", i)
 		if err := os.WriteFile(filepath.Join(src, name), []byte(content), 0o600); err != nil {

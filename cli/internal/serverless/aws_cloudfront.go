@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -224,11 +225,8 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 			// Ensure Aliases
 			found := false
 			if dc.Aliases != nil {
-				for _, alias := range dc.Aliases.Items {
-					if alias == domain {
-						found = true
-						break
-					}
+				if slices.Contains(dc.Aliases.Items, domain) {
+					found = true
 				}
 			}
 			if !found {
@@ -554,7 +552,7 @@ func (p *AWSProvider) applyDistributionConfig(ctx context.Context, dc *cfTypes.D
 // state. This is required before a DeleteDistribution call can succeed.
 func (p *AWSProvider) waitForCloudFrontDeployed(ctx context.Context, client *cloudfront.Client, distributionId string) error {
 	maxRetries := 60 // CloudFront disable can take several minutes
-	for i := 0; i < maxRetries; i++ {
+	for range maxRetries {
 		out, err := client.GetDistribution(ctx, &cloudfront.GetDistributionInput{
 			Id: aws.String(distributionId),
 		})

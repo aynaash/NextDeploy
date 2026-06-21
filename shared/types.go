@@ -52,7 +52,7 @@ type CommandPayload struct {
 type StatusPayload struct {
 	Status  string         `json:"status"`
 	Metrics map[string]any `json:"metrics,omitempty"`
-	Load    SystemLoad     `json:"load,omitempty"`
+	Load    SystemLoad     `json:"load"`
 }
 
 type SystemLoad struct {
@@ -177,8 +177,8 @@ type EnvFile struct {
 
 func ParseEnvFile(content []byte) (*EnvFile, error) {
 	variables := make(map[string]string)
-	lines := strings.Split(string(content), "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(string(content), "\n")
+	for line := range lines {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}

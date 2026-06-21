@@ -159,13 +159,13 @@ func handleShipSubcommand() {
 	tarball := ""
 	dopplerToken := ""
 	for _, arg := range os.Args[2:] {
-		if strings.HasPrefix(arg, "--tarball=") {
-			tarball = strings.TrimPrefix(arg, "--tarball=")
+		if after, ok := strings.CutPrefix(arg, "--tarball="); ok {
+			tarball = after
 			tarball = strings.Trim(tarball, "\"'")
-		} else if strings.HasPrefix(arg, "--dopplerToken=") {
-			dopplerToken = strings.TrimPrefix(arg, "--dopplerToken=")
-		} else if strings.HasPrefix(arg, "--socket-path=") {
-			socketPathOverride = strings.TrimPrefix(arg, "--socket-path=")
+		} else if after, ok := strings.CutPrefix(arg, "--dopplerToken="); ok {
+			dopplerToken = after
+		} else if after, ok := strings.CutPrefix(arg, "--socket-path="); ok {
+			socketPathOverride = after
 		}
 	}
 	if tarball == "" {
@@ -185,14 +185,14 @@ func handleSecretsSubcommand() {
 	key := ""
 	value := ""
 	for _, arg := range os.Args[2:] {
-		if strings.HasPrefix(arg, "--action=") {
-			action = strings.TrimPrefix(arg, "--action=")
-		} else if strings.HasPrefix(arg, "--appName=") {
-			appName = strings.TrimPrefix(arg, "--appName=")
-		} else if strings.HasPrefix(arg, "--key=") {
-			key = strings.TrimPrefix(arg, "--key=")
-		} else if strings.HasPrefix(arg, "--value=") {
-			value = strings.TrimPrefix(arg, "--value=")
+		if after, ok := strings.CutPrefix(arg, "--action="); ok {
+			action = after
+		} else if after, ok := strings.CutPrefix(arg, "--appName="); ok {
+			appName = after
+		} else if after, ok := strings.CutPrefix(arg, "--key="); ok {
+			key = after
+		} else if after, ok := strings.CutPrefix(arg, "--value="); ok {
+			value = after
 			value = strings.Trim(value, "\"'")
 		}
 	}
@@ -208,8 +208,8 @@ func handleSecretsSubcommand() {
 func handleStatusSubcommand() {
 	appName := ""
 	for _, arg := range os.Args[2:] {
-		if strings.HasPrefix(arg, "--appName=") {
-			appName = strings.TrimPrefix(arg, "--appName=")
+		if after, ok := strings.CutPrefix(arg, "--appName="); ok {
+			appName = after
 		}
 	}
 	sendDaemonCommand(daemontypes.Command{Type: "status", Args: map[string]any{"appName": appName}})
@@ -218,8 +218,8 @@ func handleStatusSubcommand() {
 func handleLogsSubcommand() {
 	appName := ""
 	for _, arg := range os.Args[2:] {
-		if strings.HasPrefix(arg, "--appName=") {
-			appName = strings.TrimPrefix(arg, "--appName=")
+		if after, ok := strings.CutPrefix(arg, "--appName="); ok {
+			appName = after
 		}
 	}
 	sendDaemonCommand(daemontypes.Command{Type: "logs", Args: map[string]any{"appName": appName}})
@@ -231,14 +231,14 @@ func handleRollbackSubcommand() {
 	toCommit := ""
 	steps := 0
 	for _, arg := range os.Args[2:] {
-		if strings.HasPrefix(arg, "--appName=") {
-			appName = strings.TrimPrefix(arg, "--appName=")
-		} else if strings.HasPrefix(arg, "--dopplerToken=") {
-			dopplerToken = strings.TrimPrefix(arg, "--dopplerToken=")
-		} else if strings.HasPrefix(arg, "--toCommit=") {
-			toCommit = strings.TrimPrefix(arg, "--toCommit=")
-		} else if strings.HasPrefix(arg, "--steps=") {
-			n, err := strconv.Atoi(strings.TrimPrefix(arg, "--steps="))
+		if after, ok := strings.CutPrefix(arg, "--appName="); ok {
+			appName = after
+		} else if after, ok := strings.CutPrefix(arg, "--dopplerToken="); ok {
+			dopplerToken = after
+		} else if after, ok := strings.CutPrefix(arg, "--toCommit="); ok {
+			toCommit = after
+		} else if after, ok := strings.CutPrefix(arg, "--steps="); ok {
+			n, err := strconv.Atoi(after)
 			if err != nil || n < 0 {
 				fmt.Fprintln(os.Stderr, "Error: --steps must be a non-negative integer")
 				os.Exit(1)
@@ -267,8 +267,8 @@ func handleRollbackSubcommand() {
 func handleStopSubcommand() {
 	appName := ""
 	for _, arg := range os.Args[2:] {
-		if strings.HasPrefix(arg, "--appName=") {
-			appName = strings.TrimPrefix(arg, "--appName=")
+		if after, ok := strings.CutPrefix(arg, "--appName="); ok {
+			appName = after
 		}
 	}
 	if appName == "" {
@@ -301,8 +301,8 @@ func handleHelpSubcommand() {
 func handleDestroySubcommand() {
 	appName := ""
 	for _, arg := range os.Args[2:] {
-		if strings.HasPrefix(arg, "--appName=") {
-			appName = strings.TrimPrefix(arg, "--appName=")
+		if after, ok := strings.CutPrefix(arg, "--appName="); ok {
+			appName = after
 		}
 	}
 	if appName == "" {
@@ -388,7 +388,7 @@ func acquireLock() error {
 
 	pidPath := strings.TrimSuffix(lockPath, ".lock") + ".pid"
 	// #nosec G306 G703
-	if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0600); err != nil {
+	if err := os.WriteFile(pidPath, fmt.Appendf(nil, "%d\n", os.Getpid()), 0600); err != nil {
 		_ = fileLock.Unlock() // #nosec G104
 		return fmt.Errorf("error writing PID file: %w", err)
 	}
