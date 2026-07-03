@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/aynaash/NextDeploy/compare/v0.14.4...v0.15.0) (2026-07-03)
+
+
+### Features
+
+* **runtime:** execute Server Actions on Cloudflare ([#41](https://github.com/aynaash/NextDeploy/issues/41)) ([27d72db](https://github.com/aynaash/NextDeploy/commit/27d72db33444d64b3f8eb48483cea1de0a058af9))
+
 ## [0.14.4](https://github.com/aynaash/NextDeploy/compare/v0.14.3...v0.14.4) (2026-07-03)
 
 
