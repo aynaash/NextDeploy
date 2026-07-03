@@ -3,6 +3,7 @@ package nextbuild
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -26,12 +27,7 @@ func IsTurbopackOutput(standaloneDir string) bool {
 		filepath.Join(standaloneDir, ".next", "server", "chunks"),
 		filepath.Join(standaloneDir, ".next", "server", "chunks", "ssr"),
 	}
-	for _, dir := range candidates {
-		if hasTurbopackMarker(dir) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(candidates, hasTurbopackMarker)
 }
 
 // hasTurbopackMarker shallow-scans dir for any file whose name starts

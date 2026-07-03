@@ -241,10 +241,10 @@ func (p *AWSProvider) updateS3BucketPolicyForOAC(ctx context.Context, bucketName
 
 	const oacSid = "AllowCloudFrontServicePrincipal"
 
-	newStatement := map[string]interface{}{
+	newStatement := map[string]any{
 		"Sid":    oacSid,
 		"Effect": "Allow",
-		"Principal": map[string]interface{}{
+		"Principal": map[string]any{
 			"Service": "cloudfront.amazonaws.com",
 		},
 		"Action": []string{"s3:GetObject", "s3:ListBucket"},
@@ -252,25 +252,25 @@ func (p *AWSProvider) updateS3BucketPolicyForOAC(ctx context.Context, bucketName
 			fmt.Sprintf("arn:aws:s3:::%s/*", bucketName),
 			fmt.Sprintf("arn:aws:s3:::%s", bucketName),
 		},
-		"Condition": map[string]interface{}{
-			"StringEquals": map[string]interface{}{
+		"Condition": map[string]any{
+			"StringEquals": map[string]any{
 				"AWS:SourceArn": fmt.Sprintf("arn:aws:cloudfront::%s:distribution/%s", p.accountID, distributionId),
 			},
 		},
 	}
 
 	// Attempt to read existing policy
-	var existingStatements []interface{}
+	var existingStatements []any
 	getPolicyOut, err := client.GetBucketPolicy(ctx, &s3.GetBucketPolicyInput{
 		Bucket: aws.String(bucketName),
 	})
 	if err == nil && getPolicyOut.Policy != nil {
-		var existing map[string]interface{}
+		var existing map[string]any
 		if jsonErr := json.Unmarshal([]byte(*getPolicyOut.Policy), &existing); jsonErr == nil {
-			if stmts, ok := existing["Statement"].([]interface{}); ok {
+			if stmts, ok := existing["Statement"].([]any); ok {
 				// Filter out any previous OAC statement so we don't accumulate duplicates
 				for _, s := range stmts {
-					if sm, ok := s.(map[string]interface{}); ok {
+					if sm, ok := s.(map[string]any); ok {
 						if sm["Sid"] == oacSid {
 							continue
 						}
@@ -283,7 +283,7 @@ func (p *AWSProvider) updateS3BucketPolicyForOAC(ctx context.Context, bucketName
 
 	existingStatements = append(existingStatements, newStatement)
 
-	mergedPolicy := map[string]interface{}{
+	mergedPolicy := map[string]any{
 		"Version":   "2012-10-17",
 		"Statement": existingStatements,
 	}

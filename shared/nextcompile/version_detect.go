@@ -53,17 +53,30 @@ var ErrVersionNotFound = fmt.Errorf("nextcompile: could not locate next.js versi
 // readDepVersions walks the lookup order and returns the first (next,react)
 // pair where at least `next` is present.
 func readDepVersions(standaloneDir string) (string, string, error) {
-	candidates := []string{
+	// 1. the standalone's own vendored package.json; 2. node_modules/next.
+	direct := []string{
 		filepath.Join(standaloneDir, packageJSONFile),
 		filepath.Join(standaloneDir, "node_modules", "next", packageJSONFile),
-		filepath.Join(filepath.Dir(standaloneDir), packageJSONFile),
 	}
-
-	for _, path := range candidates {
-		nv, rv, ok := readPackageJSON(path)
-		if ok {
+	for _, path := range direct {
+		if nv, rv, ok := readPackageJSON(path); ok {
 			return nv, rv, nil
 		}
+	}
+
+	// 3. Climb ancestors to the filesystem root for the app's own package.json.
+	//    The canonical layout is <project>/.next/standalone, so the repo root is
+	//    two levels up — a single filepath.Dir(standaloneDir) lands on
+	//    <project>/.next, which never has a package.json (the old bug).
+	for dir := filepath.Dir(standaloneDir); ; {
+		if nv, rv, ok := readPackageJSON(filepath.Join(dir, packageJSONFile)); ok {
+			return nv, rv, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break // reached the filesystem root
+		}
+		dir = parent
 	}
 	return "", "", ErrVersionNotFound
 }

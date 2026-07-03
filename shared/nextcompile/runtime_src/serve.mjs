@@ -46,13 +46,21 @@ export async function serveStaticFromR2(env, pathname) {
  * key. Restricted to paths whose final segment contains a "." to keep
  * real 404s from spending an R2 GET each.
  */
-export async function serveRootPublicFromR2(env, pathname) {
+export async function serveRootPublicFromR2(env, pathname, manifest) {
   if (!env.ASSETS) return null;
   if (pathname.length < 2 || pathname.endsWith("/")) return null;
   const last = pathname.slice(pathname.lastIndexOf("/") + 1);
   if (!last.includes(".")) return null;
 
-  const obj = await env.ASSETS.get(safeDecode(pathname.slice(1)));
+  const key = safeDecode(pathname.slice(1));
+  // Never serve prerendered PAGE HTML here — those keys are the SSG/ISR route
+  // targets, reachable only through the guarded dispatch path. Serving them at
+  // their bare ".html" key (e.g. /dashboard.html) would bypass the edge guard,
+  // which matched the request path "/dashboard.html", not the protected route
+  // "/dashboard".
+  if (isPrerenderedPageKey(key, manifest)) return null;
+
+  const obj = await env.ASSETS.get(key);
   if (!obj) return null;
 
   const headers = new Headers();
@@ -62,6 +70,26 @@ export async function serveRootPublicFromR2(env, pathname) {
     headers.set("cache-control", "public, max-age=300");
   }
   return new Response(obj.body, { headers });
+}
+
+/**
+ * isPrerenderedPageKey reports whether an R2 key is a prerendered SSG/ISR page
+ * target (as opposed to a genuine public/ file). Used to keep page HTML out of
+ * the unguarded root-public serving path — see serveRootPublicFromR2.
+ */
+function isPrerenderedPageKey(key, manifest) {
+  const routes = manifest?.routes;
+  if (!routes) return false;
+  for (const bucket of ["ssg", "isr"]) {
+    const table = routes[bucket];
+    if (!table) continue;
+    for (const target of Object.values(table)) {
+      if (typeof target === "string" && target.replace(/^\/+/, "") === key) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**

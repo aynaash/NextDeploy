@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -70,9 +71,7 @@ func (p *AWSProvider) ensureFifoQueue(
 		"FifoQueue":                 "true",
 		"ContentBasedDeduplication": "true",
 	}
-	for k, v := range extraAttrs {
-		attrs[k] = v
-	}
+	maps.Copy(attrs, extraAttrs)
 
 	createOut, err := client.CreateQueue(ctx, &sqs.CreateQueueInput{
 		QueueName:  aws.String(queueName),

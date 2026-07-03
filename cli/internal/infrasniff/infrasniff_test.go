@@ -3,6 +3,7 @@ package infrasniff
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -18,12 +19,7 @@ func write(t *testing.T, dir, rel, content string) {
 }
 
 func hasResource(r *Result, want Resource) bool {
-	for _, got := range r.Resources() {
-		if got == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(r.Resources(), want)
 }
 
 func reasonFor(r *Result, res Resource) []string {
@@ -230,10 +226,5 @@ func TestSniff_MissingDirIsNotFatal(t *testing.T) {
 }
 
 func contains(ss []string, want string) bool {
-	for _, s := range ss {
-		if s == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ss, want)
 }

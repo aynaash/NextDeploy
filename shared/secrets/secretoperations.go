@@ -3,6 +3,7 @@ package secrets
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"maps"
 
 	"errors"
 	"fmt"
@@ -166,9 +167,7 @@ func (sm *SecretManager) ImportSecrets(filePath string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	for name, secret := range secrets {
-		sm.secrets[name] = secret
-	}
+	maps.Copy(sm.secrets, secrets)
 
 	return nil
 }

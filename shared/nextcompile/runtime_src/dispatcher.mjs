@@ -83,7 +83,7 @@ export async function dispatch(request, env, ctx, tables) {
     const routed = await tryRouteDispatch(request, env, ctx, url, pathname, tables);
     if (routed) return routed;
 
-    const publicRoot = await serveRootPublicFromR2(env, pathname);
+    const publicRoot = await serveRootPublicFromR2(env, pathname, manifest);
     if (publicRoot) return publicRoot;
 
     return notFound();

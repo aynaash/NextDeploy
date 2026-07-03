@@ -81,16 +81,15 @@ func loadTagMap(ctx context.Context) (TagPathMap, error) {
 	return tagMap, nil
 }
 
-func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
-	// 1. Load tag map from S3
-	tMap, _ := loadTagMap(ctx) // In case of error, we can still fall back to msg.Path
-
-	// 2. Collect unique paths across all SQS messages
+// collectPaths returns the unique set of paths to invalidate for a batch of
+// SQS record bodies, expanding tags via the provided map. Pure: no AWS, no
+// globals — the seam that makes the handler's branching testable.
+func collectPaths(bodies []string, tagMap TagPathMap) []string {
 	pathsToInvalidate := map[string]struct{}{}
-	for _, record := range sqsEvent.Records {
+	for _, body := range bodies {
 		var msg RevalidateMessage
-		if err := json.Unmarshal([]byte(record.Body), &msg); err != nil {
-			fmt.Printf("Failed to unmarshal SQS record body: %s\n", record.Body)
+		if err := json.Unmarshal([]byte(body), &msg); err != nil {
+			fmt.Printf("Failed to unmarshal SQS record body: %s\n", body)
 			continue
 		}
 
@@ -99,8 +98,8 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 		}
 
 		// Look up all paths for this tag
-		if msg.Tag != "" && tMap.Tags != nil {
-			if matchedPaths, ok := tMap.Tags[msg.Tag]; ok {
+		if msg.Tag != "" && tagMap.Tags != nil {
+			if matchedPaths, ok := tagMap.Tags[msg.Tag]; ok {
 				for _, p := range matchedPaths {
 					pathsToInvalidate[p] = struct{}{}
 				}
@@ -108,13 +107,26 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 		}
 	}
 
-	if len(pathsToInvalidate) == 0 {
-		return nil
-	}
-
-	var paths []string
+	paths := make([]string, 0, len(pathsToInvalidate))
 	for p := range pathsToInvalidate {
 		paths = append(paths, p)
+	}
+	return paths
+}
+
+func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
+	// 1. Load tag map from S3
+	tMap, _ := loadTagMap(ctx) // In case of error, we can still fall back to msg.Path
+
+	// 2. Collect unique paths across all SQS messages
+	bodies := make([]string, 0, len(sqsEvent.Records))
+	for i := range sqsEvent.Records {
+		bodies = append(bodies, sqsEvent.Records[i].Body)
+	}
+	paths := collectPaths(bodies, tMap)
+
+	if len(paths) == 0 {
+		return nil
 	}
 
 	fmt.Printf("Invalidating %d paths: %v\n", len(paths), paths)
@@ -128,10 +140,7 @@ func invalidatePaths(ctx context.Context, paths []string) error {
 
 	// Bound the conversion so a pathological path count can't overflow int32
 	// (gosec G115). Invalidation batches are tiny in practice.
-	n := len(paths)
-	if n > math.MaxInt32 {
-		n = math.MaxInt32
-	}
+	n := min(len(paths), math.MaxInt32)
 	quantity := int32(n)
 	req := &cloudfront.CreateInvalidationInput{
 		DistributionId: aws.String(distributionID),

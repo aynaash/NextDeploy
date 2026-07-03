@@ -76,8 +76,8 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 	}
 
 	domainList := sDomain
-	if strings.HasPrefix(sDomain, "www.") {
-		root := strings.TrimPrefix(sDomain, "www.")
+	if after, ok := strings.CutPrefix(sDomain, "www."); ok {
+		root := after
 		domainList = fmt.Sprintf("%s, %s", sDomain, root)
 	} else if !strings.Contains(sDomain, "localhost") && !strings.Contains(sDomain, "127.0.0.1") && !strings.Contains(sDomain, "::1") {
 		domainList = fmt.Sprintf("%s, www.%s", sDomain, sDomain)

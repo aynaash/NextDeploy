@@ -81,12 +81,12 @@ func TestPendingMigrations_AllAppliedReturnsEmpty(t *testing.T) {
 }
 
 func TestParseAppliedMigrations(t *testing.T) {
-	rows := []interface{}{
-		map[string]interface{}{"name": "0000_init.sql"},
-		map[string]interface{}{"name": "0001_users.sql"},
-		map[string]interface{}{"name": ""},   // skipped: empty
-		map[string]interface{}{"other": "x"}, // skipped: no name
-		"not-a-row",                          // skipped: wrong type
+	rows := []any{
+		map[string]any{"name": "0000_init.sql"},
+		map[string]any{"name": "0001_users.sql"},
+		map[string]any{"name": ""},   // skipped: empty
+		map[string]any{"other": "x"}, // skipped: no name
+		"not-a-row",                  // skipped: wrong type
 	}
 	got := parseAppliedMigrations(rows)
 	if len(got) != 2 || !got["0000_init.sql"] || !got["0001_users.sql"] {
@@ -208,10 +208,10 @@ func (m *d1Mock) handler() http.HandlerFunc {
 			m.querySQLs = append(m.querySQLs, body.Sql)
 			m.mu.Unlock()
 
-			var rows []map[string]interface{}
+			var rows []map[string]any
 			if strings.Contains(body.Sql, "SELECT name FROM") {
 				for _, n := range m.appliedNames {
-					rows = append(rows, map[string]interface{}{"name": n})
+					rows = append(rows, map[string]any{"name": n})
 				}
 			}
 			writeQueryEnvelope(w, rows)
@@ -221,28 +221,28 @@ func (m *d1Mock) handler() http.HandlerFunc {
 	}
 }
 
-func writeEnvelopeArray(w http.ResponseWriter, result interface{}) {
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+func writeEnvelopeArray(w http.ResponseWriter, result any) {
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"success": true, "errors": []any{}, "messages": []any{},
 		"result":      result,
 		"result_info": map[string]int{"page": 1, "per_page": 100, "count": 1, "total_count": 1},
 	})
 }
 
-func writeEnvelopeObject(w http.ResponseWriter, result interface{}) {
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+func writeEnvelopeObject(w http.ResponseWriter, result any) {
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"success": true, "errors": []any{}, "messages": []any{}, "result": result,
 	})
 }
 
-func writeQueryEnvelope(w http.ResponseWriter, rows []map[string]interface{}) {
+func writeQueryEnvelope(w http.ResponseWriter, rows []map[string]any) {
 	if rows == nil {
-		rows = []map[string]interface{}{}
+		rows = []map[string]any{}
 	}
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"success": true, "errors": []any{}, "messages": []any{},
-		"result": []map[string]interface{}{
-			{"success": true, "meta": map[string]interface{}{}, "results": rows},
+		"result": []map[string]any{
+			{"success": true, "meta": map[string]any{}, "results": rows},
 		},
 	})
 }
@@ -341,10 +341,22 @@ func TestApplyD1Migrations_AppliesOnlyPending(t *testing.T) {
 	if !strings.Contains(joined, "CREATE TABLE IF NOT EXISTS "+migrationsTable) {
 		t.Errorf("tracking table not ensured:\n%s", joined)
 	}
-	// The already-applied migration's INSERT record must not be re-run.
-	inserts := strings.Count(joined, "INSERT INTO "+migrationsTable)
+	// Recording is now folded into the migration's own batch (apply + record in
+	// one query) so a crash can't leave it applied-but-unrecorded. Exactly one
+	// tracking INSERT — for the single pending migration, not the already-applied one.
+	inserts := strings.Count(joined, "INSERT OR IGNORE INTO "+migrationsTable)
 	if inserts != 1 {
 		t.Errorf("expected exactly 1 migration recorded, got %d\n%s", inserts, joined)
+	}
+	// Apply + record must ride in the SAME query (atomicity is the whole point).
+	var recordingQuery string
+	for _, q := range m.querySQLs {
+		if strings.Contains(q, "INSERT OR IGNORE INTO "+migrationsTable) {
+			recordingQuery = q
+		}
+	}
+	if !strings.Contains(recordingQuery, "CREATE TABLE t(id);") {
+		t.Errorf("record INSERT is not batched with the migration DDL:\n%s", recordingQuery)
 	}
 }
 

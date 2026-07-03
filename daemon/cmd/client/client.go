@@ -84,7 +84,7 @@ func isDaemonRunning() bool {
 
 	conn, err := client.SendCommand(getClientConfig(), types.Command{
 		Type: "status",
-		Args: map[string]interface{}{},
+		Args: map[string]any{},
 	})
 
 	return err == nil && conn != nil
@@ -101,8 +101,8 @@ func handleDaemonCommand() {
 	foreground := false
 
 	for _, arg := range os.Args[2:] {
-		if strings.HasPrefix(arg, "--config=") {
-			configPath = strings.TrimPrefix(arg, "--config=")
+		if after, ok := strings.CutPrefix(arg, "--config="); ok {
+			configPath = after
 		} else if arg == "--foreground" {
 			foreground = true
 		}
@@ -153,7 +153,7 @@ func startDaemonProcess(configPath string) {
 }
 
 func sendCommandToDaemon(command string) {
-	args := make(map[string]interface{})
+	args := make(map[string]any)
 	for i := 2; i < len(os.Args); i++ {
 		arg := os.Args[i]
 		if strings.HasPrefix(arg, "--") {
@@ -201,9 +201,9 @@ func displayResponse(response *types.Response) {
 		fmt.Printf("Success: %s\n", response.Message)
 		if response.Data != nil {
 			switch data := response.Data.(type) {
-			case []interface{}:
+			case []any:
 				for _, item := range data {
-					if itemMap, ok := item.(map[string]interface{}); ok {
+					if itemMap, ok := item.(map[string]any); ok {
 						// format container list nicely
 						for key, value := range itemMap {
 							fmt.Printf("%s: %v\t", key, value)
@@ -213,7 +213,7 @@ func displayResponse(response *types.Response) {
 						fmt.Printf("%v\n", item)
 					}
 				}
-			case map[string]interface{}:
+			case map[string]any:
 				for key, value := range data {
 					fmt.Printf("%s: %v\n", key, value)
 				}

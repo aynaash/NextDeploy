@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/aynaash/nextdeploy/cli/internal/buildflow"
@@ -24,6 +26,7 @@ import (
 var (
 	shipVerbose     bool
 	shipNoProvision bool
+	shipVerify      bool
 )
 
 var shipCmd = &cobra.Command{
@@ -38,6 +41,12 @@ var shipCmd = &cobra.Command{
 		log := shared.PackageLogger("ship", "🚀 SHIP")
 		log.Info("Starting NextDeploy ship process...")
 
+		// Signal-aware context so Ctrl+C / SIGTERM cancels the build + deploy
+		// cleanly (the ctx is threaded through every provider call) rather than
+		// killing the process mid-upload and leaving half-applied state.
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+
 		cfg, err := config.Load()
 		if err != nil {
 			log.Error("Failed to load config: %v", err)
@@ -49,7 +58,7 @@ var shipCmd = &cobra.Command{
 			log.Warn("   Commit before shipping for cleaner deployment provenance.")
 		}
 
-		result, err := buildflow.Run(context.Background(), buildflow.Opts{
+		result, err := buildflow.Run(ctx, buildflow.Opts{
 			ProjectDir: ".",
 			Cfg:        cfg,
 			Force:      false,
@@ -61,7 +70,7 @@ var shipCmd = &cobra.Command{
 		}
 
 		if result.EffectiveTarget == "serverless" {
-			shipServerless(log, cfg, &result.Payload)
+			shipServerless(ctx, log, cfg, &result.Payload)
 			// Reached only on success — shipServerless exits the process on failure.
 			telemetry.RecordShipSuccess(cfg.Serverless.Provider, shared.Version)
 			return
@@ -71,13 +80,17 @@ var shipCmd = &cobra.Command{
 	},
 }
 
-func shipServerless(log *shared.Logger, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) {
+func shipServerless(ctx context.Context, log *shared.Logger, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) {
 	log.Info("Deployment Target: SERVERLESS (provider=%s)", cfg.Serverless.Provider)
 	if cfg.Serverless == nil {
 		log.Error("Inferred 'serverless' target but 'serverless' config block is missing.")
 		os.Exit(1)
 	}
-	if err := serverless.Deploy(context.Background(), cfg, meta, shipVerbose, !shipNoProvision); err != nil {
+	if err := serverless.Deploy(ctx, cfg, meta, shipVerbose, !shipNoProvision, shipVerify); err != nil {
+		if ctx.Err() != nil {
+			log.Warn("Deploy interrupted — state may be partial. Re-run `nextdeploy ship` " +
+				"to converge (steps are idempotent).")
+		}
 		log.Error("Serverless deployment failed: %v", err)
 		os.Exit(1)
 	}
@@ -95,7 +108,7 @@ func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow
 		if domain != "" {
 			caddyPlan := caddy.GenerateCaddyfile(meta.AppName, domain, string(meta.OutputMode), meta.Config.Port, "/opt/nextdeploy/apps/"+meta.AppName+"/current", meta.DetectedFeatures, meta.DistDir, meta.ExportDir)
 			log.Info("  Caddy Configuration Plan Preview:")
-			for _, line := range strings.Split(caddyPlan, "\n") {
+			for line := range strings.SplitSeq(caddyPlan, "\n") {
 				if strings.TrimSpace(line) != "" {
 					log.Info("  %s", line)
 				}
@@ -198,5 +211,6 @@ func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow
 func init() {
 	shipCmd.Flags().BoolVarP(&shipVerbose, "verbose", "v", false, "Print detailed deployment logs (S3 uploads, Lambda steps, CloudFront status)")
 	shipCmd.Flags().BoolVar(&shipNoProvision, "no-provision", false, "Skip reconciling declared Cloudflare resources (KV/Hyperdrive/D1) before deploying")
+	shipCmd.Flags().BoolVar(&shipVerify, "verify", false, "Fail the deploy if the post-deploy smoke check does not pass (for CI)")
 	rootCmd.AddCommand(shipCmd)
 }

@@ -3,6 +3,7 @@ package protection
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -158,7 +159,7 @@ func TestRuntimeJSON_ShapeAndKeys(t *testing.T) {
 		t.Fatalf("JSON: %v", err)
 	}
 	// Must be valid JSON and round-trip back to the same camelCase keys guard.mjs reads.
-	var back map[string]interface{}
+	var back map[string]any
 	if err := json.Unmarshal(raw, &back); err != nil {
 		t.Fatalf("emitted invalid JSON: %v\n%s", err, raw)
 	}
@@ -187,12 +188,7 @@ func TestRuntimeJSON_Deterministic(t *testing.T) {
 // --- helpers -----------------------------------------------------------------
 
 func contains(ss []string, want string) bool {
-	for _, s := range ss {
-		if s == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ss, want)
 }
 
 func sortedAsc(ss []string) bool {

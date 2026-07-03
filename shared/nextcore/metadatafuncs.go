@@ -39,13 +39,13 @@ func CollectBuildMetadata(buildCmd string) (*NextBuildMetadata, error) {
 		return nil, fmt.Errorf("failed to read BUILD_ID: %w", err)
 	}
 
-	readJSON := func(filename string) (interface{}, error) {
+	readJSON := func(filename string) (any, error) {
 		// #nosec G304
 		data, err := os.ReadFile(filepath.Join(nextDir, filename))
 		if err != nil {
 			return nil, err
 		}
-		var result interface{}
+		var result any
 		if err := json.Unmarshal(data, &result); err != nil {
 			return nil, err
 		}

@@ -142,7 +142,7 @@ var validModules = map[string]bool{
 
 func filterPlanByModules(r *serverless.PlanResult, only string) (*serverless.PlanResult, error) {
 	want := map[string]bool{}
-	for _, m := range strings.Split(only, ",") {
+	for m := range strings.SplitSeq(only, ",") {
 		m = strings.TrimSpace(strings.ToLower(m))
 		if m == "" {
 			continue

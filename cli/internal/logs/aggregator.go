@@ -39,8 +39,8 @@ func NewAggregator(out io.Writer, appName string) *LogAggregator {
 }
 
 func (a *LogAggregator) WriteSource(source LogSource, p []byte) (n int, err error) {
-	lines := strings.Split(string(p), "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(string(p), "\n")
+	for line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}

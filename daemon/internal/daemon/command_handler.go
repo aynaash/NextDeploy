@@ -271,7 +271,7 @@ func (ch *CommandHandler) setUpCaddy(args map[string]interface{}) types.Response
 		}
 	}
 
-	if err := os.WriteFile("/etc/caddy/Caddyfile", caddyfileContent, 0600); err != nil {
+	if err := os.WriteFile("/etc/caddy/Caddyfile", caddyfileContent, 0o600); err != nil {
 		return types.Response{
 			Success: false,
 			Message: fmt.Sprintf("failed to write /etc/caddy/Caddyfile: %v", err),
@@ -319,7 +319,7 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 	log.Printf("[ship] Starting deployment from: %s", tarballPath)
 
 	// Ensure workTmpDir exists
-	if err := os.MkdirAll(workTmpDir, 0750); err != nil {
+	if err := os.MkdirAll(workTmpDir, 0o750); err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to ensure tmp dir: %v", err)}
 	}
 
@@ -377,7 +377,7 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 	releaseDir := filepath.Join(appsDir, appName, "releases", releaseID)
 
 	// #nosec G301 G703
-	if err := os.MkdirAll(filepath.Dir(releaseDir), 0750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(releaseDir), 0o750); err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to create releases dir: %v", err)}
 	}
 
@@ -477,6 +477,15 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 
 	log.Printf("[activate] Allocated port %d for release %s", port, ctx.ReleaseID)
 
+	// Persisted secrets: render the store into this release's EnvironmentFile
+	// before the unit exists. Fail hard — starting a release without its known
+	// secrets is exactly the failure mode this prevents.
+	if err := ch.renderEnvFile(ctx.AppName, ctx.ReleaseDir, map[string]string{
+		"DOPPLER_TOKEN": ctx.DopplerToken,
+	}); err != nil {
+		return types.Response{Success: false, Message: fmt.Sprintf("failed to render secrets env file: %v", err)}
+	}
+
 	serviceName, serviceGenerated, err = ch.processManager.GenerateServiceFile(
 		ctx.AppName, ctx.ReleaseDir, ctx.OutputMode, ctx.DopplerToken, port, ctx.PackageManager, ctx.ReleaseID, ctx.Resources,
 	)
@@ -522,7 +531,8 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 
 	// Port file for Caddy and other discovery tools (write after health check passes)
 	portFilePath := filepath.Join(appsDir, ctx.AppName, "port")
-	if err := os.WriteFile(portFilePath, []byte(fmt.Sprintf("%d", port)), 0644); err != nil {
+	// #nosec G306 -- must be world-readable for Caddy/other discovery tools to read the port
+	if err := os.WriteFile(portFilePath, []byte(fmt.Sprintf("%d", port)), 0o644); err != nil {
 		log.Printf("[activate] Warning: failed to write port file to %s: %v", portFilePath, err)
 	}
 
@@ -538,7 +548,8 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 	sharedStaticDir := filepath.Join(appsDir, ctx.AppName, "shared_static")
 	sourceStaticDir := filepath.Join(ctx.ReleaseDir, ctx.DistDir, "static")
 	if _, err := os.Stat(sourceStaticDir); err == nil {
-		if err := os.MkdirAll(sharedStaticDir, 0755); err == nil {
+		// #nosec G301 -- static assets dir is served by Caddy, needs group/other traversal
+		if err := os.MkdirAll(sharedStaticDir, 0o755); err == nil {
 			// Use cp -R to copy assets, overwriting existing ones to ensure newest versions are served
 			cpPath := resolveTool("cp")
 			// #nosec G204
@@ -879,7 +890,7 @@ func copyDir(src, dst string) error {
 		target := filepath.Join(dst, rel)
 		if d.IsDir() {
 			// #nosec G301 G703
-			return os.MkdirAll(target, 0750)
+			return os.MkdirAll(target, 0o750)
 		}
 		if d.Type()&os.ModeSymlink != 0 {
 			linkTarget, err := os.Readlink(path)
@@ -887,7 +898,7 @@ func copyDir(src, dst string) error {
 				return fmt.Errorf("readlink %s: %w", path, err)
 			}
 			// #nosec G301 G703
-			if err := os.MkdirAll(filepath.Dir(target), 0750); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 				return err
 			}
 			return os.Symlink(linkTarget, target)
@@ -905,7 +916,7 @@ func copyFile(src, dst string) error {
 	defer in.Close()
 
 	// #nosec G301 G703
-	if err := os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
 		return err
 	}
 	// #nosec G304 G703
@@ -948,12 +959,16 @@ func (ch *CommandHandler) ensureDirPermissions(root string) {
 		log.Printf("[ship] Warning: failed to chmod dirs in %s: %v - %s", root, err, string(out))
 	}
 
-	// #nosec G204
-	chmodFileCmd := exec.Command(findPath, root, "-type", "f", "!", "-perm", "0644", "-exec", chmodPath, "0644", "{}", "+")
+	// .env.nextdeploy holds secrets and must stay 0600 — the next ship runs
+	// this pass over the whole app dir, so without the exclusion the live
+	// release's env file would become world-readable one deploy later.
+	//nolint:gosec,noctx // fixed args + resolved system binaries; a deploy-time find/chmod, context cancellation not needed
+	chmodFileCmd := exec.Command(findPath, root, "-type", "f", "!", "-name", ".env.nextdeploy", "!", "-perm", "0644", "-exec", chmodPath, "0644", "{}", "+")
 	if out, err := chmodFileCmd.CombinedOutput(); err != nil {
 		log.Printf("[ship] Warning: failed to chmod files in %s: %v - %s", root, err, string(out))
 	}
 }
+
 func (ch *CommandHandler) handleDestroy(args map[string]interface{}) types.Response {
 	appName, ok := StringArg(args, "appName")
 	if !ok {

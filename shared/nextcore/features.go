@@ -1,6 +1,7 @@
 package nextcore
 
 import (
+	"slices"
 	"strings"
 )
 
@@ -61,10 +62,10 @@ func DetectFeatures(config *NextConfig) *DetectedFeatures {
 	// --- check if user already set a CSP in headers ---
 	// if so, we should NOT override it in Caddy
 	for _, h := range config.Headers {
-		if hMap, ok := h.(map[string]interface{}); ok {
-			if headers, ok := hMap["headers"].([]interface{}); ok {
+		if hMap, ok := h.(map[string]any); ok {
+			if headers, ok := hMap["headers"].([]any); ok {
 				for _, header := range headers {
-					if hItem, ok := header.(map[string]interface{}); ok {
+					if hItem, ok := header.(map[string]any); ok {
 						key, _ := hItem["key"].(string)
 						if strings.EqualFold(key, "content-security-policy") {
 							f.UserDefinedCSP = true
@@ -193,10 +194,5 @@ func defaultCSP() string {
 }
 
 func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, item)
 }

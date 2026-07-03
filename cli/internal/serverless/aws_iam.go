@@ -32,12 +32,12 @@ func (p *AWSProvider) ensureExecutionRoleExists(ctx context.Context) (string, er
 
 		p.log.Info("IAM role %s not found, creating one...", roleName)
 
-		trustPolicy := map[string]interface{}{
+		trustPolicy := map[string]any{
 			"Version": "2012-10-17",
-			"Statement": []map[string]interface{}{
+			"Statement": []map[string]any{
 				{
 					"Effect": "Allow",
-					"Principal": map[string]interface{}{
+					"Principal": map[string]any{
 						"Service": "lambda.amazonaws.com",
 					},
 					"Action": "sts:AssumeRole",
@@ -79,9 +79,9 @@ func (p *AWSProvider) ensureExecutionRoleExists(ctx context.Context) (string, er
 	// middle and pin the account ID as the suffix. The previous pattern
 	// (`nextdeploy-{accountID}-*`) never matched any real bucket and silently
 	// 403'd every S3 read from imgopt and the revalidator.
-	inlinePolicy := map[string]interface{}{
+	inlinePolicy := map[string]any{
 		"Version": "2012-10-17",
-		"Statement": []map[string]interface{}{
+		"Statement": []map[string]any{
 			{
 				"Effect": "Allow",
 				"Action": []string{"s3:GetObject", "s3:ListBucket"},

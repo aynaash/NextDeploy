@@ -2,6 +2,7 @@ package infrasniff
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -192,12 +193,7 @@ func hasKVID(w *WranglerConfig) bool {
 }
 
 func has(r *Result, want Resource) bool {
-	for _, x := range r.Resources() {
-		if x == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(r.Resources(), want)
 }
 
 func refName(v, def string) string {
