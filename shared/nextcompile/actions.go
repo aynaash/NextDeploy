@@ -38,13 +38,14 @@ import (
 //	  "encryptionKey": "..."
 //	}
 //
-// NOTE ON EXECUTION: the compiled module does NOT expose the action as a named
-// export — `.next/server/app/page.js` exports Next's own machinery
-// (decodeReply/decodeAction/serverHooks/…), not the action function or the
-// moduleId. So actions.mjs's `mod[entry.export]` model cannot invoke a real
-// action; correct execution needs Next's action-runtime machinery. Tracked as a
-// runtime milestone. Action.Export below carries the moduleId for reference/
-// stability only — it is not a callable export.
+// EXECUTION: the compiled page module does NOT expose the action as a named
+// export — it exposes the webpack require as `__next_app__.require`, and the
+// action worker module (keyed by its moduleId) exports the actions keyed by
+// actionId. So actions.mjs resolves + invokes via
+// `mod.__next_app__.require(<moduleId>)[<actionId>]` (the way Next itself does),
+// then Flight-encodes the return value with the module's renderToReadableStream.
+// Verified against real Next 14.2 + 15.1 builds. Action.Export below carries the
+// webpack moduleId that keys `__next_app__.require`.
 //
 // Our emitted manifest is flattened and stable:
 //
