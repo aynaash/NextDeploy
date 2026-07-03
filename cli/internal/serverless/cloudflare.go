@@ -518,38 +518,8 @@ func (p *CloudflareProvider) DeployStatic(ctx context.Context, pkg *packaging.Pa
 		return fmt.Errorf("failed to ensure R2 bucket: %w", err)
 	}
 
-	if p.r2s3 == nil {
-		switch {
-		case p.r2ParentKeyID != "":
-			// Explicit opt-in wins: the user set R2_PARENT_ACCESS_KEY_ID because
-			// their API token lacks R2 scope. Previously unreachable — the
-			// derive-from-token branch always fired first and silently used creds
-			// that then 403 on every PUT.
-			p.log.Info("Minting short-lived R2 creds for bucket %s (parent: %s…)", bucketName, p.r2ParentKeyID[:min(8, len(p.r2ParentKeyID))])
-			creds, err := p.mintR2TempCreds(ctx, bucketName)
-			if err != nil {
-				return fmt.Errorf("R2 temp credential minting failed: %w", err)
-			}
-			p.r2s3 = newR2S3Client(p.accountID, creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken)
-		default:
-			// Tier 2: derive R2 creds from the API token. Default zero-config path.
-			if akid, secret, ok := deriveR2CredsFromAPIToken(p.apiTokenID, p.apiToken); ok {
-				sensitive.Register(secret)
-				p.log.Info("Using R2 credentials derived from API token (zero-config path)")
-				p.r2s3 = newR2S3Client(p.accountID, akid, secret, "")
-			}
-		}
-
-		if p.r2s3 == nil {
-			return fmt.Errorf(
-				"R2 object uploads need credentials. The CLOUDFLARE_API_TOKEN you\n" +
-					"provided didn't expose a token id — that's unexpected. Check that\n" +
-					"the token has 'Workers R2 Storage: Edit' scope. As a fallback you\n" +
-					"can export an explicit pair (R2_ACCESS_KEY_ID + R2_SECRET_ACCESS_KEY)\n" +
-					"or just R2_PARENT_ACCESS_KEY_ID — see\n" +
-					"https://dash.cloudflare.com/?to=/:account/r2/api-tokens",
-			)
-		}
+	if err := p.ensureR2Client(ctx, bucketName); err != nil {
+		return err
 	}
 
 	p.log.Info("Uploading %d static assets to R2 bucket %s...", len(pkg.S3Assets), bucketName)
@@ -638,6 +608,45 @@ func (p *CloudflareProvider) uploadBatch(ctx context.Context, bucket string, ass
 		}
 	}
 	return up.Load(), sk.Load(), nil
+}
+
+// ensureR2Client lazily initializes the S3-compatible R2 client (p.r2s3) used
+// for object uploads and teardown sweeps. Credential tiers: an explicit
+// parent-key opt-in (R2_PARENT_ACCESS_KEY_ID) mints short-lived creds, otherwise
+// creds are derived from the API token. No-op when already initialized.
+func (p *CloudflareProvider) ensureR2Client(ctx context.Context, bucketName string) error {
+	if p.r2s3 != nil {
+		return nil
+	}
+	switch {
+	case p.r2ParentKeyID != "":
+		// Explicit opt-in wins: the user set R2_PARENT_ACCESS_KEY_ID because
+		// their API token lacks R2 scope.
+		p.log.Info("Minting short-lived R2 creds for bucket %s (parent: %s…)", bucketName, p.r2ParentKeyID[:min(8, len(p.r2ParentKeyID))])
+		creds, err := p.mintR2TempCreds(ctx, bucketName)
+		if err != nil {
+			return fmt.Errorf("R2 temp credential minting failed: %w", err)
+		}
+		p.r2s3 = newR2S3Client(p.accountID, creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken)
+	default:
+		// Tier 2: derive R2 creds from the API token. Default zero-config path.
+		if akid, secret, ok := deriveR2CredsFromAPIToken(p.apiTokenID, p.apiToken); ok {
+			sensitive.Register(secret)
+			p.log.Info("Using R2 credentials derived from API token (zero-config path)")
+			p.r2s3 = newR2S3Client(p.accountID, akid, secret, "")
+		}
+	}
+	if p.r2s3 == nil {
+		return fmt.Errorf(
+			"R2 access needs credentials. The CLOUDFLARE_API_TOKEN you\n" +
+				"provided didn't expose a token id — that's unexpected. Check that\n" +
+				"the token has 'Workers R2 Storage: Edit' scope. As a fallback you\n" +
+				"can export an explicit pair (R2_ACCESS_KEY_ID + R2_SECRET_ACCESS_KEY)\n" +
+				"or just R2_PARENT_ACCESS_KEY_ID — see\n" +
+				"https://dash.cloudflare.com/?to=/:account/r2/api-tokens",
+		)
+	}
+	return nil
 }
 
 // uploadToR2IfChanged HEADs the object first and skips the PUT when the
@@ -1359,27 +1368,49 @@ func pickActiveVersion(versions []workers.DeploymentVersion) string {
 	return best.VersionID
 }
 
-// Destroy removes the Worker and the R2 bucket. Bucket delete will fail if
-// the bucket still has objects; we don't sweep them yet.
+// Destroy tears down everything nextdeploy created for this app: the Worker
+// (its routes + secrets go with it), the R2 bucket (objects swept first, since
+// CF refuses to delete a non-empty bucket), every provisioned resource recorded
+// in the cfstate manifest (D1/KV/Hyperdrive/Queues/Vectorize/AI Gateway), and
+// the DNS records it added. Anything that can't be deleted is reported and makes
+// Destroy return an error, so the operator is never told "done" while resources
+// (and billing) survive. 404s are treated as already-gone.
 func (p *CloudflareProvider) Destroy(ctx context.Context, cfg *config.NextDeployConfig) error {
 	workerName := p.getWorkerName(cfg)
 	bucketName := p.getBucketName(cfg)
 
+	var problems []string
+
+	// 1. Worker — its routes and secret_text bindings are removed with it.
 	p.log.Info("Deleting Worker: %s...", workerName)
 	if _, err := p.cf.Workers.Scripts.Delete(ctx, workerName, workers.ScriptDeleteParams{
 		AccountID: cloudflare.F(p.accountID),
-	}); err != nil {
-		var apiErr *cloudflare.Error
-		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
-			p.log.Warn("Worker delete failed (non-fatal): %v", err)
-		}
+	}); err != nil && !isCFNotFound(err) {
+		p.log.Warn("Worker delete failed: %v", err)
+		problems = append(problems, "worker "+workerName)
 	}
 
-	p.log.Info("Deleting R2 bucket: %s...", bucketName)
-	if _, err := p.cf.R2.Buckets.Delete(ctx, bucketName, r2.BucketDeleteParams{
+	// 2. R2 — empty the bucket, then delete it.
+	p.log.Info("Emptying + deleting R2 bucket: %s...", bucketName)
+	if err := p.sweepR2Bucket(ctx, bucketName); err != nil {
+		p.log.Warn("R2 sweep failed (bucket not deleted, still holds objects): %v", err)
+		problems = append(problems, "r2 bucket "+bucketName+" (objects remain)")
+	} else if _, err := p.cf.R2.Buckets.Delete(ctx, bucketName, r2.BucketDeleteParams{
 		AccountID: cloudflare.F(p.accountID),
-	}); err != nil {
-		p.log.Warn("R2 bucket delete failed (non-fatal — may still contain objects): %v", err)
+	}); err != nil && !isCFNotFound(err) {
+		p.log.Warn("R2 bucket delete failed: %v", err)
+		problems = append(problems, "r2 bucket "+bucketName)
+	}
+
+	// 3. Provisioned resources recorded in the state manifest (incl. orphans).
+	problems = append(problems, p.teardownProvisionedResources(ctx)...)
+
+	// 4. DNS records nextdeploy added (matched by value; siblings untouched).
+	problems = append(problems, p.teardownDeclaredDNS(ctx, cfg)...)
+
+	if len(problems) > 0 {
+		return fmt.Errorf("destroy incomplete — these still exist and need manual cleanup "+
+			"(check the Cloudflare dashboard — they may still bill): %s", strings.Join(problems, ", "))
 	}
 
 	p.log.Info("Cloudflare resources destroyed.")
