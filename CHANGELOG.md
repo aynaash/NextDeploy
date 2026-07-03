@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/aynaash/NextDeploy/compare/v0.15.0...v0.15.1) (2026-07-03)
+
+
+### Bug Fixes
+
+* **cloudflare:** destroy actually tears everything down ([#43](https://github.com/aynaash/NextDeploy/issues/43)) ([84e0a73](https://github.com/aynaash/NextDeploy/commit/84e0a732e4cdc824de4b9e669bd3d0bbd0d08b78))
+
 ## [0.15.0](https://github.com/aynaash/NextDeploy/compare/v0.14.4...v0.15.0) (2026-07-03)
 
 
