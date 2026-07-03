@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Server Actions are Next.js's primary mutation primitive. The compiled
@@ -23,14 +24,27 @@ import (
 // action manifest this file emits. No Next runtime involvement at
 // request time — the manifest carries everything the dispatcher needs.
 //
-// Manifest shape upstream (abbreviated; Next 14 / 15):
+// Manifest shape upstream (verified against real Next 14.2 + 15.1 builds —
+// see testdata/fixtures):
 //
 //	{
-//	  "node":     { "<actionId>": { "workers": { "<moduleId>": "exportName" },
-//	                                 "layer":   { "<moduleId>": "action-browser" } } },
-//	  "edge":     { "<actionId>": { "workers": {...}, "layer": {...} } },
-//	  "encryption": { "key": "..." }
+//	  "node": { "<actionId>": {
+//	      // KEY is the module path; VALUE is the webpack moduleId — a bare
+//	      // string in Next 14 ("9459") and a {moduleId, async} object in Next 15.
+//	      "workers": { "app/page": "9459" },              // Next 14
+//	      "workers": { "app/page": {"moduleId":"1149"} },  // Next 15
+//	      "layer":   { "app/page": "rsc" } } },
+//	  "edge": { ... },
+//	  "encryptionKey": "..."
 //	}
+//
+// NOTE ON EXECUTION: the compiled module does NOT expose the action as a named
+// export — `.next/server/app/page.js` exports Next's own machinery
+// (decodeReply/decodeAction/serverHooks/…), not the action function or the
+// moduleId. So actions.mjs's `mod[entry.export]` model cannot invoke a real
+// action; correct execution needs Next's action-runtime machinery. Tracked as a
+// runtime milestone. Action.Export below carries the moduleId for reference/
+// stability only — it is not a callable export.
 //
 // Our emitted manifest is flattened and stable:
 //
@@ -117,11 +131,33 @@ type upstreamManifest struct {
 }
 
 type upstreamEntry struct {
-	// Workers is the canonical field. Some Next minors wrote
-	// `workers` only when there was one; always a map.
-	Workers map[string]string `json:"workers"`
+	// Workers maps a MODULE PATH (e.g. "app/page") to the webpack moduleId of
+	// the compiled action worker. Confirmed against real builds (see
+	// testdata/fixtures): the value is a bare string in Next 14 ("9459") and a
+	// {moduleId, async} object in Next 15 ({"moduleId":"1149","async":false}).
+	// Decode per-value as json.RawMessage so neither shape fails Unmarshal —
+	// treating it as map[string]string aborted the parse on every Next 15 build.
+	Workers map[string]json.RawMessage `json:"workers"`
 	// Layer is advisory — we parse it but don't branch on it.
 	Layer map[string]string `json:"layer"`
+}
+
+// moduleIDFromWorker extracts the webpack moduleId from a `workers` map value,
+// handling the Next 14 string form ("9459") and the Next 15 object form
+// ({"moduleId":"1149","async":false}). moduleId itself may be quoted or numeric;
+// the result is normalized to a bare string.
+func moduleIDFromWorker(raw json.RawMessage) (string, bool) {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s, true
+	}
+	var obj struct {
+		ModuleID json.RawMessage `json:"moduleId"`
+	}
+	if json.Unmarshal(raw, &obj) == nil && len(obj.ModuleID) > 0 {
+		return strings.Trim(string(obj.ModuleID), `"`), true
+	}
+	return "", false
 }
 
 func parseUpstreamManifest(data []byte) (*ActionManifest, error) {
@@ -137,7 +173,7 @@ func parseUpstreamManifest(data []byte) (*ActionManifest, error) {
 
 	flatten := func(src map[string]upstreamEntry, runtime ActionRuntime) {
 		for actionID, entry := range src {
-			for moduleID, exportName := range entry.Workers {
+			for module, raw := range entry.Workers {
 				// Same action ID may repeat across node + edge when an app
 				// uses both runtimes for the same action. Prefer node (the
 				// default for most apps); edge only wins when node is absent.
@@ -146,15 +182,15 @@ func parseUpstreamManifest(data []byte) (*ActionManifest, error) {
 						continue
 					}
 				}
+				moduleID, _ := moduleIDFromWorker(raw)
 				out.Actions[actionID] = Action{
 					ID:      actionID,
-					Module:  moduleID,
-					Export:  exportName,
+					Module:  module,
+					Export:  moduleID,
 					Runtime: runtime,
 				}
-				// First worker entry wins per action; Next emits deterministic
-				// output but we still pin to the smallest moduleID to keep our
-				// manifest stable across pickup order changes.
+				// First worker entry wins per action; stabilize() below pins to
+				// the lexicographically smallest module for reproducibility.
 				break
 			}
 		}
@@ -193,10 +229,11 @@ func stabilize(out *ActionManifest, up upstreamManifest) {
 			}
 			sort.Strings(modules)
 			chosen := modules[0]
+			moduleID, _ := moduleIDFromWorker(entry.Workers[chosen])
 			out.Actions[actionID] = Action{
 				ID:      actionID,
 				Module:  chosen,
-				Export:  entry.Workers[chosen],
+				Export:  moduleID,
 				Runtime: runtime,
 			}
 		}

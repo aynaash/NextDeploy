@@ -1,0 +1,28 @@
+{
+  "node": {
+    "40d07be28396314db7e910ce0cb011f6e762f6c106": {
+      "workers": {
+        "app/page": {
+          "moduleId": "1149",
+          "async": false
+        }
+      },
+      "layer": {
+        "app/page": "rsc"
+      }
+    },
+    "40e81f65262b7e6949f2faceafe14ffc1b8bf14861": {
+      "workers": {
+        "app/page": {
+          "moduleId": "1149",
+          "async": false
+        }
+      },
+      "layer": {
+        "app/page": "rsc"
+      }
+    }
+  },
+  "edge": {},
+  "encryptionKey": "REDACTED-FIXTURE"
+}
