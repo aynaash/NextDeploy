@@ -341,10 +341,22 @@ func TestApplyD1Migrations_AppliesOnlyPending(t *testing.T) {
 	if !strings.Contains(joined, "CREATE TABLE IF NOT EXISTS "+migrationsTable) {
 		t.Errorf("tracking table not ensured:\n%s", joined)
 	}
-	// The already-applied migration's INSERT record must not be re-run.
-	inserts := strings.Count(joined, "INSERT INTO "+migrationsTable)
+	// Recording is now folded into the migration's own batch (apply + record in
+	// one query) so a crash can't leave it applied-but-unrecorded. Exactly one
+	// tracking INSERT — for the single pending migration, not the already-applied one.
+	inserts := strings.Count(joined, "INSERT OR IGNORE INTO "+migrationsTable)
 	if inserts != 1 {
 		t.Errorf("expected exactly 1 migration recorded, got %d\n%s", inserts, joined)
+	}
+	// Apply + record must ride in the SAME query (atomicity is the whole point).
+	var recordingQuery string
+	for _, q := range m.querySQLs {
+		if strings.Contains(q, "INSERT OR IGNORE INTO "+migrationsTable) {
+			recordingQuery = q
+		}
+	}
+	if !strings.Contains(recordingQuery, "CREATE TABLE t(id);") {
+		t.Errorf("record INSERT is not batched with the migration DDL:\n%s", recordingQuery)
 	}
 }
 

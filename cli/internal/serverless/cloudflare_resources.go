@@ -60,6 +60,11 @@ func (p *CloudflareProvider) ProvisionResources(ctx context.Context, cfg *config
 	if p.provisioned == nil {
 		p.provisioned = newResourceMap()
 	}
+	// Persist whatever we manage to provision even if a later resource fails —
+	// each loop below returns on first error, and without this a partial
+	// provision would leave already-created (paid) resources unrecorded and
+	// invisible to orphan detection / `nextdeploy destroy`.
+	defer p.persistResourceState()
 
 	for _, d := range res.D1 {
 		id, err := p.ensureD1Database(ctx, d)
@@ -121,11 +126,6 @@ func (p *CloudflareProvider) ProvisionResources(ctx context.Context, cfg *config
 		}
 	}
 
-	// Persist the provisioned resource IDs to an encrypted state manifest and
-	// surface any orphans (recorded earlier, no longer declared). Non-fatal:
-	// the deploy must not fail just because we couldn't write the manifest.
-	p.persistResourceState()
-
 	return nil
 }
 
@@ -166,7 +166,11 @@ func (p *CloudflareProvider) persistResourceState() {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	manifest := cfstate.New()
+	// Merge into the prior manifest rather than rebuilding from scratch. The old
+	// cfstate.New() dropped orphans (recorded earlier, no longer declared) right
+	// after warning about them — destroying the only record that made cleanup
+	// possible. Keeping them means they stay visible every run until `destroy`.
+	manifest := prior
 	for k, id := range snap {
 		kind, name, found := strings.Cut(k, ":")
 		if !found {

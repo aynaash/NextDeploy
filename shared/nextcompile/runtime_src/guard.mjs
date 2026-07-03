@@ -129,12 +129,18 @@ export async function verifySessionCookie(value, secret, nowMs = Date.now()) {
   const sig = value.slice(dot + 1);
   const expected = await hmacSign(payload, secret);
   if (!timingSafeEqual(sig, expected)) return false;
+  // Require a numeric `exp`. A validly-signed cookie with no expiry would be
+  // valid forever with no revocation path (stateless — no DB check), so an
+  // opaque or exp-less payload is rejected. The scaffold's session issuer must
+  // always set `exp`.
+  let data;
   try {
-    const data = JSON.parse(new TextDecoder().decode(b64urlDecodeToBytes(payload)));
-    if (data && typeof data.exp === "number" && data.exp * 1000 < nowMs) return false;
+    data = JSON.parse(new TextDecoder().decode(b64urlDecodeToBytes(payload)));
   } catch {
-    // Payload isn't JSON — signature already proved authenticity, so accept.
+    return false;
   }
+  if (!data || typeof data.exp !== "number") return false;
+  if (data.exp * 1000 < nowMs) return false;
   return true;
 }
 
@@ -172,14 +178,19 @@ export async function runGuard(request, env, ctx, cfg, nowMs = Date.now()) {
   // 2. Rate limit.
   if (cfg.rateLimit && matchesAny(path, cfg.rateLimit.paths)) {
     const kv = env?.[cfg.rateLimit.kvBinding];
-    if (kv) {
-      const { limited } = await checkRateLimit(kv, ip, cfg.rateLimit.requestsPerMinute, nowMs);
-      if (limited) {
-        return new Response("Too Many Requests", {
-          status: 429,
-          headers: { "retry-after": "60" },
-        });
-      }
+    if (!kv) {
+      // Misconfig: the binding is declared in protection config but not bound.
+      // Fail CLOSED rather than silently un-limit — a missing binding must not
+      // quietly disable a rate limit meant to throttle brute-force/login abuse.
+      console.error(`rate_limit kvBinding "${cfg.rateLimit.kvBinding}" not bound`);
+      return new Response("Service Unavailable", { status: 503 });
+    }
+    const { limited } = await checkRateLimit(kv, ip, cfg.rateLimit.requestsPerMinute, nowMs);
+    if (limited) {
+      return new Response("Too Many Requests", {
+        status: 429,
+        headers: { "retry-after": "60" },
+      });
     }
   }
 

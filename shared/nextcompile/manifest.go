@@ -197,6 +197,9 @@ func buildFeatures(p Payload, refs []ModuleRef) ManifestFeatures {
 		if r.PPREnabled {
 			f.PPR = true
 		}
+		if r.UsesAfter {
+			f.After = true
+		}
 	}
 	return f
 }

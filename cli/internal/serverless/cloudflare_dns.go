@@ -43,20 +43,28 @@ func (p *CloudflareProvider) ensureDNSRecord(ctx context.Context, decl config.CF
 		return fmt.Errorf("dns %s %s: %w", recType, fqdn, err)
 	}
 
-	existing, err := p.findDNSRecord(ctx, zoneID, fqdn, recType)
+	existing, err := p.findDNSRecords(ctx, zoneID, fqdn, recType)
 	if err != nil {
 		return fmt.Errorf("dns %s %s: list: %w", recType, fqdn, err)
 	}
-	if existing != nil {
-		if dnsRecordMatches(*existing, decl.Content, ttl, decl.Proxied) {
+
+	// Already-current if ANY existing record carries the declared value — never
+	// rewrite a sibling to reach this state.
+	for _, r := range existing {
+		if dnsRecordMatches(r, decl.Content, ttl, decl.Proxied) {
 			p.log.Info("DNS record already current: %s %s → %s", recType, fqdn, decl.Content)
 			return nil
 		}
-		_, err := p.cf.DNS.Records.Edit(ctx, existing.ID, dns.RecordEditParams{
+	}
+
+	// A single-valued type (CNAME) with exactly one record is safe to edit in
+	// place. For multi-valued types (A/TXT) with no content match, CREATE —
+	// editing would clobber a round-robin leg or an SPF/verification sibling.
+	if isSingleValued(recType) && len(existing) == 1 {
+		if _, err := p.cf.DNS.Records.Edit(ctx, existing[0].ID, dns.RecordEditParams{
 			ZoneID: cloudflare.F(zoneID),
 			Body:   editBody,
-		})
-		if err != nil {
+		}); err != nil {
 			return fmt.Errorf("dns %s %s: update: %w", recType, fqdn, err)
 		}
 		p.log.Info("DNS record updated: %s %s → %s (ttl=%d, proxied=%v)", recType, fqdn, decl.Content, ttl, decl.Proxied)
@@ -73,25 +81,35 @@ func (p *CloudflareProvider) ensureDNSRecord(ctx context.Context, decl config.CF
 	return nil
 }
 
-// findDNSRecord returns the first record matching (name, type) within the
-// zone, or nil if none exists.
-func (p *CloudflareProvider) findDNSRecord(ctx context.Context, zoneID, fqdn, recType string) (*dns.RecordResponse, error) {
+// isSingleValued reports whether a record type holds at most one value per name,
+// making in-place edit of the sole record correct. A/AAAA/TXT/MX/NS/CAA can hold
+// several per name; CNAME cannot.
+func isSingleValued(recType string) bool {
+	return recType == "CNAME"
+}
+
+// findDNSRecords returns ALL records matching (name, type) in the zone. A
+// (name, type) can legitimately hold several records — round-robin A/AAAA,
+// multiple apex TXT (SPF + verification). Returning only the first let
+// ensureDNSRecord rewrite a sibling in place.
+func (p *CloudflareProvider) findDNSRecords(ctx context.Context, zoneID, fqdn, recType string) ([]dns.RecordResponse, error) {
 	iter := p.cf.DNS.Records.ListAutoPaging(ctx, dns.RecordListParams{
 		ZoneID: cloudflare.F(zoneID),
 		Name: cloudflare.F(dns.RecordListParamsName{
 			Exact: cloudflare.F(fqdn),
 		}),
 	})
+	var out []dns.RecordResponse
 	for iter.Next() {
 		r := iter.Current()
 		if string(r.Type) == recType {
-			return &r, nil
+			out = append(out, r)
 		}
 	}
 	if err := iter.Err(); err != nil {
 		return nil, err
 	}
-	return nil, nil
+	return out, nil
 }
 
 // dnsRecordFQDN expands "@" → zone, "*" → "*.zone", and "sub" → "sub.zone".
@@ -103,11 +121,12 @@ func dnsRecordFQDN(name, zone string) string {
 	case "*":
 		return "*." + zone
 	}
-	if strings.HasSuffix(name, "."+zone) || name == zone {
-		return name
-	}
-	if strings.Contains(name, ".") {
-		// already an FQDN (e.g. user typed "api.example.com"); trust it
+	// Fully qualified only if it already ends with the zone. A bare label
+	// ("api") AND a multi-label subdomain ("api.staging") both expand by
+	// appending the zone — the old strings.Contains(".") shortcut wrongly
+	// treated "api.staging" as already-qualified, so lookups missed and every
+	// deploy created a duplicate.
+	if name == zone || strings.HasSuffix(name, "."+zone) {
 		return name
 	}
 	return name + "." + zone

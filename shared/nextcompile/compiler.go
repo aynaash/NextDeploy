@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -51,7 +52,12 @@ func Compile(ctx context.Context, opts CompileOpts) (*CompiledBundle, error) {
 	// from the standalone tree. Missing manifest → no actions (fine).
 	actionManifest, err := DetectServerActions(opts.StandaloneDir, opts.Payload.DistDir)
 	if err != nil && !errors.Is(err, ErrNoActionManifest) {
-		return nil, fmt.Errorf("detect server actions: %w", err)
+		// A PARSE failure must NOT abort the whole deploy — degrade to "actions
+		// unavailable" so a manifest-shape drift in a new Next version doesn't
+		// brick deploys that don't use actions.
+		log.Warn("nextcompile: server-reference-manifest parse failed (%v); "+
+			"Server Actions will be unavailable in this deploy", err)
+		actionManifest = nil
 	}
 	if actionManifest != nil && len(actionManifest.Actions) > 0 {
 		log.Info("nextcompile: detected %d Server Actions", len(actionManifest.Actions))
@@ -83,7 +89,7 @@ func Compile(ctx context.Context, opts CompileOpts) (*CompiledBundle, error) {
 	// OutDir is nested inside StandaloneDir (as the cloudflare adapter
 	// does for isolation), the import-prefix has to walk back through the
 	// nesting to reach the standalone root.
-	dispatchPath, err := EmitDispatchTable(kept, actionManifest, opts.OutDir, opts.StandaloneDir)
+	dispatchPath, err := EmitDispatchTable(kept, actionManifest, opts.OutDir, opts.StandaloneDir, payloadDistDir(opts.Payload))
 	if err != nil {
 		return nil, fmt.Errorf("emit dispatch: %w", err)
 	}
@@ -120,14 +126,17 @@ func Compile(ctx context.Context, opts CompileOpts) (*CompiledBundle, error) {
 		return nil, fmt.Errorf("emit worker entry: %w", err)
 	}
 
-	// Phase 14 — compute content hash over every generated/extracted file
-	// in deterministic order. Adapter uses this to skip no-op redeploys.
-	hashInputs := append([]string{manifestPath, dispatchPath, actionManifestPath, protectionPath, entryPath}, runtimeFiles...)
+	// Phase 14 — compute content hash over every generated/extracted file in
+	// deterministic order. Adapter uses this to skip no-op redeploys.
+	// manifestPath is intentionally excluded from the file list — its on-disk
+	// bytes embed the wall-clock GeneratedAt; hashBundle folds in a normalized
+	// (timestamp-zeroed) manifest instead so identical input hashes identically.
+	hashInputs := append([]string{dispatchPath, actionManifestPath, protectionPath, entryPath}, runtimeFiles...)
 	if vendored != nil {
 		hashInputs = append(hashInputs, vendored.TargetPath)
 	}
 	sort.Strings(hashInputs)
-	contentHash, totalBytes, err := hashFiles(hashInputs)
+	contentHash, totalBytes, err := hashBundle(opts.OutDir, manifest, hashInputs)
 	if err != nil {
 		return nil, fmt.Errorf("hash bundle: %w", err)
 	}
@@ -224,18 +233,34 @@ func ensureOutDir(dir string) error {
 	return os.MkdirAll(dir, 0o750)
 }
 
-// hashFiles produces a single SHA-256 over the concatenation of every path's
-// contents in the order given. Also returns the total byte count, which is
-// cheap to compute alongside and populates CompileStats.BundleBytes.
-func hashFiles(paths []string) (string, int64, error) {
+// hashBundle computes the deploy-skip digest deterministically for identical
+// input: a NORMALIZED manifest (GeneratedAt zeroed — it's a wall-clock stamp)
+// plus every other emitted file, each hashed by its baseDir-RELATIVE path
+// (never the absolute path, which varies per machine/checkout) and content.
+// Also returns the total byte count for CompileStats.BundleBytes.
+func hashBundle(baseDir string, manifest Manifest, paths []string) (string, int64, error) {
+	norm := manifest
+	norm.GeneratedAt = "" // exclude the wall-clock stamp from the digest
+	mb, err := json.Marshal(norm)
+	if err != nil {
+		return "", 0, fmt.Errorf("marshal manifest for hash: %w", err)
+	}
+
 	h := sha256.New()
-	var total int64
+	h.Write([]byte("manifest\x00"))
+	h.Write(mb)
+	total := int64(len(mb))
+
 	for _, p := range paths {
 		data, err := os.ReadFile(p) // #nosec G304 — hashing the compiler's own output
 		if err != nil {
 			return "", 0, fmt.Errorf("read %s: %w", p, err)
 		}
-		h.Write([]byte(p))
+		rel, err := filepath.Rel(baseDir, p)
+		if err != nil {
+			rel = filepath.Base(p)
+		}
+		h.Write([]byte(filepath.ToSlash(rel)))
 		h.Write([]byte{0})
 		h.Write(data)
 		total += int64(len(data))

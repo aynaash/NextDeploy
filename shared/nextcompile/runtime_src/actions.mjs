@@ -85,6 +85,9 @@ export async function handleServerAction(request, env, ctx, actionManifest, modu
   try {
     args = await parseArgs(request);
   } catch (err) {
+    if (err instanceof BodyTooLargeError) {
+      return plainError(413, err.message);
+    }
     return plainError(400, "Failed to parse action body: " + (err?.message || String(err)));
   }
 
@@ -128,10 +131,31 @@ export async function handleServerAction(request, env, ctx, actionManifest, modu
 
 // ── Body parsing ─────────────────────────────────────────────────────────────
 
+// BodyTooLargeError signals an oversized/unbounded action body so the caller
+// can map it to HTTP 413 instead of a generic 400.
+class BodyTooLargeError extends Error {
+  constructor(len) {
+    super(
+      Number.isFinite(len)
+        ? `action body ${len} bytes exceeds ${MAX_BODY_BYTES}`
+        : `action body has no Content-Length (required for multipart, cap ${MAX_BODY_BYTES})`,
+    );
+    this.name = "BodyTooLargeError";
+  }
+}
+
 async function parseArgs(request) {
   const contentType = (request.headers.get("content-type") || "").toLowerCase();
 
   if (contentType.startsWith("multipart/form-data") || contentType.startsWith("application/x-www-form-urlencoded")) {
+    // request.formData() buffers the WHOLE body with no cap — a large upload
+    // would exhaust the isolate, the exact DoS MAX_BODY_BYTES exists to stop.
+    // Gate on Content-Length before parsing (chunked / missing length is
+    // rejected rather than trusted).
+    const len = Number(request.headers.get("content-length"));
+    if (!Number.isFinite(len) || len > MAX_BODY_BYTES) {
+      throw new BodyTooLargeError(len);
+    }
     const form = await request.formData();
     return [formDataToArgs(form)];
   }

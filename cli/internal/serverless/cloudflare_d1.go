@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/aynaash/nextdeploy/shared/config"
 
@@ -111,19 +110,31 @@ func (p *CloudflareProvider) applyD1Migrations(ctx context.Context, dbID string,
 
 	for _, path := range pending {
 		name := filepath.Base(path)
-		sqlBytes, err := os.ReadFile(path)
+		sqlBytes, err := os.ReadFile(path) // #nosec G304 — migration path from the configured dir
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
-		if err := p.d1Exec(ctx, dbID, string(sqlBytes)); err != nil {
+		// Apply the migration AND record it in one batched query. D1 runs the
+		// statements in order within the single /query call, so a crash can't
+		// leave the DB migrated-but-unrecorded (which makes the next deploy
+		// replay the file and hard-fail on "table already exists"). INSERT OR
+		// IGNORE keeps the record write safe even if the batch is retried.
+		combined := string(sqlBytes) + fmt.Sprintf(
+			"\nINSERT OR IGNORE INTO %s (name, applied_at) VALUES (%s, datetime('now'));",
+			migrationsTable, sqlQuote(name))
+		if err := p.d1Exec(ctx, dbID, combined); err != nil {
 			return fmt.Errorf("apply migration %s: %w", name, err)
-		}
-		if err := p.d1Record(ctx, dbID, name); err != nil {
-			return fmt.Errorf("record migration %s: %w", name, err)
 		}
 		p.log.Info("D1 %s: applied migration %s", decl.Name, name)
 	}
 	return nil
+}
+
+// sqlQuote renders s as a single-quoted SQL string literal, doubling embedded
+// quotes. Migration names are operator-controlled filenames, but we escape
+// rather than trust them.
+func sqlQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 // d1Exec runs a (possibly multi-statement) SQL string against the database.
@@ -131,18 +142,6 @@ func (p *CloudflareProvider) d1Exec(ctx context.Context, dbID, sql string) error
 	_, err := p.cf.D1.Database.Query(ctx, dbID, d1.DatabaseQueryParams{
 		AccountID: cloudflare.F(p.accountID),
 		Body:      d1.DatabaseQueryParamsBodyD1SingleQuery{Sql: cloudflare.F(sql)},
-	})
-	return err
-}
-
-// d1Record inserts a migration name into the tracking table with a UTC stamp.
-func (p *CloudflareProvider) d1Record(ctx context.Context, dbID, name string) error {
-	_, err := p.cf.D1.Database.Query(ctx, dbID, d1.DatabaseQueryParams{
-		AccountID: cloudflare.F(p.accountID),
-		Body: d1.DatabaseQueryParamsBodyD1SingleQuery{
-			Sql:    cloudflare.F(fmt.Sprintf("INSERT INTO %s (name, applied_at) VALUES (?, ?);", migrationsTable)),
-			Params: cloudflare.F([]string{name, time.Now().UTC().Format(time.RFC3339)}),
-		},
 	})
 	return err
 }

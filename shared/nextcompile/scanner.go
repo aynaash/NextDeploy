@@ -200,21 +200,24 @@ func attachLayoutChains(refs []ModuleRef, standaloneDir, classifyRoot string) []
 		}
 		pageDir := filepath.Dir(filepath.ToSlash(pageRel))
 
-		// Walk from the page's directory back up to server/app, collecting
-		// any layout.js sitting in an ancestor directory. Result is ordered
-		// from page-nearest to root-nearest; we reverse so the runtime can
-		// apply root-first.
+		// Walk from the page's directory up to the app root, collecting each
+		// ancestor's layout.js. The loop already visits server/app (it runs
+		// while dir != "." && dir != "/"), so there's no separate top-level
+		// append — that double-counted the root layout. A seen-set guarantees
+		// no path shape can reintroduce a duplicate. Ordered page-nearest to
+		// root-nearest; we reverse below so the runtime applies root-first.
 		var chain []string
+		seen := map[string]struct{}{}
 		for dir := pageDir; dir != "." && dir != "/"; dir = filepath.Dir(dir) {
-			if layoutPath, ok := layoutByDir[dir]; ok {
-				chain = append(chain, layoutPath)
+			layoutPath, ok := layoutByDir[dir]
+			if !ok {
+				continue
 			}
-		}
-		// Also check the top-level (server/app) layout.
-		if top, ok := layoutByDir["server/app"]; ok {
-			chain = append(chain, top)
-		} else if top, ok := layoutByDir[filepath.Dir(pageDir)]; ok && len(chain) == 0 {
-			chain = append(chain, top)
+			if _, dup := seen[layoutPath]; dup {
+				continue
+			}
+			seen[layoutPath] = struct{}{}
+			chain = append(chain, layoutPath)
 		}
 
 		// Reverse to root→leaf ordering.
@@ -243,11 +246,11 @@ func collectCompiledFiles(serverDir string) ([]string, error) {
 			return err
 		}
 		if d.IsDir() {
-			// Skip Next's own internal chunks — they're required by the
-			// compiled modules but not directly dispatchable. esbuild
-			// pulls them in transitively when bundling the ModuleRef set.
-			base := d.Name()
-			if base == "chunks" || base == "pages-manifest" {
+			// Skip ONLY Next's internal build dir at <serverDir>/chunks — never
+			// a user route directory that happens to be named "chunks" (e.g.
+			// app/chunks/page.tsx compiles to server/app/chunks/page.js and must
+			// be scanned). Matching the name at any depth silently dropped those.
+			if rel, err := filepath.Rel(serverDir, path); err == nil && filepath.ToSlash(rel) == "chunks" {
 				return fs.SkipDir
 			}
 			return nil
@@ -306,6 +309,7 @@ func analyzeModule(standaloneDir, classifyRoot, absPath string) (ModuleRef, erro
 		UsesRSC:      usesRSCPattern.MatchString(src),
 		HasActions:   hasActionsPattern.MatchString(src),
 		PPREnabled:   pprPattern.MatchString(src),
+		UsesAfter:    afterPattern.MatchString(src),
 	}
 	return ref, nil
 }
@@ -344,6 +348,13 @@ var (
 	// some Next 15 canary builds where the static shell has already been
 	// materialized at build time.
 	pprPattern = regexp.MustCompile(`experimental_ppr\s*=\s*true|__NEXT_PPR_STATIC_`)
+
+	// after() — Next's post-response work API (next/server). "unstable_after"
+	// (Next 14.x) survives verbatim in compiled output; the stable "after"
+	// (Next 15) is too common a word to match bare, so we also accept a
+	// __next_after tell. Validate against a real Next 15 build before relying
+	// on this signal — compiled output is the ground truth.
+	afterPattern = regexp.MustCompile(`\bunstable_after\b|__next_after__`)
 )
 
 // uniqueStrings deduplicates a regex FindAllStringSubmatch result by the

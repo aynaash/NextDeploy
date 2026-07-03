@@ -79,7 +79,7 @@ func maybeProvisionResources(ctx context.Context, p Provider, cfg *config.NextDe
 //  5. Invalidates the CDN cache
 //
 //nolint:gocognit,gocyclo,cyclop,funlen // top-level orchestrator with pre-existing complexity; this change only delegates provisioning to a helper.
-func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload, verbose, provision bool) error {
+func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload, verbose, provision, verify bool) error {
 	log := shared.PackageLogger("serverless", "☁️  SERVERLESS")
 
 	if err := validateProviderConsistency(cfg, log); err != nil {
@@ -135,7 +135,14 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	pushSecrets := func() error {
 		appSecrets, err := loadLocalSecrets(cfg)
 		if err != nil {
-			log.Warn("Failed to load local secrets (non-fatal): %v", err)
+			// Only tolerable when nothing was declared. If the project references
+			// secret sources, a load failure must abort — shipping an empty set
+			// strips every live secret (CF upload is replace-not-merge).
+			if secretsDeclared(cfg) {
+				return fmt.Errorf("refusing to deploy: secrets are declared but failed to load "+
+					"(would strip all live Worker secrets): %w", err)
+			}
+			log.Warn("No secrets loaded (none declared): %v", err)
 			appSecrets = map[string]string{}
 		}
 		// Register every secret value so it is scrubbed from any subsequent log
@@ -188,15 +195,20 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 		}
 	}
 
-	log.Info("Serverless deployment complete! Application is live.")
+	log.Info("Serverless deployment complete — verifying...")
 
 	// ── 6.5. Post-deploy smoke verify ───────────────────────────────────────
-	// Non-fatal by default — CI callers can opt into FailOnError when they
-	// want the deploy to gate on the smoke check. Domain-less deploys (no
-	// custom domain, workers.dev only) skip automatically.
-	if _, err := SmokeVerify(ctx, log, cfg, meta, SmokeOpts{}); err != nil {
+	// Non-fatal by default; `--verify` (verify=true) gates the deploy on the
+	// smoke check for CI. Domain-less deploys (no custom domain, workers.dev
+	// only) skip automatically.
+	if _, err := SmokeVerify(ctx, log, cfg, meta, SmokeOpts{FailOnError: verify}); err != nil {
+		if verify {
+			return fmt.Errorf("post-deploy smoke verify failed: %w", err)
+		}
 		log.Warn("Smoke verify returned error (non-fatal): %v", err)
 	}
+
+	log.Info("Application is live.")
 
 	// ── 7. Generate Visual Report ───────────────────────────────────────────
 	resMap, err := p.GetResourceMap(ctx, cfg)
@@ -266,6 +278,28 @@ func LoadLocalSecrets(cfg *config.NextDeployConfig) (map[string]string, error) {
 //
 // Higher-precedence sources override lower ones. The managed store wins
 // because it represents explicit user intent via the CLI.
+// secretsDeclared reports whether the project references any secret source.
+// When true, a loadLocalSecrets failure must abort the deploy rather than ship
+// an empty set — CF Worker uploads are replace-not-merge, so an empty set
+// strips every live secret. When false (no declared sources) an empty set is
+// legitimately the intended state.
+func secretsDeclared(cfg *config.NextDeployConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	if len(cfg.Secrets.Files) > 0 {
+		return true
+	}
+	if cfg.Secrets.Doppler != nil || cfg.Secrets.Vault != nil {
+		return true
+	}
+	// Managed store, populated by `nextdeploy secrets set/load`.
+	if _, err := os.Stat(filepath.Join(".nextdeploy", ".env")); err == nil {
+		return true
+	}
+	return false
+}
+
 func loadLocalSecrets(cfg *config.NextDeployConfig) (map[string]string, error) {
 	log := shared.PackageLogger("serverless", "🔐 SECRETS")
 	merged := map[string]string{}
@@ -381,10 +415,14 @@ func harvestDopplerEnv(cfg *config.NextDeployConfig) (map[string]string, string)
 	envMap := envSliceToMap(os.Environ())
 
 	if allowErr != nil {
-		log.Warn("Could not query `doppler secrets --json` for allowlist (%v) — "+
-			"falling back to denylist heuristic. Some local shell vars may leak; "+
-			"prefer fixing the doppler CLI or running outside `doppler run -- ...`", allowErr)
-		return harvestByDenylist(envMap), source
+		// Do NOT fall back to harvesting the whole shell environment — that
+		// leaks desktop/session vars (WAYLAND_DISPLAY, DBUS_SESSION_BUS_ADDRESS,
+		// …) as Worker secret_text and churns the deploy hash every run. Ship
+		// only explicitly-declared secrets instead.
+		log.Warn("Could not query `doppler secrets --json` (%v). NOT harvesting the "+
+			"shell environment (would leak desktop/session vars as Worker secrets). "+
+			"Fix the doppler CLI, or declare secrets in secrets.files[].", allowErr)
+		return nil, source
 	}
 
 	out := make(map[string]string, len(allowlist))
@@ -437,20 +475,6 @@ func dopplerKeyAllowlist() (map[string]struct{}, error) {
 	return keys, nil
 }
 
-// harvestByDenylist is the legacy filter used as a fallback when the
-// doppler CLI can't be queried. Kept as-is so the deploy still ships
-// when offline; the allowlist path above is the preferred filter.
-func harvestByDenylist(envMap map[string]string) map[string]string {
-	out := map[string]string{}
-	for k, v := range envMap {
-		if !shouldHarvestEnvKey(k) {
-			continue
-		}
-		out[k] = v
-	}
-	return out
-}
-
 // envSliceToMap turns os.Environ() output into a name→value map.
 func envSliceToMap(env []string) map[string]string {
 	out := make(map[string]string, len(env))
@@ -462,69 +486,6 @@ func envSliceToMap(env []string) map[string]string {
 		out[kv[:i]] = kv[i+1:]
 	}
 	return out
-}
-
-// shouldHarvestEnvKey returns true when an environment variable looks like a
-// user app secret rather than a system/tooling/nextdeploy variable.
-//
-// Rules:
-//   - Must be SCREAMING_SNAKE_CASE (no lowercase letters).
-//   - Must not match any tooling/credential/system prefix the harvester
-//     should never push to the cloud (CLOUDFLARE_API_TOKEN, AWS keys, the
-//     Doppler bookkeeping vars themselves, shell internals).
-//
-// This list is conservative — we'd rather drop a secret the user expected
-// us to push than push a credential we shouldn't. Users who need to force
-// a denied key into the deploy can declare it in `secrets.files[]` or in
-// the managed store.
-func shouldHarvestEnvKey(k string) bool {
-	if k == "" {
-		return false
-	}
-	hasLower := false
-	for _, r := range k {
-		if r >= 'a' && r <= 'z' {
-			hasLower = true
-			break
-		}
-	}
-	if hasLower {
-		return false
-	}
-	denyExact := map[string]struct{}{
-		"PATH": {}, "HOME": {}, "USER": {}, "SHELL": {}, "PWD": {}, "OLDPWD": {},
-		"LANG": {}, "LC_ALL": {}, "TERM": {}, "TMPDIR": {}, "LOGNAME": {},
-		"HOSTNAME": {}, "DISPLAY": {}, "XAUTHORITY": {}, "MAIL": {},
-		"SSH_AUTH_SOCK": {}, "SSH_AGENT_PID": {}, "SSH_CONNECTION": {}, "SSH_CLIENT": {}, "SSH_TTY": {},
-		"GOPATH": {}, "GOROOT": {}, "GOCACHE": {}, "GOMODCACHE": {},
-		"NODE_PATH": {}, "NPM_CONFIG_PREFIX": {},
-		"_": {},
-	}
-	if _, bad := denyExact[k]; bad {
-		return false
-	}
-	denyPrefixes := []string{
-		"DOPPLER_",    // Doppler bookkeeping (we don't push our own auth)
-		"CLOUDFLARE_", // CF deploy creds, not app secrets
-		"R2_",         // R2 deploy creds
-		"AWS_",        // AWS deploy creds
-		"GOOGLE_",     // GCP deploy creds
-		"AZURE_",      // Azure deploy creds
-		"NEXTDEPLOY_", // our own internal flags
-		"ND_",         // our own internal flags (short prefix)
-		"BASH_",       // shell internals
-		"XDG_",        // XDG base dirs
-		"LC_",         // locale
-		"GITHUB_",     // GitHub Actions runner internals
-		"RUNNER_",     // GitHub Actions runner internals
-		"CI_",         // generic CI internals
-	}
-	for _, p := range denyPrefixes {
-		if strings.HasPrefix(k, p) {
-			return false
-		}
-	}
-	return true
 }
 
 // mergeInto copies src into dst, overwriting existing keys.

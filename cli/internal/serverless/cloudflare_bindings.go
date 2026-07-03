@@ -68,6 +68,24 @@ func buildScriptMetadata(cf *config.CloudflareConfig, defaultBucket, entryName s
 		})
 	}
 
+	// Detect duplicate binding names before the (multi-MB) upload — a collision
+	// otherwise surfaces only as an opaque CF API error post-upload. Common
+	// cause: an .env key (folded in as secret_text) shadowing a declared binding
+	// or the auto-injected ASSETS bucket.
+	seen := make(map[string]struct{}, len(bindings))
+	for _, b := range bindings {
+		name := bindingName(b)
+		if name == "" {
+			continue
+		}
+		if _, dup := seen[name]; dup {
+			return workers.ScriptUpdateParamsMetadata{}, fmt.Errorf(
+				"duplicate Worker binding name %q — rename one, or remove the .env key "+
+					"that collides with a declared binding or the ASSETS bucket", name)
+		}
+		seen[name] = struct{}{}
+	}
+
 	meta := workers.ScriptUpdateParamsMetadata{
 		MainModule:         cloudflare.F(entryName),
 		CompatibilityDate:  cloudflare.F(compatDate),
@@ -132,6 +150,39 @@ func sortedKeys(m map[string]string) []string {
 		}
 	}
 	return keys
+}
+
+// bindingName extracts a binding's Name from the request-param union. There's no
+// shared accessor on the union, but every kind embeds Name param.Field[string]
+// whose Value field is exported. Returns "" for an unrecognized kind (never
+// expected — all kinds buildBindings emits are covered).
+func bindingName(u workers.ScriptUpdateParamsMetadataBindingUnion) string {
+	switch b := u.(type) {
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindR2Bucket:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindD1:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindHyperdrive:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindQueue:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindVectorize:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindAI:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindDurableObjectNamespace:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindKVNamespace:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindPlainText:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindSecretsStoreSecret:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindSecretText:
+		return b.Name.Value
+	default:
+		return ""
+	}
 }
 
 func buildBindings(cf *config.CloudflareConfig, defaultBucket string, resolveRef refResolver) ([]workers.ScriptUpdateParamsMetadataBindingUnion, error) {

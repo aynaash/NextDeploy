@@ -32,16 +32,36 @@ export async function handleImageRequest(request, env, manifest) {
   const quality = clamp(parseIntOrDefault(url.searchParams.get("q"), 75), 1, 100);
   const format = url.searchParams.get("fm") || pickPreferredFormat(manifest);
 
-  // Relative URLs are same-origin — always allowed.
-  const isAbsolute = /^https?:\/\//i.test(src);
-
-  if (isAbsolute) {
-    if (!passesRemotePatternCheck(src, manifest)) {
-      return textError(403, "url does not match any remotePatterns / domains entry in next.config");
-    }
+  // Resolve FIRST, then classify by the RESOLVED URL — never by the raw
+  // string. Protocol-relative ("//evil.com"), leading-whitespace
+  // ("%20https://evil.com"), "http:evil.com", and relative inputs all collapse
+  // to a concrete origin here, so none can slip past the allowlist the way the
+  // old /^https?:\/\// regex gate let them (that was an open-SSRF hole).
+  let resolvedURL;
+  try {
+    resolvedURL = new URL(src, url);
+  } catch {
+    return textError(400, "invalid ?url= parameter");
   }
 
-  const resolved = isAbsolute ? src : new URL(src, request.url).toString();
+  // Only http(s) is fetchable — blocks data:, file:, blob:, etc.
+  if (resolvedURL.protocol !== "http:" && resolvedURL.protocol !== "https:") {
+    return textError(400, "unsupported url scheme");
+  }
+
+  // Defense in depth: refuse loopback / link-local / RFC1918 hosts even if an
+  // operator allowlisted too broadly (blocks the 169.254.169.254 metadata
+  // endpoint, localhost, private ranges).
+  if (isBlockedHost(resolvedURL.hostname)) {
+    return textError(403, "url resolves to a blocked host");
+  }
+
+  const sameOrigin = resolvedURL.origin === url.origin;
+  if (!sameOrigin && !passesRemotePatternCheck(resolvedURL.toString(), manifest)) {
+    return textError(403, "url does not match any remotePatterns / domains entry in next.config");
+  }
+
+  const resolved = resolvedURL.toString();
 
   if (manifest?.images?.unoptimized) {
     return passthroughFetch(resolved);
@@ -56,6 +76,21 @@ export async function handleImageRequest(request, env, manifest) {
   }
 
   return passthroughFetch(resolved);
+}
+
+// isBlockedHost reports whether a hostname points at loopback, link-local, or
+// RFC1918 space — hosts an image proxy must never fetch. A same-origin app
+// never hits these, and a legit CDN host never resolves to one of these literals.
+function isBlockedHost(hostname) {
+  const h = hostname.toLowerCase();
+  if (h === "localhost" || h === "0.0.0.0" || h === "::1" || h === "[::1]") return true;
+  if (h === "169.254.169.254") return true; // cloud metadata endpoint
+  if (/^127\./.test(h)) return true;
+  if (/^10\./.test(h)) return true;
+  if (/^192\.168\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  return false;
 }
 
 function passesRemotePatternCheck(src, manifest) {

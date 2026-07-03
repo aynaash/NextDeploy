@@ -519,21 +519,25 @@ func (p *CloudflareProvider) DeployStatic(ctx context.Context, pkg *packaging.Pa
 	}
 
 	if p.r2s3 == nil {
-		// Tier 2: derive R2 creds from the API token. Default path.
-		if akid, secret, ok := deriveR2CredsFromAPIToken(p.apiTokenID, p.apiToken); ok {
-			sensitive.Register(secret)
-			p.log.Info("Using R2 credentials derived from API token (zero-config path)")
-			p.r2s3 = newR2S3Client(p.accountID, akid, secret, "")
-		} else if p.r2ParentKeyID != "" {
-			// Tier 3: parent-key flow. Used when the user explicitly set
-			// R2_PARENT_ACCESS_KEY_ID — usually because their main API
-			// token doesn't have R2 scope.
+		switch {
+		case p.r2ParentKeyID != "":
+			// Explicit opt-in wins: the user set R2_PARENT_ACCESS_KEY_ID because
+			// their API token lacks R2 scope. Previously unreachable — the
+			// derive-from-token branch always fired first and silently used creds
+			// that then 403 on every PUT.
 			p.log.Info("Minting short-lived R2 creds for bucket %s (parent: %s…)", bucketName, p.r2ParentKeyID[:min(8, len(p.r2ParentKeyID))])
 			creds, err := p.mintR2TempCreds(ctx, bucketName)
 			if err != nil {
 				return fmt.Errorf("R2 temp credential minting failed: %w", err)
 			}
 			p.r2s3 = newR2S3Client(p.accountID, creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken)
+		default:
+			// Tier 2: derive R2 creds from the API token. Default zero-config path.
+			if akid, secret, ok := deriveR2CredsFromAPIToken(p.apiTokenID, p.apiToken); ok {
+				sensitive.Register(secret)
+				p.log.Info("Using R2 credentials derived from API token (zero-config path)")
+				p.r2s3 = newR2S3Client(p.accountID, akid, secret, "")
+			}
 		}
 
 		if p.r2s3 == nil {
@@ -550,46 +554,90 @@ func (p *CloudflareProvider) DeployStatic(ctx context.Context, pkg *packaging.Pa
 
 	p.log.Info("Uploading %d static assets to R2 bucket %s...", len(pkg.S3Assets), bucketName)
 
+	// Two-phase upload (D1): immutable content-hashed chunks first, so that by
+	// the time any mutable HTML referencing them becomes visible in R2, every
+	// chunk it points at already exists. uploadBatch wg.Wait()s internally, so
+	// its return is a hard barrier between the phases. A failure in the
+	// immutable phase aborts before any mutable key is touched.
+	immutable, mutable := partitionAssets(pkg.S3Assets)
+
+	upImm, skImm, err := p.uploadBatch(ctx, bucketName, immutable)
+	if err != nil {
+		return fmt.Errorf("upload immutable assets: %w", err)
+	}
+	upMut, skMut, err := p.uploadBatch(ctx, bucketName, mutable)
+	if err != nil {
+		return fmt.Errorf("upload mutable assets: %w", err)
+	}
+
+	uploaded, skipped := upImm+upMut, skImm+skMut
+	if skipped > 0 {
+		p.log.Info("R2 asset sync: %d uploaded, %d skipped (content unchanged)", uploaded, skipped)
+	} else {
+		p.log.Info("R2 asset sync: %d uploaded to %s", uploaded, bucketName)
+	}
+	return nil
+}
+
+// immutableKeyPrefix marks content-hashed assets that are safe to upload before
+// any mutable HTML/RSC (see the two-phase upload in DeployStatic): new hashes
+// never collide with old ones and old ones are never deleted. The packager
+// emits these under _next/static/ with a "…, immutable" Cache-Control; the key
+// prefix is the authoritative signal — packaging.S3Asset has no Immutable field.
+const immutableKeyPrefix = "_next/static/"
+
+// partitionAssets splits the packaged asset set into immutable content-hashed
+// chunks (uploaded first) and mutable stable-key assets (prerendered HTML/RSC +
+// public/, uploaded second, after the chunks they reference exist in R2).
+func partitionAssets(assets []packaging.S3Asset) (immutable, mutable []packaging.S3Asset) {
+	for _, a := range assets {
+		if strings.HasPrefix(a.S3Key, immutableKeyPrefix) {
+			immutable = append(immutable, a)
+		} else {
+			mutable = append(mutable, a)
+		}
+	}
+	return immutable, mutable
+}
+
+// uploadBatch uploads assets to R2 with bounded concurrency, HEAD-skipping
+// objects whose content is unchanged. Returns per-batch counts so the two-phase
+// caller can log a combined summary. wg.Wait() makes the return a hard barrier.
+func (p *CloudflareProvider) uploadBatch(ctx context.Context, bucket string, assets []packaging.S3Asset) (uploaded, skipped int64, err error) {
 	const cfR2UploadConcurrency = 8
 	sem := make(chan struct{}, cfR2UploadConcurrency)
-	errs := make(chan error, len(pkg.S3Assets))
+	errs := make(chan error, len(assets))
 	var wg sync.WaitGroup
 
-	var uploaded, skipped atomic.Int64
+	var up, sk atomic.Int64
 
-	for _, asset := range pkg.S3Assets {
+	for _, asset := range assets {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			didUpload, err := p.uploadToR2IfChanged(ctx, bucketName, asset)
-			if err != nil {
-				errs <- fmt.Errorf("upload %s: %w", asset.S3Key, err)
+			didUpload, uploadErr := p.uploadToR2IfChanged(ctx, bucket, asset)
+			if uploadErr != nil {
+				errs <- fmt.Errorf("upload %s: %w", asset.S3Key, uploadErr)
 				return
 			}
 			if didUpload {
-				uploaded.Add(1)
+				up.Add(1)
 			} else {
-				skipped.Add(1)
+				sk.Add(1)
 			}
 		}()
 	}
 	wg.Wait()
 	close(errs)
 
-	for err := range errs {
-		if err != nil {
-			return err
+	for e := range errs {
+		if e != nil {
+			return up.Load(), sk.Load(), e
 		}
 	}
-
-	if skipped.Load() > 0 {
-		p.log.Info("R2 asset sync: %d uploaded, %d skipped (content unchanged)", uploaded.Load(), skipped.Load())
-	} else {
-		p.log.Info("R2 asset sync: %d uploaded to %s", uploaded.Load(), bucketName)
-	}
-	return nil
+	return up.Load(), sk.Load(), nil
 }
 
 // uploadToR2IfChanged HEADs the object first and skips the PUT when the
@@ -826,6 +874,12 @@ func resolveStandaloneDir(pkg *packaging.PackageResult, meta *nextcore.NextCoreP
 // catch-all R2 worker is sufficient. We skip in that case.
 func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageResult, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) error {
 	if meta != nil && meta.OutputMode == nextcore.OutputModeExport {
+		if len(p.pendingSecrets) > 0 {
+			p.log.Warn("Static-export build has no server runtime — %d staged secret(s) "+
+				"will NOT be deployed. Move runtime logic to SSR, or drop them from config.",
+				len(p.pendingSecrets))
+			p.pendingSecrets = nil
+		}
 		p.log.Info("Static-export build detected; skipping Worker deploy.")
 		return nil
 	}
@@ -868,6 +922,19 @@ func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.P
 	if p.provisioned != nil {
 		resolve = p.provisioned.get
 	}
+
+	// Guard: a Worker upload is replace-not-merge. If the incoming set omits a
+	// secret currently live on the Worker, abort unless the operator opted into
+	// a wipe. GetSecrets lists live names (CF never returns values).
+	if cfBlock == nil || !cfBlock.AllowSecretWipe {
+		live, err := p.GetSecrets(ctx, cfg.App.Name)
+		if err != nil {
+			p.log.Warn("Could not list live Worker secrets to check for an accidental wipe (%v) — proceeding without the guard", err)
+		} else if err := refuseSecretWipe(p.pendingSecrets, live); err != nil {
+			return err
+		}
+	}
+
 	scriptMeta, err := buildScriptMetadata(cfBlock, bucketName, entryName, resolve, p.pendingSecrets)
 	if err != nil {
 		return fmt.Errorf("build script metadata: %w", err)
@@ -1121,6 +1188,31 @@ func (p *CloudflareProvider) UpdateSecrets(ctx context.Context, appName string, 
 	return nil
 }
 
+// refuseSecretWipe guards against a Worker upload that would strip live
+// secrets. CF uploads are replace-not-merge: uploading `pending` as the full
+// secret_text set removes any live secret whose name it omits. If pending drops
+// names the live Worker still has, this returns a fatal error naming the
+// at-risk secrets. No live secrets makes it a no-op. GetSecrets returns
+// map[name]"[secret]" — only the keys matter here.
+func refuseSecretWipe(pending, live map[string]string) error {
+	if len(live) == 0 {
+		return nil
+	}
+	dropped := map[string]string{}
+	for name := range live {
+		if _, keep := pending[name]; !keep {
+			dropped[name] = ""
+		}
+	}
+	if len(dropped) == 0 {
+		return nil
+	}
+	return fmt.Errorf("refusing to upload a Worker that would strip %d live secret(s) (%s): "+
+		"the incoming secret set omits them and CF uploads are replace-not-merge; "+
+		"set cloudflare.allow_secret_wipe: true to override",
+		len(dropped), strings.Join(sortedKeys(dropped), ", "))
+}
+
 // GetSecrets lists secret names. The CF API never returns secret values.
 func (p *CloudflareProvider) GetSecrets(ctx context.Context, appName string) (map[string]string, error) {
 	workerName := p.workerName(appName)
@@ -1219,7 +1311,7 @@ func (p *CloudflareProvider) Rollback(ctx context.Context, cfg *config.NextDeplo
 	if len(target.Versions) == 0 {
 		return fmt.Errorf("rollback target deployment %s has no versions", target.ID)
 	}
-	previousVersionID := target.Versions[0].VersionID
+	previousVersionID := pickActiveVersion(target.Versions)
 	p.log.Info("Rolling back to version: %s", previousVersionID)
 
 	_, err = p.cf.Workers.Scripts.Deployments.New(ctx, workerName, workers.ScriptDeploymentNewParams{
@@ -1238,8 +1330,33 @@ func (p *CloudflareProvider) Rollback(ctx context.Context, cfg *config.NextDeplo
 		return fmt.Errorf("failed to activate previous deployment: %w", err)
 	}
 
+	// Purge the edge cache so the rolled-back version is served immediately
+	// (the Provider contract promises this). Non-fatal — the version swap
+	// already took effect.
+	if err := p.InvalidateCache(ctx, cfg); err != nil {
+		p.log.Warn("Rollback: cache invalidation failed (edge may serve stale HTML): %v", err)
+	}
+	p.log.Warn("Rollback re-pointed the Worker to %s, but R2 HTML/RSC assets are NOT "+
+		"version-restored. If this deploy changed prerendered pages, redeploy the "+
+		"known-good commit to realign assets with server code.", previousVersionID)
+
 	p.log.Info("Rollback complete. Worker is now running version %s", previousVersionID)
 	return nil
+}
+
+// pickActiveVersion returns the VersionID that was actually receiving traffic in
+// a deployment — the one with the highest rollout percentage. Falls back to the
+// first version. A single-version deployment (the common case) is unaffected;
+// this only matters for a gradual/percentage rollout where Versions[0] was
+// arbitrary.
+func pickActiveVersion(versions []workers.DeploymentVersion) string {
+	best := versions[0]
+	for _, v := range versions[1:] {
+		if v.Percentage > best.Percentage {
+			best = v
+		}
+	}
+	return best.VersionID
 }
 
 // Destroy removes the Worker and the R2 bucket. Bucket delete will fail if

@@ -111,6 +111,13 @@ type CloudflareConfig struct {
 	// enabled by default (NextDeploy sets up log infra out of the box); set
 	// enabled:false to opt out, or tune the sampling rate.
 	Observability *CFObservability `yaml:"observability,omitempty"`
+
+	// AllowSecretWipe permits a Worker upload that carries fewer secret_text
+	// bindings than the live Worker currently has. CF uploads are
+	// replace-not-merge, so dropping a secret from the incoming set strips it
+	// from production. Default false: a would-be wipe aborts the deploy. Set
+	// true only for a deliberate teardown / secret reset.
+	AllowSecretWipe bool `yaml:"allow_secret_wipe,omitempty"`
 }
 
 // CFObservability mirrors the Workers observability metadata. Enabled is a
