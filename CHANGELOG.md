@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.4](https://github.com/aynaash/NextDeploy/compare/v0.14.3...v0.14.4) (2026-07-03)
+
+
+### Bug Fixes
+
+* **nextcompile:** parse real Next 14/15 server-action manifest shape ([#40](https://github.com/aynaash/NextDeploy/issues/40)) ([74013c5](https://github.com/aynaash/NextDeploy/commit/74013c595102ea2123837a4d659c66986d41905c))
+
+
+### Documentation
+
+* **cloudflare:** correct over-claim on client hydration ([#38](https://github.com/aynaash/NextDeploy/issues/38)) ([6d3fdaa](https://github.com/aynaash/NextDeploy/commit/6d3fdaa4e5a50b4549cc4ddcf2cedacc58fff36c))
+
 ## [0.14.3](https://github.com/aynaash/NextDeploy/compare/v0.14.2...v0.14.3) (2026-07-03)
 
 
