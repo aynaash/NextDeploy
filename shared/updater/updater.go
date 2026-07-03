@@ -94,7 +94,73 @@ func (e *UpdateError) Unwrap() error {
 	return e.Err
 }
 
+// LatestRelease resolves the newest published release. It first tries the
+// github.com /releases/latest redirect, which does NOT consume the (60/hour,
+// unauthenticated) GitHub API rate limit — the common failure mode for the API
+// path. It falls back to the REST API (which honors GITHUB_TOKEN) when the
+// redirect can't be parsed.
 func LatestRelease() (Release, error) {
+	if rel, err := latestReleaseViaRedirect(); err == nil {
+		return rel, nil
+	}
+	return latestReleaseViaAPI()
+}
+
+// latestReleaseViaRedirect reads the tag from the 302 Location of
+// https://github.com/<owner>/<repo>/releases/latest without touching the API.
+func latestReleaseViaRedirect() (Release, error) {
+	const latestURL = "https://github.com/" + githubOwner + "/" + githubRepo + "/releases/latest"
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		// Capture the redirect instead of following it, so we can read Location.
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	req, err := http.NewRequest(http.MethodGet, latestURL, http.NoBody)
+	if err != nil {
+		return Release{}, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "nextdeploy-updater/"+shared.Version)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return Release{}, fmt.Errorf("request failed: %w", err)
+	}
+	defer closeBestEffort(resp.Body)
+
+	loc := resp.Header.Get("Location")
+	if loc == "" {
+		return Release{}, fmt.Errorf("no redirect for latest release (status %d)", resp.StatusCode)
+	}
+
+	i := strings.LastIndex(loc, "/tag/")
+	if i == -1 {
+		return Release{}, fmt.Errorf("unexpected latest-release URL: %s", loc)
+	}
+	tag := strings.Trim(loc[i+len("/tag/"):], "/")
+	if tag == "" {
+		return Release{}, fmt.Errorf("empty tag in latest-release URL: %s", loc)
+	}
+	return Release{TagName: tag, HTMLURL: loc}, nil
+}
+
+// githubToken returns a GitHub token from the environment, if any, so the API
+// fallback gets the authenticated (5000/hour) rate limit instead of 60/hour.
+func githubToken() string {
+	for _, k := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// latestReleaseViaAPI queries the GitHub REST API (rate-limited to 60/hour
+// unless GITHUB_TOKEN is set) as a fallback to the redirect resolver.
+func latestReleaseViaAPI() (Release, error) {
 	var release Release
 	var lastErr error
 
@@ -114,6 +180,9 @@ func LatestRelease() (Release, error) {
 
 		req.Header.Set("Accept", "application/vnd.github+json")
 		req.Header.Set("User-Agent", "nextdeploy-updater/"+shared.Version)
+		if tok := githubToken(); tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
 
 		resp, err := client.Do(req)
 		if err != nil {
