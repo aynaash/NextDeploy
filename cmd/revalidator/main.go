@@ -120,8 +120,8 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 
 	// 2. Collect unique paths across all SQS messages
 	bodies := make([]string, 0, len(sqsEvent.Records))
-	for _, record := range sqsEvent.Records {
-		bodies = append(bodies, record.Body)
+	for i := range sqsEvent.Records {
+		bodies = append(bodies, sqsEvent.Records[i].Body)
 	}
 	paths := collectPaths(bodies, tMap)
 

@@ -136,7 +136,7 @@ func Compile(ctx context.Context, opts CompileOpts) (*CompiledBundle, error) {
 		hashInputs = append(hashInputs, vendored.TargetPath)
 	}
 	sort.Strings(hashInputs)
-	contentHash, totalBytes, err := hashBundle(opts.OutDir, manifest, hashInputs)
+	contentHash, totalBytes, err := hashBundle(opts.OutDir, &manifest, hashInputs)
 	if err != nil {
 		return nil, fmt.Errorf("hash bundle: %w", err)
 	}
@@ -238,8 +238,8 @@ func ensureOutDir(dir string) error {
 // plus every other emitted file, each hashed by its baseDir-RELATIVE path
 // (never the absolute path, which varies per machine/checkout) and content.
 // Also returns the total byte count for CompileStats.BundleBytes.
-func hashBundle(baseDir string, manifest Manifest, paths []string) (string, int64, error) {
-	norm := manifest
+func hashBundle(baseDir string, manifest *Manifest, paths []string) (hash string, total int64, err error) {
+	norm := *manifest
 	norm.GeneratedAt = "" // exclude the wall-clock stamp from the digest
 	mb, err := json.Marshal(norm)
 	if err != nil {
@@ -249,7 +249,7 @@ func hashBundle(baseDir string, manifest Manifest, paths []string) (string, int6
 	h := sha256.New()
 	h.Write([]byte("manifest\x00"))
 	h.Write(mb)
-	total := int64(len(mb))
+	total = int64(len(mb))
 
 	for _, p := range paths {
 		data, err := os.ReadFile(p) // #nosec G304 — hashing the compiler's own output

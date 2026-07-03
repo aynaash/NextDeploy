@@ -166,11 +166,11 @@ func TestHashBundle_DeterministicAcrossRoots(t *testing.T) {
 	mA := Manifest{AppName: "app", GeneratedAt: "2020-01-01T00:00:00Z"}
 	mB := Manifest{AppName: "app", GeneratedAt: "2099-12-31T23:59:59Z"}
 
-	hA, _, err := hashBundle(rootA, mA, []string{filepath.Join(rootA, "a.js"), filepath.Join(rootA, "b.js")})
+	hA, _, err := hashBundle(rootA, &mA, []string{filepath.Join(rootA, "a.js"), filepath.Join(rootA, "b.js")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	hB, _, err := hashBundle(rootB, mB, []string{filepath.Join(rootB, "a.js"), filepath.Join(rootB, "b.js")})
+	hB, _, err := hashBundle(rootB, &mB, []string{filepath.Join(rootB, "a.js"), filepath.Join(rootB, "b.js")})
 	if err != nil {
 		t.Fatal(err)
 	}

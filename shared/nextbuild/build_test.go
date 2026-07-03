@@ -82,18 +82,20 @@ func TestIndexByte(t *testing.T) {
 func fakeNext(t *testing.T, dir, recordPath string, exitCode int) {
 	t.Helper()
 	binDir := filepath.Join(dir, "node_modules", ".bin")
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
+	if err := os.MkdirAll(binDir, 0o750); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	script := "#!/bin/sh\n" +
 		"echo \"argv=$*\" > " + recordPath + "\n" +
 		"echo \"TURBOPACK=${TURBOPACK}\" >> " + recordPath + "\n" +
 		"exit " + strconv.Itoa(exitCode) + "\n"
+	// #nosec G306 -- fake next binary must be executable for the test to run it
 	if err := os.WriteFile(filepath.Join(binDir, "next"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake next: %v", err)
 	}
 }
 
+//nolint:gocyclo // table-driven build test; branch count reflects the cases covered, not real complexity
 func TestRun(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake next binary is a /bin/sh script")
@@ -181,10 +183,11 @@ func TestResolveNextBinary(t *testing.T) {
 	t.Run("finds local bin", func(t *testing.T) {
 		dir := t.TempDir()
 		binDir := filepath.Join(dir, "node_modules", ".bin")
-		if err := os.MkdirAll(binDir, 0o755); err != nil {
+		if err := os.MkdirAll(binDir, 0o750); err != nil {
 			t.Fatal(err)
 		}
 		bin := filepath.Join(binDir, "next")
+		// #nosec G306 -- fake next binary must be executable for the test to run it
 		if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -196,7 +199,7 @@ func TestResolveNextBinary(t *testing.T) {
 
 	t.Run("dir-as-binary is rejected", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(dir, "node_modules", ".bin", "next"), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(dir, "node_modules", ".bin", "next"), 0o750); err != nil {
 			t.Fatal(err)
 		}
 		t.Setenv("PATH", t.TempDir()) // no npx
@@ -209,6 +212,7 @@ func TestResolveNextBinary(t *testing.T) {
 	t.Run("missing with npx present", func(t *testing.T) {
 		dir := t.TempDir()
 		npxDir := t.TempDir()
+		// #nosec G306 -- fake npx must be executable for the test to run it
 		if err := os.WriteFile(filepath.Join(npxDir, "npx"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}

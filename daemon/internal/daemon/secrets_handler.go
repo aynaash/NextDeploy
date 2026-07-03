@@ -77,6 +77,7 @@ func (ch *CommandHandler) renderEnvFile(appName, dir string, extra map[string]st
 	if err := os.WriteFile(envPath, []byte(b.String()), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", envPath, err)
 	}
+	//nolint:gosec,noctx // fixed ownership + resolved system chown binary; short-lived, context not needed
 	_ = exec.Command(resolveTool("chown"), "nextdeploy:nextdeploy", envPath).Run()
 	return nil
 }

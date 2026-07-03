@@ -531,6 +531,7 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 
 	// Port file for Caddy and other discovery tools (write after health check passes)
 	portFilePath := filepath.Join(appsDir, ctx.AppName, "port")
+	// #nosec G306 -- must be world-readable for Caddy/other discovery tools to read the port
 	if err := os.WriteFile(portFilePath, []byte(fmt.Sprintf("%d", port)), 0o644); err != nil {
 		log.Printf("[activate] Warning: failed to write port file to %s: %v", portFilePath, err)
 	}
@@ -547,6 +548,7 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 	sharedStaticDir := filepath.Join(appsDir, ctx.AppName, "shared_static")
 	sourceStaticDir := filepath.Join(ctx.ReleaseDir, ctx.DistDir, "static")
 	if _, err := os.Stat(sourceStaticDir); err == nil {
+		// #nosec G301 -- static assets dir is served by Caddy, needs group/other traversal
 		if err := os.MkdirAll(sharedStaticDir, 0o755); err == nil {
 			// Use cp -R to copy assets, overwriting existing ones to ensure newest versions are served
 			cpPath := resolveTool("cp")
@@ -960,7 +962,7 @@ func (ch *CommandHandler) ensureDirPermissions(root string) {
 	// .env.nextdeploy holds secrets and must stay 0600 — the next ship runs
 	// this pass over the whole app dir, so without the exclusion the live
 	// release's env file would become world-readable one deploy later.
-	// #nosec G204
+	//nolint:gosec,noctx // fixed args + resolved system binaries; a deploy-time find/chmod, context cancellation not needed
 	chmodFileCmd := exec.Command(findPath, root, "-type", "f", "!", "-name", ".env.nextdeploy", "!", "-perm", "0644", "-exec", chmodPath, "0644", "{}", "+")
 	if out, err := chmodFileCmd.CombinedOutput(); err != nil {
 		log.Printf("[ship] Warning: failed to chmod files in %s: %v - %s", root, err, string(out))

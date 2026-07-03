@@ -160,6 +160,7 @@ func TestVerifyBinaryIntegrity(t *testing.T) {
 	dir := t.TempDir()
 	binPath := filepath.Join(dir, "bin")
 	content := []byte("the binary bytes")
+	// #nosec G306 -- test binary must be executable for the updater to exec it
 	if err := os.WriteFile(binPath, content, 0o755); err != nil {
 		t.Fatal(err)
 	}
