@@ -272,13 +272,14 @@ func (p *CloudflareProvider) planDNSRecord(ctx context.Context, decl config.CFDN
 	if len(existing) == 0 {
 		return PlanItem{Kind: "dns", Name: itemName, Action: PlanCreate, Detail: fmt.Sprintf("→ %s (ttl=%d, proxied=%v)", decl.Content, ttl, decl.Proxied)}, nil
 	}
-	for _, r := range existing {
-		if dnsRecordMatches(r, decl.Content, ttl, decl.Proxied) {
+	// Index to avoid copying the large dns.RecordResponse per iteration.
+	for i := range existing {
+		if dnsRecordMatches(existing[i], decl.Content, ttl, decl.Proxied) {
 			return PlanItem{Kind: "dns", Name: itemName, Action: PlanNoOp}, nil
 		}
 	}
 	if isSingleValued(recType) && len(existing) == 1 {
-		cur := existing[0]
+		cur := &existing[0]
 		var diffs []string
 		if cur.Content != decl.Content {
 			diffs = append(diffs, fmt.Sprintf("content: %q → %q", cur.Content, decl.Content))

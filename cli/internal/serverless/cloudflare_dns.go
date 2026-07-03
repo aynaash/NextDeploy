@@ -49,9 +49,10 @@ func (p *CloudflareProvider) ensureDNSRecord(ctx context.Context, decl config.CF
 	}
 
 	// Already-current if ANY existing record carries the declared value — never
-	// rewrite a sibling to reach this state.
-	for _, r := range existing {
-		if dnsRecordMatches(r, decl.Content, ttl, decl.Proxied) {
+	// rewrite a sibling to reach this state. Index to avoid copying the large
+	// dns.RecordResponse per iteration.
+	for i := range existing {
+		if dnsRecordMatches(existing[i], decl.Content, ttl, decl.Proxied) {
 			p.log.Info("DNS record already current: %s %s → %s", recType, fqdn, decl.Content)
 			return nil
 		}
