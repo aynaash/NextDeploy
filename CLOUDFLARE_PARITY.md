@@ -22,6 +22,7 @@ is production-ready and what is not**.
 | Static / prerendered pages (`○`, `●`) | Served from the Worker + R2 |
 | Client reference manifests | Wired for Next 14 (`.json`) **and** Next 15 (`.js`) — v0.14+. (Manifest plumbing only; whether a given app *hydrates* also depends on its own client code + build-time env.) |
 | API routes (`ƒ /api/*`) | Dispatched by the Worker |
+| Server Actions — execution | Resolved + invoked the way Next does (`__next_app__.require(moduleId)[actionId]`) and the return value is Flight-encoded. Side effects run: mutations, `revalidatePath`/`revalidateTag`, cookies, `redirect()`. **Partial:** JS-invoked actions with bound args / Flight-encoded arg bodies, and full progressive-enhancement re-render of the page after the action, are still incomplete (the latter is coupled to the dynamic-SSR gap below). |
 | Middleware | Runs ahead of the dispatcher |
 | Static assets (`/_next/static`, `/public`) | Uploaded to R2, content-hash skipped |
 | Custom domains | Auto-attached + re-pointed (`override_existing_origin`) |

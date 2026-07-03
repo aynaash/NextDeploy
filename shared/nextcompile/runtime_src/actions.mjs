@@ -74,11 +74,17 @@ export async function handleServerAction(request, env, ctx, actionManifest, modu
   }
 
   const mod = await loader();
-  const fn = mod?.[entry.export];
+  // Resolve the action function the way Next itself does. Server actions are
+  // NOT named exports of the page module — the page module exposes
+  // `__next_app__.require` (the webpack require), and the compiled action worker
+  // module (keyed by its webpack moduleId, carried in entry.export) exports the
+  // actions keyed by their actionId. So: require(moduleId)[actionId]. Verified
+  // against real Next 14.2 + 15.1 builds.
+  const fn = resolveActionFn(mod, entry.export, actionId);
   if (typeof fn !== "function") {
     return plainError(500,
-      `action ${actionId}: module ${entry.module} does not export ${entry.export}.\n` +
-      `Exports observed: ${Object.keys(mod || {}).join(", ")}`);
+      `action ${actionId}: could not resolve from module ${entry.module} (moduleId ${entry.export}).\n` +
+      "The compiled build may not expose __next_app__.require, or the action worker changed shape — verify the Next build output.");
   }
 
   let args;
@@ -108,25 +114,73 @@ export async function handleServerAction(request, env, ctx, actionManifest, modu
       return mergeContextHeaders(result, reqCtx);
     }
 
-    // Plain data — return as JSON for now. The Next client's Flight
-    // parser will warn but form actions that redirect or return void
-    // still work because the status + headers drive behavior there.
-    const body = result === undefined || result === null
-      ? null
-      : JSON.stringify(result);
+    // Encode the return value as a Flight (RSC) reply the Next client decodes
+    // as the action result — the module's own react-server-dom-webpack
+    // renderToReadableStream produces the `text/x-component` stream Next
+    // expects. Falls back to JSON if the module doesn't expose the encoder or
+    // the result shape can't be encoded.
+    const flight = encodeFlightReply(mod, result);
+    if (flight) {
+      const headers = new Headers({ "content-type": "text/x-component" });
+      applyContextHeaders(headers, reqCtx);
+      return new Response(flight, { status: 200, headers });
+    }
 
+    const body = result === undefined || result === null ? null : JSON.stringify(result);
     const headers = new Headers({
       "content-type": "application/json",
       "x-nextcompile-action-response": "json",
-      // Signal to the Next client that Flight isn't available so it falls
-      // back to the full-page reload path rather than attempting to
-      // decode Flight from our JSON. Undocumented but works across 14/15.
-      "x-next-action-version": "v1-json-fallback",
     });
     applyContextHeaders(headers, reqCtx);
-
     return new Response(body, { status: 200, headers });
   });
+}
+
+// ── Action resolution + response encoding ────────────────────────────────────
+
+// pageExports unwraps CJS/ESM interop: the compiled page module is CommonJS, so
+// a dynamic import() lands its real exports under `.default`, while a require()
+// returns them directly. Return whichever object actually carries the Next
+// runtime surface (__next_app__ / renderToReadableStream).
+function pageExports(mod) {
+  if (!mod) return mod;
+  if (mod.__next_app__ || mod.renderToReadableStream) return mod;
+  const d = mod.default;
+  if (d && (d.__next_app__ || d.renderToReadableStream)) return d;
+  return mod;
+}
+
+// resolveActionFn resolves a server action function from the loaded page module.
+// Next registers actions in a webpack worker module (keyed by its numeric
+// moduleId) that exports them keyed by actionId; the page module exposes the
+// webpack require as `__next_app__.require`. So: require(moduleId)[actionId].
+// Returns undefined when the shape isn't what we expect (caller 500s clearly).
+export function resolveActionFn(mod, moduleId, actionId) {
+  const req = pageExports(mod)?.__next_app__?.require;
+  if (typeof req !== "function") return undefined;
+  let actionModule;
+  try {
+    actionModule = req(moduleId);
+  } catch {
+    return undefined;
+  }
+  const fn = actionModule?.[actionId];
+  return typeof fn === "function" ? fn : undefined;
+}
+
+// encodeFlightReply encodes an action's return value as a Flight (RSC) stream
+// via the module's react-server-dom-webpack renderToReadableStream — the
+// `text/x-component` format Next's client decodes. Returns the stream, or null
+// when the encoder is unavailable / throws (caller falls back to JSON). An empty
+// client manifest is sufficient for plain-data results (the common case).
+export function encodeFlightReply(mod, result) {
+  const render = pageExports(mod)?.renderToReadableStream;
+  if (typeof render !== "function") return null;
+  try {
+    return render(result === undefined ? null : result, {});
+  } catch {
+    return null;
+  }
 }
 
 // ── Body parsing ─────────────────────────────────────────────────────────────
