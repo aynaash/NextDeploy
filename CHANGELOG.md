@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.3](https://github.com/aynaash/NextDeploy/compare/v0.14.2...v0.14.3) (2026-07-03)
+
+
+### Bug Fixes
+
+* harden Cloudflare deploy pipeline (+ Go modernization & test coverage) ([#36](https://github.com/aynaash/NextDeploy/issues/36)) ([5904aa8](https://github.com/aynaash/NextDeploy/commit/5904aa85cec7b088ff23189f5cdc52107c7d7f31))
+
+## [0.14.2](https://github.com/aynaash/NextDeploy/compare/v0.14.1...v0.14.2) (2026-06-15)
+
+
+### Bug Fixes
+
+* **nextcompile:** URL-decode R2 asset keys (fixes ChunkLoadError) ([#34](https://github.com/aynaash/NextDeploy/issues/34)) ([35d7c3b](https://github.com/aynaash/NextDeploy/commit/35d7c3b67086409125a93aaaed0188e8c8d4dcaa))
+
 ## [0.14.1](https://github.com/aynaash/NextDeploy/compare/v0.14.0...v0.14.1) (2026-06-15)
 
 

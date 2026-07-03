@@ -33,8 +33,32 @@ import { getContext } from "./context.mjs";
 // GET, so a stale cache for this lifetime is visible to every request on
 // this isolate even without KV.
 
-const staleRoutes = new Set();
-const staleTags = new Set();
+// Time-boxed stale markers: path/tag → epoch-ms after which the marker
+// self-clears. Without the window a single revalidatePath() poisoned the route
+// for the entire lifetime of the warm isolate (it was added to a Set and never
+// cleared), turning stale-while-revalidate into a permanent miss. A bounded
+// window lets a stuck flag self-heal; true global invalidation remains the
+// tracked ISR-revalidator milestone.
+const STALE_WINDOW_MS = 60 * 1000;
+const staleRoutes = new Map();
+const staleTags = new Map();
+
+// markStale records a self-expiring stale marker.
+function markStale(map, key) {
+  map.set(key, Date.now() + STALE_WINDOW_MS);
+}
+
+// isMarkedStale reports whether key is currently stale, clearing it once the
+// window has passed so the marker self-heals.
+function isMarkedStale(map, key, nowMs = Date.now()) {
+  const until = map.get(key);
+  if (until == null) return false;
+  if (until < nowMs) {
+    map.delete(key);
+    return false;
+  }
+  return true;
+}
 
 // tagToPaths is populated from the manifest at module-init time (called
 // from dispatcher.mjs) so revalidateTag can expand to its affected routes.
@@ -56,7 +80,7 @@ export function initCacheIndex(manifestISR) {
  */
 export async function revalidatePath(path, _type) {
   if (!path) return;
-  staleRoutes.add(path);
+  markStale(staleRoutes, path);
   await persistToKV(`rev:${path}`);
 }
 
@@ -66,11 +90,11 @@ export async function revalidatePath(path, _type) {
  */
 export async function revalidateTag(tag) {
   if (!tag) return;
-  staleTags.add(tag);
+  markStale(staleTags, tag);
   await persistToKV(`revTag:${tag}`);
   if (tagIndex && Array.isArray(tagIndex[tag])) {
     for (const path of tagIndex[tag]) {
-      staleRoutes.add(path);
+      markStale(staleRoutes, path);
       await persistToKV(`rev:${path}`);
     }
   }
@@ -82,9 +106,9 @@ export async function revalidateTag(tag) {
  * to any other instance (within KV consistency).
  */
 export async function isStale(path, tags, env) {
-  if (staleRoutes.has(path)) return true;
+  if (isMarkedStale(staleRoutes, path)) return true;
   if (Array.isArray(tags)) {
-    for (const t of tags) if (staleTags.has(t)) return true;
+    for (const t of tags) if (isMarkedStale(staleTags, t)) return true;
   }
   if (env?.NEXTCOMPILE_CACHE) {
     if (await env.NEXTCOMPILE_CACHE.get(`rev:${path}`)) return true;
@@ -136,7 +160,7 @@ function isCacheHitUsable(hit, revalidate, tags) {
 
 function isTaggedStale(tags) {
   for (const t of tags) {
-    if (staleTags.has(t)) return true;
+    if (isMarkedStale(staleTags, t)) return true;
   }
   return false;
 }

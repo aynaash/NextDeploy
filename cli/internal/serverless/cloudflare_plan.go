@@ -260,26 +260,37 @@ func (p *CloudflareProvider) planDNSRecord(ctx context.Context, decl config.CFDN
 		ttl = 1
 	}
 
-	existing, err := p.findDNSRecord(ctx, zoneID, fqdn, recType)
+	existing, err := p.findDNSRecords(ctx, zoneID, fqdn, recType)
 	if err != nil {
 		return PlanItem{}, err
 	}
 	itemName := fmt.Sprintf("%s/%s", recType, fqdn)
-	if existing == nil {
+
+	// Mirror ensureDNSRecord: a matching record anywhere in the set is a no-op;
+	// a single-valued type (CNAME) with exactly one record updates in place;
+	// otherwise we create (never rewrite a multi-valued sibling).
+	if len(existing) == 0 {
 		return PlanItem{Kind: "dns", Name: itemName, Action: PlanCreate, Detail: fmt.Sprintf("→ %s (ttl=%d, proxied=%v)", decl.Content, ttl, decl.Proxied)}, nil
 	}
-	if dnsRecordMatches(*existing, decl.Content, ttl, decl.Proxied) {
-		return PlanItem{Kind: "dns", Name: itemName, Action: PlanNoOp}, nil
+	// Index to avoid copying the large dns.RecordResponse per iteration.
+	for i := range existing {
+		if dnsRecordMatches(existing[i], decl.Content, ttl, decl.Proxied) {
+			return PlanItem{Kind: "dns", Name: itemName, Action: PlanNoOp}, nil
+		}
 	}
-	var diffs []string
-	if existing.Content != decl.Content {
-		diffs = append(diffs, fmt.Sprintf("content: %q → %q", existing.Content, decl.Content))
+	if isSingleValued(recType) && len(existing) == 1 {
+		cur := &existing[0]
+		var diffs []string
+		if cur.Content != decl.Content {
+			diffs = append(diffs, fmt.Sprintf("content: %q → %q", cur.Content, decl.Content))
+		}
+		if int(cur.TTL) != ttl {
+			diffs = append(diffs, fmt.Sprintf("ttl: %d → %d", int(cur.TTL), ttl))
+		}
+		if cur.Proxied != decl.Proxied {
+			diffs = append(diffs, fmt.Sprintf("proxied: %v → %v", cur.Proxied, decl.Proxied))
+		}
+		return PlanItem{Kind: "dns", Name: itemName, Action: PlanUpdate, Detail: strings.Join(diffs, ", ")}, nil
 	}
-	if int(existing.TTL) != ttl {
-		diffs = append(diffs, fmt.Sprintf("ttl: %d → %d", int(existing.TTL), ttl))
-	}
-	if existing.Proxied != decl.Proxied {
-		diffs = append(diffs, fmt.Sprintf("proxied: %v → %v", existing.Proxied, decl.Proxied))
-	}
-	return PlanItem{Kind: "dns", Name: itemName, Action: PlanUpdate, Detail: strings.Join(diffs, ", ")}, nil
+	return PlanItem{Kind: "dns", Name: itemName, Action: PlanCreate, Detail: fmt.Sprintf("→ %s (ttl=%d, proxied=%v)", decl.Content, ttl, decl.Proxied)}, nil
 }

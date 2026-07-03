@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,13 +14,15 @@ import (
 )
 
 const (
-	// #nosec G101
-	secretsDir     = "/opt/nextdeploy/secrets"
 	errMissingKey  = "missing 'key' argument"
 	errLoadSecrets = "failed to load secrets: %v"
 )
 
-func (ch *CommandHandler) handleSecrets(args map[string]interface{}) types.Response {
+// secretsDir is a var (not const) so tests can point the store at a temp dir.
+// #nosec G101
+var secretsDir = "/opt/nextdeploy/secrets"
+
+func (ch *CommandHandler) handleSecrets(args map[string]any) types.Response {
 	action, ok := StringArg(args, "action")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'action' argument"}
@@ -47,7 +50,61 @@ func (ch *CommandHandler) handleSecrets(args map[string]interface{}) types.Respo
 	}
 }
 
-func (ch *CommandHandler) setSecret(appName string, args map[string]interface{}) types.Response {
+func (ch *CommandHandler) renderEnvFile(appName, dir string, extra map[string]string) error {
+	secrets, err := ch.loadSecrets(appName)
+	if err != nil {
+		return fmt.Errorf("load secrets for %s: %w", appName, err)
+	}
+	for k, v := range extra {
+		if v != "" {
+			secrets[k] = v
+		}
+	}
+	if len(secrets) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(secrets))
+	for k := range secrets {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		fmt.Fprintf(&b, "%s=%s\n", k, quoteEnvValue(secrets[k]))
+	}
+	envPath := filepath.Join(dir, ".env.nextdeploy")
+	if err := os.WriteFile(envPath, []byte(b.String()), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", envPath, err)
+	}
+	//nolint:gosec,noctx // fixed ownership + resolved system chown binary; short-lived, context not needed
+	_ = exec.Command(resolveTool("chown"), "nextdeploy:nextdeploy", envPath).Run()
+	return nil
+}
+
+func (ch *CommandHandler) syncAppSecrets(appName string) error {
+	currentLink := filepath.Join(appsDir, appName, "current")
+	if _, err := os.Stat(currentLink); os.IsNotExist(err) {
+		return nil
+	}
+	releaseDir, err := filepath.EvalSymlinks(currentLink)
+	if err != nil {
+		releaseDir = currentLink
+	}
+	if err := ch.renderEnvFile(appName, releaseDir, nil); err != nil {
+		return err
+	}
+	// Units are named nextdeploy-{app}-{releaseID}.service — resolve via
+	// findActiveService instead of restarting the bare app name.
+	serviceName, err := ch.findActiveService(appName)
+	if err != nil {
+		return fmt.Errorf("no active service for %s: %w", appName, err)
+	}
+	log.Printf("[secrets] Updated %s/.env.nextdeploy, restarting %s...", releaseDir, serviceName)
+	return ch.processManager.RestartService(serviceName)
+}
+
+func (ch *CommandHandler) setSecret(appName string, args map[string]any) types.Response {
 	key, ok := StringArg(args, "key")
 	if !ok {
 		return types.Response{Success: false, Message: errMissingKey}
@@ -68,14 +125,14 @@ func (ch *CommandHandler) setSecret(appName string, args map[string]interface{})
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to save secrets: %v", err)}
 	}
 
-	if err := ch.syncAppSecrets(appName, secrets); err != nil {
+	if err := ch.syncAppSecrets(appName); err != nil {
 		return types.Response{Success: true, Message: fmt.Sprintf("secret set but sync failed: %v", err)}
 	}
 
 	return types.Response{Success: true, Message: fmt.Sprintf("secret %s set successfully", key)}
 }
 
-func (ch *CommandHandler) getSecret(appName string, args map[string]interface{}) types.Response {
+func (ch *CommandHandler) getSecret(appName string, args map[string]any) types.Response {
 	key, ok := StringArg(args, "key")
 	if !ok {
 		return types.Response{Success: false, Message: errMissingKey}
@@ -94,7 +151,7 @@ func (ch *CommandHandler) getSecret(appName string, args map[string]interface{})
 	return types.Response{Success: true, Message: value}
 }
 
-func (ch *CommandHandler) unsetSecret(appName string, args map[string]interface{}) types.Response {
+func (ch *CommandHandler) unsetSecret(appName string, args map[string]any) types.Response {
 	key, ok := StringArg(args, "key")
 	if !ok {
 		return types.Response{Success: false, Message: errMissingKey}
@@ -116,7 +173,7 @@ func (ch *CommandHandler) unsetSecret(appName string, args map[string]interface{
 	}
 
 	// Hot-reload application environment
-	if err := ch.syncAppSecrets(appName, secrets); err != nil {
+	if err := ch.syncAppSecrets(appName); err != nil {
 		return types.Response{Success: true, Message: fmt.Sprintf("secret unset but sync failed: %v", err)}
 	}
 
@@ -161,7 +218,7 @@ func (ch *CommandHandler) loadSecrets(appName string) (map[string]string, error)
 }
 
 func (ch *CommandHandler) saveSecrets(appName string, secrets map[string]string) error {
-	if err := os.MkdirAll(secretsDir, 0700); err != nil {
+	if err := os.MkdirAll(secretsDir, 0o700); err != nil {
 		return err
 	}
 
@@ -171,34 +228,7 @@ func (ch *CommandHandler) saveSecrets(appName string, secrets map[string]string)
 		return err
 	}
 
-	return os.WriteFile(path, data, 0600)
-}
-
-func (ch *CommandHandler) syncAppSecrets(appName string, secrets map[string]string) error {
-	appDir := filepath.Join("/opt/nextdeploy/apps", appName, "current")
-	if _, err := os.Stat(appDir); os.IsNotExist(err) {
-		return nil
-	}
-
-	envFilePath := filepath.Join(appDir, ".env.nextdeploy")
-
-	keys := make([]string, 0, len(secrets))
-	for k := range secrets {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	var envLines []string
-	for _, k := range keys {
-		envLines = append(envLines, fmt.Sprintf("%s=%s", k, quoteEnvValue(secrets[k])))
-	}
-	content := strings.Join(envLines, "\n") + "\n"
-	if err := os.WriteFile(envFilePath, []byte(content), 0600); err != nil {
-		return fmt.Errorf("failed to write env file: %w", err)
-	}
-
-	log.Printf("[secrets] Updated %s, restarting service...", envFilePath)
-	return ch.processManager.RestartService(appName)
+	return os.WriteFile(path, data, 0o600)
 }
 
 // quoteEnvValue wraps a secret value so that it is safely consumed by

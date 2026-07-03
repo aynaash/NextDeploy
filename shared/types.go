@@ -43,16 +43,16 @@ type AgentMessage struct {
 }
 
 type CommandPayload struct {
-	Name string      `json:"name"`
-	Args []string    `json:"args,omitempty"`
-	ID   string      `json:"id"`
-	Meta interface{} `json:"meta,omitempty"`
+	Name string   `json:"name"`
+	Args []string `json:"args,omitempty"`
+	ID   string   `json:"id"`
+	Meta any      `json:"meta,omitempty"`
 }
 
 type StatusPayload struct {
-	Status  string                 `json:"status"`
-	Metrics map[string]interface{} `json:"metrics,omitempty"`
-	Load    SystemLoad             `json:"load,omitempty"`
+	Status  string         `json:"status"`
+	Metrics map[string]any `json:"metrics,omitempty"`
+	Load    SystemLoad     `json:"load"`
 }
 
 type SystemLoad struct {
@@ -68,8 +68,8 @@ type AuthPayload struct {
 }
 
 type EventPayload struct {
-	Type string      `json:"type"`
-	Data interface{} `json:"data"`
+	Type string `json:"type"`
+	Data any    `json:"data"`
 }
 
 type ErrorPayload struct {
@@ -177,8 +177,8 @@ type EnvFile struct {
 
 func ParseEnvFile(content []byte) (*EnvFile, error) {
 	variables := make(map[string]string)
-	lines := strings.Split(string(content), "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(string(content), "\n")
+	for line := range lines {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}

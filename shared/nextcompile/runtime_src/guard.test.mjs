@@ -95,8 +95,15 @@ test("timingSafeEqual", () => {
 // --- session cookie sign/verify ---------------------------------------------
 
 test("sign then verify round-trips", async () => {
-  const cookie = await signSessionCookie({ sub: "user-1" }, "s3cret");
+  // exp is now mandatory — a validly-signed but exp-less cookie is rejected
+  // (no expiry = no revocation path for a stateless session).
+  const cookie = await signSessionCookie({ sub: "user-1", exp: 9999999999 }, "s3cret");
   assert.ok(await verifySessionCookie(cookie, "s3cret"));
+});
+
+test("valid signature but no exp → rejected", async () => {
+  const cookie = await signSessionCookie({ sub: "user-1" }, "s3cret");
+  assert.ok(!(await verifySessionCookie(cookie, "s3cret")));
 });
 
 test("verify fails with wrong secret", async () => {
@@ -212,7 +219,7 @@ test("runGuard: protected path without cookie → 302 redirect for HTML", async 
 
 test("runGuard: protected path with valid cookie → passes", async () => {
   const env = { RATE_LIMIT: fakeKV(), AUTH_SECRET: "s3cret" };
-  const cookie = await signSessionCookie({ sub: "u1" }, "s3cret");
+  const cookie = await signSessionCookie({ sub: "u1", exp: 9999999999 }, "s3cret");
   const out = await runGuard(
     req("/app/data", { "cf-connecting-ip": "1.1.1.1", accept: "text/html", cookie: `session=${cookie}` }),
     env,

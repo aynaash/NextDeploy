@@ -86,7 +86,7 @@ func VendorRSC(standaloneDir, bundleDir string) (*VendoredPackage, error) {
 // because os.Stat follows symlinks.
 func locateRSCPackage(standaloneDir string) (string, error) {
 	current := standaloneDir
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		candidate := filepath.Join(current, "node_modules", "react-server-dom-webpack")
 		if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
 			return candidate, nil

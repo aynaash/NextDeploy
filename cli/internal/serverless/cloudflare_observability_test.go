@@ -60,7 +60,7 @@ func TestBuildScriptMetadata_IncludesObservability(t *testing.T) {
 	}
 }
 
-func mustJSON(t *testing.T, v interface{}) string {
+func mustJSON(t *testing.T, v any) string {
 	t.Helper()
 	raw, err := json.Marshal(v)
 	if err != nil {

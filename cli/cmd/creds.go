@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"sort"
 	"strings"
@@ -67,9 +68,7 @@ var credsSetCmd = &cobra.Command{
 
 		existing, _ := credstore.Load(provider)
 		fields := map[string]string{}
-		for k, v := range existing {
-			fields[k] = v
-		}
+		maps.Copy(fields, existing)
 
 		for _, f := range schema {
 			val, err := promptCredential(f, fields[f.Key] != "")

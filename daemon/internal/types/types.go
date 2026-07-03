@@ -1,9 +1,9 @@
 package types
 
 type Command struct {
-	Type      string                 `json:"type"`
-	Args      map[string]interface{} `json:"args"`
-	Signature string                 `json:"signature,omitempty"`
+	Type      string         `json:"type"`
+	Args      map[string]any `json:"args"`
+	Signature string         `json:"signature,omitempty"`
 	// Timestamp (Unix seconds) and Nonce are covered by the HMAC signature
 	// and used by the daemon's ReplayGuard to reject stale/replayed commands.
 	Timestamp int64  `json:"timestamp,omitempty"`
@@ -17,9 +17,9 @@ const (
 )
 
 type Response struct {
-	Success bool        `json:"success"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
 }
 
 type DaemonConfig struct {

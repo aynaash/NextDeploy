@@ -14,6 +14,10 @@ func TestDNSRecordFQDN(t *testing.T) {
 		{"@", "example.com", "example.com"},
 		{"*", "example.com", "*.example.com"},
 		{"api", "example.com", "api.example.com"},
+		// Multi-label subdomain not yet qualified — must get the zone appended.
+		// The old strings.Contains(".") shortcut wrongly returned it unchanged,
+		// breaking lookup idempotency (duplicate records every deploy).
+		{"api.staging", "example.com", "api.staging.example.com"},
 		{"api.example.com", "example.com", "api.example.com"},
 		{"example.com", "example.com", "example.com"},
 		{"deep.sub.example.com", "example.com", "deep.sub.example.com"},

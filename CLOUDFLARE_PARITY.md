@@ -65,11 +65,21 @@ full RSC streaming as unsupported on the Cloudflare target for now.
 
 ## Status of the gaps
 
-- **Client reference manifests — wired (v0.14+).** `nextcompile` now reads both
-  Next 14 `.json` and Next 15 `.js` manifests (previously the `.js` form was
-  ignored, leaving `loadClientManifest` null). This is the manifest *plumbing*;
-  it does not by itself guarantee a given app hydrates — that also needs the
-  app's client code + build-time `NEXT_PUBLIC_*`/auth env to be correct.
+- **Client-component plumbing — wired (v0.14+), but hydration is not "done".**
+  Two general fixes landed: (1) the worker URL-decodes R2 asset keys, so client
+  chunks under `[param]` / route-group dirs (requested as `%5B...%5D`) stop
+  404'ing with a `ChunkLoadError`; (2) `nextcompile` reads both Next 14 `.json`
+  and Next 15 `.js` client-reference-manifests (previously the `.js` form was
+  ignored, leaving `loadClientManifest` null). This is the manifest + chunk-load
+  *plumbing* — it does **not** by itself guarantee a given app hydrates. That
+  still depends on the app's own client code + build-time `NEXT_PUBLIC_*`/auth
+  env being correct, and on the SSR gap below (App Router pages render a blank
+  shell until the SSR runtime lands).
+
+  > Debugging a browser "client-side exception": check the console. A
+  > `ChunkLoadError` on a `_next/static/.../%5B...%5D/...` URL was the decode bug
+  > (fixed). A library/`undefined` error is usually app code — often a
+  > `NEXT_PUBLIC_*` env missing at **build** time (inlined into the client bundle).
 - **Dynamic SSR (limitation 1) — open.** Needs a `workerd`-compatible Next server
   runtime (shim or vendored) so the externalized `app-page.runtime.prod.js` /
   `react-dom/server.edge` resolve at runtime. Tracked as engine work.

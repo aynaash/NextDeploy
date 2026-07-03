@@ -217,6 +217,10 @@ type ModuleRef struct {
 	// markers ("use client" boundaries or Flight-payload imports).
 	UsesRSC bool
 
+	// UsesAfter is true when the compiled source references next/server's
+	// after() / unstable_after() post-response API. See afterPattern.
+	UsesAfter bool
+
 	// ClientManifestPath points at the Next-emitted
 	// page_client-reference-manifest.json sibling, when present.
 	// Relative to StandaloneDir. Used by rsc.mjs as Flight bundlerConfig.

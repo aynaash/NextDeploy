@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -76,7 +77,7 @@ func NewAWSProvider(verbose bool) *AWSProvider {
 }
 
 // verboseLog logs a message only when --verbose is enabled.
-func (p *AWSProvider) verboseLog(msg string, args ...interface{}) {
+func (p *AWSProvider) verboseLog(msg string, args ...any) {
 	if p.verbose {
 		p.log.Info(msg, args...)
 	}
@@ -454,12 +455,9 @@ func (p *AWSProvider) findManagedDistributions(ctx context.Context, client *clou
 				}
 				// Match by domain alias (CNAME conflict prevention)
 				if !matched && domain != "" && dist.Aliases != nil {
-					for _, alias := range dist.Aliases.Items {
-						if alias == domain {
-							matched = true
-							p.log.Warn("Found distribution %s matching domain alias %s", *dist.Id, domain)
-							break
-						}
+					if slices.Contains(dist.Aliases.Items, domain) {
+						matched = true
+						p.log.Warn("Found distribution %s matching domain alias %s", *dist.Id, domain)
 					}
 				}
 

@@ -182,7 +182,7 @@ func isValidHostname(hostname string) bool {
 	if len(hostname) > 253 {
 		return false
 	}
-	for _, part := range strings.Split(hostname, ".") {
+	for part := range strings.SplitSeq(hostname, ".") {
 		if len(part) > 63 {
 			return false
 		}

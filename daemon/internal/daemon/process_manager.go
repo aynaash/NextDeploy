@@ -105,24 +105,15 @@ ReadWritePaths=%s
 WantedBy=multi-user.target
 `, appName, projectDir, execStart, port, projectDir, resourceBlock, projectDir)
 
-	if dopplerToken != "" {
-		envFilePath := filepath.Join(projectDir, ".env.nextdeploy")
-		envContent := fmt.Sprintf("DOPPLER_TOKEN=%s\n", dopplerToken)
-		if err := os.WriteFile(envFilePath, []byte(envContent), 0600); err != nil {
-			log.Printf("[process] Warning: failed to write environment file: %v", err)
-		}
-		_ = os.Chmod(envFilePath, 0600)
-	}
-
 	log.Printf("[process] Writing service file to %s", servicePath)
 	// #nosec G301
 	// #nosec G301
-	if err := os.MkdirAll(filepath.Dir(servicePath), 0750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(servicePath), 0o750); err != nil {
 		return "", false, fmt.Errorf("failed to create systemd dir: %w", err)
 	}
 
 	// #nosec G306
-	err = os.WriteFile(servicePath, []byte(serviceContent), 0644)
+	err = os.WriteFile(servicePath, []byte(serviceContent), 0o644)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to write systemd service file %s: %w", servicePath, err)
 	}

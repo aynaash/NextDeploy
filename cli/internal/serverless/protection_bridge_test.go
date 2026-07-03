@@ -1,6 +1,7 @@
 package serverless
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/aynaash/nextdeploy/shared/config"
@@ -86,10 +87,5 @@ func TestBuildProtectionRuntime_DisabledReturnsNil(t *testing.T) {
 }
 
 func containsStr(ss []string, want string) bool {
-	for _, s := range ss {
-		if s == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ss, want)
 }

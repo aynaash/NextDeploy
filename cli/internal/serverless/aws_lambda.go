@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -464,9 +465,7 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 			if err != nil {
 				p.log.Warn("Failed to fetch cloud secrets for environment injection: %v", err)
 			} else {
-				for k, v := range cloudSecrets {
-					envVars[k] = v
-				}
+				maps.Copy(envVars, cloudSecrets)
 				p.log.Success("Injected %d secrets directly into Lambda environment.", len(cloudSecrets))
 			}
 		}
@@ -725,7 +724,7 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 
 func (p *AWSProvider) waitForLambdaStable(ctx context.Context, client *lambda.Client, functionName string) error {
 	maxRetries := 20
-	for i := 0; i < maxRetries; i++ {
+	for range maxRetries {
 		output, err := client.GetFunction(ctx, &lambda.GetFunctionInput{
 			FunctionName: aws.String(functionName),
 		})
@@ -796,7 +795,7 @@ func (p *AWSProvider) ensureLambdaFunctionURLExists(ctx context.Context, client 
 	})
 	if err == nil && policyOutput.Policy != nil {
 		sidsToRemove := []string{"AllowPublicFunctionUrl", "AllowCloudFrontOACAccess", "AllowCloudFrontOACAccessInvoke"}
-		for i := 0; i < 20; i++ {
+		for i := range 20 {
 			sidsToRemove = append(sidsToRemove, fmt.Sprintf("AllowPublicFunctionUrl-%d", i))
 		}
 
@@ -838,7 +837,7 @@ func (p *AWSProvider) ensureLambdaFunctionURLExists(ctx context.Context, client 
 
 	for _, perm := range permissions {
 		maxRetries := 5
-		for i := 0; i < maxRetries; i++ {
+		for i := range maxRetries {
 			input := &lambda.AddPermissionInput{
 				FunctionName:  aws.String(functionName),
 				StatementId:   aws.String(perm.StatementId),
@@ -934,7 +933,7 @@ func (p *AWSProvider) ensureAuxiliaryLambdaExists(ctx context.Context, client *l
 
 	maxRetries := 10
 	retryDelay := 5 * time.Second
-	for i := 0; i < maxRetries; i++ {
+	for i := range maxRetries {
 		_, err := client.CreateFunction(ctx, createInput)
 		if err == nil {
 			p.log.Info("Auxiliary Lambda function %s created successfully.", name)

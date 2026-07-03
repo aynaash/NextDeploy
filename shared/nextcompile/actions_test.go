@@ -90,7 +90,7 @@ func TestDetectServerActions_Stable(t *testing.T) {
 			"edge": {}
 		}`)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		m, err := DetectServerActions(dir, ".next")
 		if err != nil {
 			t.Fatal(err)

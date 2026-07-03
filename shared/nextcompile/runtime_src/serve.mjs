@@ -46,13 +46,21 @@ export async function serveStaticFromR2(env, pathname) {
  * key. Restricted to paths whose final segment contains a "." to keep
  * real 404s from spending an R2 GET each.
  */
-export async function serveRootPublicFromR2(env, pathname) {
+export async function serveRootPublicFromR2(env, pathname, manifest) {
   if (!env.ASSETS) return null;
   if (pathname.length < 2 || pathname.endsWith("/")) return null;
   const last = pathname.slice(pathname.lastIndexOf("/") + 1);
   if (!last.includes(".")) return null;
 
-  const obj = await env.ASSETS.get(pathname.slice(1));
+  const key = safeDecode(pathname.slice(1));
+  // Never serve prerendered PAGE HTML here — those keys are the SSG/ISR route
+  // targets, reachable only through the guarded dispatch path. Serving them at
+  // their bare ".html" key (e.g. /dashboard.html) would bypass the edge guard,
+  // which matched the request path "/dashboard.html", not the protected route
+  // "/dashboard".
+  if (isPrerenderedPageKey(key, manifest)) return null;
+
+  const obj = await env.ASSETS.get(key);
   if (!obj) return null;
 
   const headers = new Headers();
@@ -62,6 +70,26 @@ export async function serveRootPublicFromR2(env, pathname) {
     headers.set("cache-control", "public, max-age=300");
   }
   return new Response(obj.body, { headers });
+}
+
+/**
+ * isPrerenderedPageKey reports whether an R2 key is a prerendered SSG/ISR page
+ * target (as opposed to a genuine public/ file). Used to keep page HTML out of
+ * the unguarded root-public serving path — see serveRootPublicFromR2.
+ */
+function isPrerenderedPageKey(key, manifest) {
+  const routes = manifest?.routes;
+  if (!routes) return false;
+  for (const bucket of ["ssg", "isr"]) {
+    const table = routes[bucket];
+    if (!table) continue;
+    for (const target of Object.values(table)) {
+      if (typeof target === "string" && target.replace(/^\/+/, "") === key) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**
@@ -87,14 +115,31 @@ export async function serveSSGFromR2(env, htmlKey) {
 }
 
 function r2KeyForStatic(pathname) {
+  let key;
   if (pathname.startsWith("/_next/static/")) {
-    return pathname.slice(1); // drop leading slash
+    key = pathname.slice(1); // drop leading slash
+  } else if (pathname.startsWith("/public/")) {
+    key = pathname.slice("/public/".length);
+  } else {
+    // Next also serves public/* at root — these only reach here via a
+    // caller that hinted "this is a public asset". Keep the contract tight:
+    // return null so we don't accidentally 200 on non-static paths.
+    return null;
   }
-  if (pathname.startsWith("/public/")) {
-    return pathname.slice("/public/".length);
+  // R2 keys are stored decoded (literal "[", "]", spaces, …), but browsers
+  // request route-group / dynamic-segment chunk paths URL-encoded
+  // (".../[...slug]/page.js" → ".../%5B...slug%5D/page.js"). Decode so the GET
+  // matches the stored key — otherwise the chunk 404s and the page throws a
+  // ChunkLoadError ("Application error: a client-side exception").
+  return safeDecode(key);
+}
+
+// safeDecode URL-decodes a key, falling back to the raw value on a malformed
+// escape sequence (never throws — a bad %xx must not 500 the asset path).
+function safeDecode(s) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
   }
-  // Next also serves public/* at root — these only reach here via a
-  // caller that hinted "this is a public asset". Keep the contract tight:
-  // return null so we don't accidentally 200 on non-static paths.
-  return null;
 }

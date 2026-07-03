@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -87,11 +88,18 @@ func DetectServerActions(standaloneDir, distDir string) (*ActionManifest, error)
 		filepath.Join(standaloneDir, "server", upstreamActionManifestName),
 	}
 	var data []byte
-	var err error
 	for _, c := range candidates {
-		data, err = os.ReadFile(c) // #nosec G304
-		if err == nil {
+		b, readErr := os.ReadFile(c) // #nosec G304
+		if readErr == nil {
+			data = b
 			break
+		}
+		// A genuinely-absent candidate is expected (most apps have no actions) —
+		// keep trying. But any OTHER error (permission denied, I/O, a directory
+		// in the way) on a file that DOES exist must not be masked as "no
+		// actions": that ships an empty action manifest and 500s every action.
+		if !errors.Is(readErr, fs.ErrNotExist) {
+			return nil, fmt.Errorf("read %s: %w", c, readErr)
 		}
 	}
 	if data == nil {

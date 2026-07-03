@@ -11,7 +11,7 @@ import (
 	"github.com/aynaash/nextdeploy/daemon/internal/types"
 )
 
-func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Response {
+func (ch *CommandHandler) handleStatus(args map[string]any) types.Response {
 	appName, ok := StringArg(args, "appName")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
@@ -28,7 +28,7 @@ func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Respon
 			return types.Response{
 				Success: true,
 				Message: "Status: Decommissioned\nThe application has been destroyed and all resources decommissioned.",
-				Data: map[string]interface{}{
+				Data: map[string]any{
 					"status": "Decommissioned",
 				},
 			}
@@ -73,7 +73,7 @@ func (ch *CommandHandler) handleStatus(args map[string]interface{}) types.Respon
 	return types.Response{
 		Success: true,
 		Message: msg,
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"status": status,
 			"pid":    pid,
 			"memory": memory,
@@ -111,7 +111,7 @@ func (ch *CommandHandler) findActiveService(appName string) (string, error) {
 	return services[len(services)-1], nil
 }
 
-func (ch *CommandHandler) handleLogs(args map[string]interface{}) types.Response {
+func (ch *CommandHandler) handleLogs(args map[string]any) types.Response {
 	appName, ok := StringArg(args, "appName")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
@@ -132,8 +132,8 @@ func (ch *CommandHandler) handleLogs(args map[string]interface{}) types.Response
 
 func parseProps(input string) map[string]string {
 	props := make(map[string]string)
-	lines := strings.Split(input, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(input, "\n")
+	for line := range lines {
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) == 2 {
 			props[parts[0]] = parts[1]

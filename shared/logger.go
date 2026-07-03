@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"os"
 	"runtime"
 	"strings"
@@ -273,9 +274,7 @@ func (l *Logger) WithPrefix(prefix string) *Logger {
 		timeFormat:    l.timeFormat,
 	}
 
-	for k, v := range l.packageMap {
-		newLogger.packageMap[k] = v
-	}
+	maps.Copy(newLogger.packageMap, l.packageMap)
 
 	return newLogger
 }

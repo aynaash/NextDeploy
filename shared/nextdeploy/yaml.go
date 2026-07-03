@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/aynaash/nextdeploy/shared"
 
@@ -146,10 +147,8 @@ func (c *Config) RemoveDockerBuildArg(key string) {
 
 // AddContainerVolume adds a volume to the container configuration.
 func (c *Config) AddContainerVolume(volume string) error {
-	for _, v := range c.Deployment.Container.Volumes {
-		if v == volume {
-			return errors.New("volume already exists")
-		}
+	if slices.Contains(c.Deployment.Container.Volumes, volume) {
+		return errors.New("volume already exists")
 	}
 	c.Deployment.Container.Volumes = append(c.Deployment.Container.Volumes, volume)
 	return nil
@@ -168,10 +167,8 @@ func (c *Config) RemoveContainerVolume(volume string) error {
 
 // AddContainerPort adds a port mapping to the container configuration.
 func (c *Config) AddContainerPort(port string) error {
-	for _, p := range c.Deployment.Container.Ports {
-		if p == port {
-			return errors.New("port already exists")
-		}
+	if slices.Contains(c.Deployment.Container.Ports, port) {
+		return errors.New("port already exists")
 	}
 	c.Deployment.Container.Ports = append(c.Deployment.Container.Ports, port)
 	return nil

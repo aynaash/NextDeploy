@@ -3,6 +3,7 @@ package nextcompile
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -136,10 +137,5 @@ func TestExtractRuntime_Idempotent(t *testing.T) {
 }
 
 func containsPath(files []string, want string) bool {
-	for _, f := range files {
-		if f == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(files, want)
 }
