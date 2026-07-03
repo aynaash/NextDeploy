@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.3](https://github.com/aynaash/NextDeploy/compare/v0.14.2...v0.14.3) (2026-07-03)
+
+
+### Bug Fixes
+
+* harden Cloudflare deploy pipeline (+ Go modernization & test coverage) ([#36](https://github.com/aynaash/NextDeploy/issues/36)) ([5904aa8](https://github.com/aynaash/NextDeploy/commit/5904aa85cec7b088ff23189f5cdc52107c7d7f31))
+
 ## [0.14.2](https://github.com/aynaash/NextDeploy/compare/v0.14.1...v0.14.2) (2026-06-15)
 
 
