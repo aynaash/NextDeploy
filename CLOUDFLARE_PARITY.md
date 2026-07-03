@@ -5,18 +5,22 @@ compiles a Next.js standalone build into a single Worker bundle (`nextcompile`)
 and serves static assets from R2. This document is the source of truth for **what
 is production-ready and what is not**.
 
-> TL;DR — The Cloudflare target is production-ready for **static + client-side**
-> Next.js apps (marketing, docs, blogs, API routes, `"use client"` interactivity).
-> It does **not** yet fully support apps that rely on **dynamic server-side
-> rendering** of the React tree. For those, use the **VPS** or **AWS Lambda**
-> target until the SSR runtime gap below is closed.
+> TL;DR — The Cloudflare target serves static + prerendered pages (with their
+> client chunks and RSC Flight payload) correctly. It does **not** yet support
+> apps that rely on **dynamic server-side rendering** of the React tree; use the
+> **VPS** or **AWS Lambda** target for those until the SSR runtime gap closes.
+>
+> Note: a "client-side exception" in the browser is usually the **app's own**
+> client code, not the deploy — most often a `NEXT_PUBLIC_*` / auth env var that
+> was missing at **build** time (those are inlined into the client bundle), so a
+> provider throws on hydration. Check the browser console and the build log.
 
 ## ✅ Production-ready on Cloudflare
 
 | Capability | Notes |
 |---|---|
 | Static / prerendered pages (`○`, `●`) | Served from the Worker + R2 |
-| Client-component hydration (`"use client"`) | Reference manifests wired for Next 14 (`.json`) **and** Next 15 (`.js`) — v0.14+ |
+| Client reference manifests | Wired for Next 14 (`.json`) **and** Next 15 (`.js`) — v0.14+. (Manifest plumbing only; whether a given app *hydrates* also depends on its own client code + build-time env.) |
 | API routes (`ƒ /api/*`) | Dispatched by the Worker |
 | Middleware | Runs ahead of the dispatcher |
 | Static assets (`/_next/static`, `/public`) | Uploaded to R2, content-hash skipped |
@@ -61,11 +65,16 @@ full RSC streaming as unsupported on the Cloudflare target for now.
 
 ## Status of the gaps
 
-- **Client-component hydration — resolved (v0.14+).** Two general fixes: (1) the
-  worker now URL-decodes R2 asset keys, so client chunks under `[param]` /
-  route-group dirs (requested as `%5B...%5D`) stop 404'ing with a `ChunkLoadError`;
-  (2) `nextcompile` reads both Next 14 `.json` and Next 15 `.js`
-  client-reference-manifests. With both, `"use client"` boundaries hydrate.
+- **Client-component plumbing — wired (v0.14+), but hydration is not "done".**
+  Two general fixes landed: (1) the worker URL-decodes R2 asset keys, so client
+  chunks under `[param]` / route-group dirs (requested as `%5B...%5D`) stop
+  404'ing with a `ChunkLoadError`; (2) `nextcompile` reads both Next 14 `.json`
+  and Next 15 `.js` client-reference-manifests (previously the `.js` form was
+  ignored, leaving `loadClientManifest` null). This is the manifest + chunk-load
+  *plumbing* — it does **not** by itself guarantee a given app hydrates. That
+  still depends on the app's own client code + build-time `NEXT_PUBLIC_*`/auth
+  env being correct, and on the SSR gap below (App Router pages render a blank
+  shell until the SSR runtime lands).
 
   > Debugging a browser "client-side exception": check the console. A
   > `ChunkLoadError` on a `_next/static/.../%5B...%5D/...` URL was the decode bug
