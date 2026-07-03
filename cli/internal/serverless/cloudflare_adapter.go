@@ -324,6 +324,14 @@ func runEsbuild(ctx context.Context, entry, out, metaPath, cwd string, log *shar
 		"--conditions=workerd,worker,node",
 		"--external:node:*",
 		"--external:cloudflare:*",
+		// __dirname/__filename are CJS-only globals that don't exist in ESM
+		// output. Bundled code (e.g. next/dist/compiled/@opentelemetry/api via
+		// Next's tracer) references __dirname at module-eval time, which throws
+		// `ReferenceError: __dirname is not defined` on the Workers runtime and
+		// 500s every dynamically-rendered page. Filesystem paths are meaningless
+		// in the Worker sandbox, so define them as inert string literals.
+		`--define:__dirname="/"`,
+		`--define:__filename="/worker.mjs"`,
 		"--loader:.node=copy",
 		"--loader:.json=json",
 		"--minify-syntax",
