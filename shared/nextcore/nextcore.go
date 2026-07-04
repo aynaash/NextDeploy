@@ -694,6 +694,13 @@ func findPublicImages(publicDir, projectDir string) ([]ImageAsset, error) {
 	_ = projectDir // retained for signature parity; paths are public-relative
 	var images []ImageAsset
 
+	// public/ is optional in Next.js — a missing directory means "no public
+	// images", not a build failure. (ParseStaticAssets already guards the same
+	// way for the asset scan.)
+	if _, err := os.Stat(publicDir); os.IsNotExist(err) {
+		return nil, nil
+	}
+
 	err := filepath.Walk(publicDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
