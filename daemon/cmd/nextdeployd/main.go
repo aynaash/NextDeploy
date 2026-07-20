@@ -1,5 +1,6 @@
 //go:build !windows
 
+// This daemon does not need to be compiled for windows or ios since it runs only on a linux server
 package main
 
 import (
@@ -335,12 +336,12 @@ func daemonize() {
 			logDir = home + "/.nextdeploy/log"
 		}
 	}
-	if err := os.MkdirAll(logDir, 0750); err != nil {
+	if err := os.MkdirAll(logDir, 0o750); err != nil {
 		log.Fatalf("Error creating log directory: %v", err)
 	}
 	logFilePath := filepath.Join(logDir, "nextdeployd.log")
 	// #nosec G304
-	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		log.Fatalf("Error opening log file: %v", err)
 	}
@@ -373,7 +374,7 @@ func acquireLock() error {
 	}
 
 	// #nosec G301 G703
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o750); err != nil {
 		return err
 	}
 
@@ -407,15 +408,5 @@ func runDaemon(configPath string, socketPathFlag string) {
 	}
 	if err := d.Start(); err != nil {
 		log.Fatalf("Error starting daemon: %v", err)
-	}
-}
-
-func isRoot() bool {
-	return os.Geteuid() == 0
-}
-
-func getSysProcAttr() *syscall.SysProcAttr {
-	return &syscall.SysProcAttr{
-		Setsid: true,
 	}
 }

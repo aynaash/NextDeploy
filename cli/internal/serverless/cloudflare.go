@@ -2,7 +2,7 @@ package serverless
 
 import (
 	"context"
-	"crypto/md5" // #nosec G501 — R2 ETag is content MD5; not used for security
+	"crypto/md5"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -68,46 +68,28 @@ import (
 // Every resolved value is registered with the sensitive scrubber so it never
 // leaks into log lines or error messages.
 type CloudflareProvider struct {
-	log         *shared.Logger
-	cf          *cloudflare.Client
-	r2s3        *s3.Client // S3-compat client for R2 objects (lazy: built on first DeployStatic)
-	accountID   string
-	apiToken    string // raw token value, kept so we can derive R2 creds from it
-	apiTokenID  string // populated by verifyToken; the access-key-id half of derived R2 creds
-	r2AccessKey string
-	r2SecretKey string
-	// r2ParentKeyID, when set, lets DeployStatic mint short-lived temp R2
-	// credentials via /accounts/:id/r2/temp-access-credentials instead of
-	// using a long-lived R2_SECRET_ACCESS_KEY. The parent key authorizes
-	// the scope; the temp creds expire in ~1 hour.
-	r2ParentKeyID string
-	environment   string       // populated in Initialize
-	provisioned   *resourceMap // standalone resource name → CF UUID, populated by ProvisionResources
-
-	// pendingSecrets holds secrets staged via UpdateSecrets() that have not
-	// yet been folded into a Worker upload. DeployCompute reads them, emits
-	// them as secret_text bindings in the script metadata, and clears them
-	// on success. This avoids the per-secret PUT loop (which is rate-
-	// limited to ~13 req/s by CF, error code 10013) — instead the entire
-	// secret set lands atomically in one Workers.Scripts.Update call.
-	//
-	// Standalone rotation paths (SetSecret/UnsetSecret) still use the
-	// per-secret API and bypass this stash.
+	log            *shared.Logger
+	cf             *cloudflare.Client
+	r2s3           *s3.Client
+	accountID      string
+	apiToken       string
+	apiTokenID     string
+	r2AccessKey    string
+	r2SecretKey    string
+	r2ParentKeyID  string
+	environment    string
+	provisioned    *resourceMap
 	pendingSecrets map[string]string
 }
 
-// cloudflareCreds is the resolved bag returned by loadCloudflareCreds.
 type cloudflareCreds struct {
 	apiToken      string
 	accountID     string
 	r2AccessKey   string
 	r2SecretKey   string
-	r2ParentKeyID string // permanent R2 access key id used to mint short-lived temp creds
+	r2ParentKeyID string
 }
 
-// loadCloudflareCreds resolves credentials in the documented precedence order
-// (env → credstore → yaml). Yaml usage emits a single WARN per call so leaks
-// via committed config get noticed.
 func loadCloudflareCreds(cfg *config.NextDeployConfig, log *shared.Logger) cloudflareCreds {
 	c := cloudflareCreds{
 		apiToken:      os.Getenv("CLOUDFLARE_API_TOKEN"),
@@ -148,8 +130,8 @@ func loadCloudflareCreds(cfg *config.NextDeployConfig, log *shared.Logger) cloud
 			c.accountID = cfg.CloudProvider.AccountID
 		}
 		if usedYaml {
-			log.Warn("⚠️  Cloudflare API token loaded from nextdeploy.yml — committing this file leaks creds.")
-			log.Warn("⚠️  Recommended: 'nextdeploy creds set --provider cloudflare' (encrypted, mode 0600).")
+			log.Warn("Cloudflare API token loaded from nextdeploy.yml — committing this file leaks creds.")
+			log.Warn("Recommended: 'nextdeploy creds set --provider cloudflare' (encrypted, mode 0600).")
 		}
 	}
 	return c
@@ -161,11 +143,6 @@ func NewCloudflareProvider() *CloudflareProvider {
 	}
 }
 
-// sanitizeCFName coerces s into a valid Cloudflare resource name (Worker script
-// or R2 bucket): lowercase, only [a-z0-9-], no leading/trailing or repeated
-// hyphens, capped at 63 chars. R2 rejects anything else with error 10005 ("The
-// specified bucket name is not valid"), and Worker script names share the same
-// constraint — so an app named e.g. "NextDeploy" must be folded to "nextdeploy".
 func sanitizeCFName(s string) string {
 	var b strings.Builder
 	lastHyphen := false
@@ -202,12 +179,6 @@ func (p *CloudflareProvider) bucketNameFromApp(appName string) string {
 	return sanitizeCFName(fmt.Sprintf("nextdeploy-%s-%s-assets", appName, env))
 }
 
-// Initialize wires up the Cloudflare SDK client and verifies the API token.
-//
-// The deploy is designed around a single-token UX: the user sets
-// CLOUDFLARE_API_TOKEN and everything else (account ID, optionally R2
-// credentials) is derived. If they want explicit overrides, env or
-// credstore wins.
 func (p *CloudflareProvider) Initialize(ctx context.Context, cfg *config.NextDeployConfig) error {
 	p.log.Info("Initializing Cloudflare deployment session...")
 
@@ -224,17 +195,6 @@ func (p *CloudflareProvider) Initialize(ctx context.Context, cfg *config.NextDep
 	p.r2SecretKey = creds.r2SecretKey
 	p.r2ParentKeyID = creds.r2ParentKeyID
 
-	// 15-minute per-request timeout: Worker uploads can be multi-megabyte
-	// multipart bundles, and observed end-to-end latency on residential
-	// connections + CF API processing has hit 5+ minutes for ~3MB
-	// scripts. The SDK's WithRequestTimeout is per-retry, so the actual
-	// wall-clock budget for a failing upload is timeout × MaxRetries.
-	// Every other CF API call (zone list, DNS edit, secret list) returns
-	// in well under a second, so the longer ceiling doesn't slow happy
-	// paths. We also disable retries for the upload path because
-	// re-uploading a 3MB bundle on a transient 5xx adds latency without
-	// helping recover — the operator will rerun `nextdeploy ship`
-	// faster than the SDK's retry-with-backoff.
 	p.cf = cloudflare.NewClient(
 		option.WithAPIToken(creds.apiToken),
 		option.WithRequestTimeout(15*time.Minute),
@@ -258,9 +218,6 @@ func (p *CloudflareProvider) Initialize(ctx context.Context, cfg *config.NextDep
 	}
 	p.accountID = creds.accountID
 
-	// Long-lived R2 keys take precedence (preserves existing CI configs).
-	// Otherwise the s3 client is built lazily in DeployStatic, after we
-	// mint short-lived creds from the parent key.
 	if p.r2AccessKey != "" && p.r2SecretKey != "" {
 		p.r2s3 = newR2S3Client(p.accountID, p.r2AccessKey, p.r2SecretKey, "")
 	}
@@ -269,18 +226,6 @@ func (p *CloudflareProvider) Initialize(ctx context.Context, cfg *config.NextDep
 	return nil
 }
 
-// verifyToken hits /user/tokens/verify and returns a clear error if the token
-// is invalid or expired. The endpoint confirms the token is alive but does
-// not enumerate scopes — scope failures will surface as 403s on the first
-// API call that needs the missing permission. The error here lists the
-// scopes a typical end-to-end deploy needs so users can sanity-check
-// their token in the CF dashboard.
-//
-// The response also carries the token's `id`. Per Cloudflare's docs, that
-// id is also the R2 S3-compat access-key-id half when the token's secret
-// half is hashed via SHA-256. We stash the id on the provider so
-// DeployStatic can derive R2 credentials from the API token alone — no
-// separate R2 dashboard click required.
 func (p *CloudflareProvider) verifyToken(ctx context.Context) error {
 	var verify struct {
 		Success bool `json:"success"`
@@ -311,14 +256,6 @@ func (p *CloudflareProvider) verifyToken(ctx context.Context) error {
 	return nil
 }
 
-// looksLikeCloudflareAccountID accepts what Cloudflare actually issues
-// (32 lowercase hex characters) and rejects everything else, including
-// the obvious placeholder strings that get pasted from sample configs:
-// "YOUR_CLOUDFLARE_ACCOUNT_ID", "<account-id>", "REPLACE_ME", empty,
-// dashboard URLs the user accidentally pasted, etc.
-//
-// Treating those as "no account id" lets the auto-discovery path kick
-// in instead of letting them flow through to a 404 from /accounts/<bad>.
 func looksLikeCloudflareAccountID(s string) bool {
 	if len(s) != 32 {
 		return false
@@ -331,21 +268,6 @@ func looksLikeCloudflareAccountID(s string) bool {
 	return true
 }
 
-// deriveR2CredsFromAPIToken returns the (accessKeyId, secretAccessKey)
-// pair that R2's S3 endpoint accepts for a given Cloudflare API token,
-// without any extra dashboard step or API call.
-//
-// Per Cloudflare's R2 docs:
-//
-//	The Access Key ID corresponds to the API token's `id`,
-//	and the Secret Access Key is the SHA-256 hash of the API token `value`.
-//
-// id is captured from /user/tokens/verify in verifyToken. value is the
-// raw bearer string the user already exported as CLOUDFLARE_API_TOKEN.
-//
-// This is the zero-config path: a token with the right scopes
-// (Workers R2 Storage: Edit) Just Works for both bucket management *and*
-// object PUT, the same way an AWS IAM key handles both planes.
 func deriveR2CredsFromAPIToken(tokenID, tokenValue string) (akid, secret string, ok bool) {
 	if tokenID == "" || tokenValue == "" {
 		return "", "", false
@@ -354,9 +276,6 @@ func deriveR2CredsFromAPIToken(tokenID, tokenValue string) (akid, secret string,
 	return tokenID, hex.EncodeToString(sum[:]), true
 }
 
-// requiredScopesHint lists the token permissions a full nextdeploy CF deploy
-// uses. Surfaced in error messages so users know what to check when a deep
-// API call fails 403.
 func requiredScopesHint() string {
 	return "Required token scopes (Account):\n" +
 		"  • Workers Scripts: Edit\n" +
@@ -375,9 +294,6 @@ func requiredScopesHint() string {
 		"  • Cache Purge: Purge"
 }
 
-// discoverAccountID lists the accounts the API token can see. Returns the
-// account ID if exactly one is visible. If multiple are visible, returns an
-// error listing them so the user can pick one explicitly.
 func (p *CloudflareProvider) discoverAccountID(ctx context.Context) (string, error) {
 	var resp struct {
 		Success bool `json:"success"`
@@ -403,20 +319,6 @@ func (p *CloudflareProvider) discoverAccountID(ctx context.Context) (string, err
 		len(resp.Result), strings.Join(names, "\n"))
 }
 
-// newR2S3Client builds an S3 client configured against the R2 S3-compatible
-// endpoint. Returns nil if R2 credentials are not present; callers must check
-// before issuing object PUTs.
-//
-// sessionToken is the third element of an STS-style triple, set when the
-// (akid, secret) pair was minted via /r2/temp-access-credentials. Pass ""
-// for permanent R2 access keys.
-//
-// UsePathStyle MUST be true for the default R2 endpoint. R2's TLS cert is
-// a wildcard *.r2.cloudflarestorage.com that only matches one subdomain
-// level, so virtual-hosted-style URLs (bucket.account.r2.cloudflarestorage.com)
-// fail TLS handshake. Path-style (account.r2.cloudflarestorage.com/bucket/key)
-// matches the cert and works. Custom-domain buckets can opt back into
-// virtual-hosted later, but that's out of scope here.
 func newR2S3Client(accountID, akid, secret, sessionToken string) *s3.Client {
 	if akid == "" || secret == "" {
 		return nil
@@ -430,30 +332,12 @@ func newR2S3Client(accountID, akid, secret, sessionToken string) *s3.Client {
 	})
 }
 
-// r2TempCreds is the body returned by /accounts/:id/r2/temp-access-credentials.
-// CF wraps it in the standard {"success": bool, "result": {...}} envelope.
 type r2TempCreds struct {
 	AccessKeyID     string `json:"accessKeyId"`
 	SecretAccessKey string `json:"secretAccessKey"`
 	SessionToken    string `json:"sessionToken"`
 }
 
-// mintR2TempCreds asks Cloudflare for a short-lived R2 credential triple
-// scoped to a single bucket. The returned creds are good for ttl seconds
-// (clamped to [60, 36*3600] by the API; we ask for one hour).
-//
-// The endpoint is authenticated via the API token (Bearer) — the parent
-// access key id is the *authority* for the temp creds, but the call itself
-// rides the API token. So callers don't need the parent key's *secret*,
-// only the id.
-//
-// permission is one of:
-//
-//	"object-read-only", "object-read-write",
-//	"admin-read-only", "admin-read-write",
-//	"admin-object-only-read-only", "admin-object-only-read-write".
-//
-// We use "object-read-write" — uploads but no bucket-level admin.
 func (p *CloudflareProvider) mintR2TempCreds(ctx context.Context, bucket string) (r2TempCreds, error) {
 	if p.r2ParentKeyID == "" {
 		return r2TempCreds{}, fmt.Errorf("R2_PARENT_ACCESS_KEY_ID not set")
@@ -490,27 +374,6 @@ func (p *CloudflareProvider) mintR2TempCreds(ctx context.Context, bucket string)
 	return resp.Result, nil
 }
 
-// DeployStatic uploads the package's static assets to an R2 bucket via the
-// S3-compatible endpoint. R2 management (bucket creation) goes through the
-// official SDK.
-//
-// R2 object PUTs use S3-protocol HMAC auth, not Bearer; cloudflare-go
-// doesn't expose object operations. Credential resolution order, designed
-// so the zero-config path is the default:
-//
-//  1. Explicit long-lived pair (R2_ACCESS_KEY_ID + R2_SECRET_ACCESS_KEY in
-//     env / credstore). Used as-is. Preserves existing CI configs.
-//  2. **Auto-derived from the CF API token.** Per CF's R2 docs, the access
-//     key id is the API token's `id` (captured in verifyToken via
-//     /user/tokens/verify) and the secret access key is SHA-256 of the
-//     token's `value`. No dashboard click, no extra scope beyond
-//     "Workers R2 Storage: Edit", no minting endpoint. This is the
-//     intended one-token-end-to-end path.
-//  3. Parent-key fallback (R2_PARENT_ACCESS_KEY_ID set): mint a 1-hour
-//     scoped child via /accounts/:id/r2/temp-access-credentials.
-//     Useful when the API token deliberately doesn't have R2 scope but a
-//     dedicated R2 parent key does.
-//  4. None of the above — fail with dashboard URL.
 func (p *CloudflareProvider) DeployStatic(ctx context.Context, pkg *packaging.PackageResult, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) error {
 	bucketName := p.getBucketName(cfg)
 
@@ -524,11 +387,6 @@ func (p *CloudflareProvider) DeployStatic(ctx context.Context, pkg *packaging.Pa
 
 	p.log.Info("Uploading %d static assets to R2 bucket %s...", len(pkg.S3Assets), bucketName)
 
-	// Two-phase upload (D1): immutable content-hashed chunks first, so that by
-	// the time any mutable HTML referencing them becomes visible in R2, every
-	// chunk it points at already exists. uploadBatch wg.Wait()s internally, so
-	// its return is a hard barrier between the phases. A failure in the
-	// immutable phase aborts before any mutable key is touched.
 	immutable, mutable := partitionAssets(pkg.S3Assets)
 
 	upImm, skImm, err := p.uploadBatch(ctx, bucketName, immutable)
@@ -549,16 +407,8 @@ func (p *CloudflareProvider) DeployStatic(ctx context.Context, pkg *packaging.Pa
 	return nil
 }
 
-// immutableKeyPrefix marks content-hashed assets that are safe to upload before
-// any mutable HTML/RSC (see the two-phase upload in DeployStatic): new hashes
-// never collide with old ones and old ones are never deleted. The packager
-// emits these under _next/static/ with a "…, immutable" Cache-Control; the key
-// prefix is the authoritative signal — packaging.S3Asset has no Immutable field.
 const immutableKeyPrefix = "_next/static/"
 
-// partitionAssets splits the packaged asset set into immutable content-hashed
-// chunks (uploaded first) and mutable stable-key assets (prerendered HTML/RSC +
-// public/, uploaded second, after the chunks they reference exist in R2).
 func partitionAssets(assets []packaging.S3Asset) (immutable, mutable []packaging.S3Asset) {
 	for _, a := range assets {
 		if strings.HasPrefix(a.S3Key, immutableKeyPrefix) {
@@ -570,9 +420,6 @@ func partitionAssets(assets []packaging.S3Asset) (immutable, mutable []packaging
 	return immutable, mutable
 }
 
-// uploadBatch uploads assets to R2 with bounded concurrency, HEAD-skipping
-// objects whose content is unchanged. Returns per-batch counts so the two-phase
-// caller can log a combined summary. wg.Wait() makes the return a hard barrier.
 func (p *CloudflareProvider) uploadBatch(ctx context.Context, bucket string, assets []packaging.S3Asset) (uploaded, skipped int64, err error) {
 	const cfR2UploadConcurrency = 8
 	sem := make(chan struct{}, cfR2UploadConcurrency)
@@ -610,18 +457,12 @@ func (p *CloudflareProvider) uploadBatch(ctx context.Context, bucket string, ass
 	return up.Load(), sk.Load(), nil
 }
 
-// ensureR2Client lazily initializes the S3-compatible R2 client (p.r2s3) used
-// for object uploads and teardown sweeps. Credential tiers: an explicit
-// parent-key opt-in (R2_PARENT_ACCESS_KEY_ID) mints short-lived creds, otherwise
-// creds are derived from the API token. No-op when already initialized.
 func (p *CloudflareProvider) ensureR2Client(ctx context.Context, bucketName string) error {
 	if p.r2s3 != nil {
 		return nil
 	}
 	switch {
 	case p.r2ParentKeyID != "":
-		// Explicit opt-in wins: the user set R2_PARENT_ACCESS_KEY_ID because
-		// their API token lacks R2 scope.
 		p.log.Info("Minting short-lived R2 creds for bucket %s (parent: %s…)", bucketName, p.r2ParentKeyID[:min(8, len(p.r2ParentKeyID))])
 		creds, err := p.mintR2TempCreds(ctx, bucketName)
 		if err != nil {
@@ -649,15 +490,6 @@ func (p *CloudflareProvider) ensureR2Client(ctx context.Context, bucketName stri
 	return nil
 }
 
-// uploadToR2IfChanged HEADs the object first and skips the PUT when the
-// remote ETag (R2 sets it to MD5 of the object body for non-multipart
-// uploads) matches the local file's MD5. Returns (didUpload, err) so the
-// caller can count uploaded vs. skipped.
-//
-// HeadObject costs one round trip but no body transfer; PUT pays the full
-// transfer cost. For large asset sets that change rarely (the common case
-// for /_next/static and /public), this turns N PUTs of N MB into N HEADs
-// of zero bytes — the dominant savings on a redeploy.
 func (p *CloudflareProvider) uploadToR2IfChanged(ctx context.Context, bucket string, asset packaging.S3Asset) (bool, error) {
 	localETag, err := md5OfFile(asset.LocalPath)
 	if err != nil {
@@ -672,12 +504,6 @@ func (p *CloudflareProvider) uploadToR2IfChanged(ctx context.Context, bucket str
 	return true, nil
 }
 
-// headR2ETag returns the remote ETag (with the surrounding quotes that S3
-// returns trimmed off). Returns (_, false) on any error — including 404,
-// permission errors, network errors — so callers fall through to PUT.
-// Skipping a PUT we *should* have done just costs an extra round trip
-// next time; doing one we shouldn't have wastes bandwidth. We err toward
-// uploading.
 func (p *CloudflareProvider) headR2ETag(ctx context.Context, bucket, key string) (string, bool) {
 	out, err := p.r2s3.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: awsv2.String(bucket),
@@ -689,29 +515,22 @@ func (p *CloudflareProvider) headR2ETag(ctx context.Context, bucket, key string)
 	return strings.Trim(*out.ETag, `"`), true
 }
 
-// md5OfFile streams a file through md5 and returns the lowercase hex
-// digest. Used to compare against R2 ETags. md5 is not used for any
-// security purpose here — R2's ETag scheme (S3-compatible) just happens
-// to be the content MD5 for single-part uploads, so we have to match it.
 func md5OfFile(path string) (string, error) {
-	f, err := os.Open(path) // #nosec G304 — caller-validated path
+	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
-	h := md5.New() // #nosec G401 — see comment on import
+	h := md5.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// sha256OfFile streams a file through SHA-256 and returns the raw digest.
-// Used to fingerprint the Worker bundle for the deploy-hash skip check
-// without reading the (multi-MB) bundle into memory.
 func sha256OfFile(path string) ([32]byte, error) {
 	var sum [32]byte
-	f, err := os.Open(path) // #nosec G304 — caller-validated path (packager output)
+	f, err := os.Open(path)
 	if err != nil {
 		return sum, err
 	}
@@ -725,7 +544,7 @@ func sha256OfFile(path string) ([32]byte, error) {
 }
 
 func (p *CloudflareProvider) putToR2(ctx context.Context, bucket string, asset packaging.S3Asset) error {
-	f, err := os.Open(asset.LocalPath) // #nosec G304
+	f, err := os.Open(asset.LocalPath)
 	if err != nil {
 		return err
 	}
@@ -744,24 +563,8 @@ func (p *CloudflareProvider) putToR2(ctx context.Context, bucket string, asset p
 	return err
 }
 
-// deployHashTagPrefix marks Worker tags managed by nextdeploy. Anything
-// with this prefix is owned by us; anything without is left alone so user
-// tags set via dashboard / wrangler survive.
 const deployHashTagPrefix = "nextdeploy-deploy-hash:"
 
-// computeDeployHash returns a hex SHA-256 over everything that would
-// change the running Worker: the bundle digest (bundleSum, computed by the
-// caller — streamed from disk in prod so the worker.mjs is never buffered
-// whole into memory), the binding metadata, and the secret values. If any of
-// these change, the hash changes; if the hash matches the deployed one,
-// re-uploading is a no-op and we skip.
-//
-// The metadata hash uses the SDK's JSON marshalling — same bytes the SDK
-// would send to /scripts/{name}, modulo field ordering which Stainless
-// emits deterministically. Secrets are hashed separately so the secret
-// values don't end up in the metadata JSON before we hash it (they're
-// already in scriptMeta as secret_text bindings, but we double-hash them
-// to make the dependency explicit and keep tests deterministic).
 func computeDeployHash(bundleSum [32]byte, meta workers.ScriptUpdateParamsMetadata, secrets map[string]string) string {
 	h := sha256.New()
 	h.Write([]byte("nextdeploy-deploy-hash/v1\n"))
@@ -789,10 +592,6 @@ func computeDeployHash(bundleSum [32]byte, meta workers.ScriptUpdateParamsMetada
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// workerAlreadyAtHash returns true when the named Worker's tags include
-// `nextdeploy-deploy-hash:<hash>`. Returns false on any read error
-// (script doesn't exist yet, permission issue, etc.) — safer to upload
-// when in doubt than to skip and serve stale code.
 func (p *CloudflareProvider) workerAlreadyAtHash(ctx context.Context, workerName, hash string) bool {
 	settings, err := p.cf.Workers.Scripts.Settings.Get(ctx, workerName, workers.ScriptSettingGetParams{
 		AccountID: cloudflare.F(p.accountID),
@@ -804,13 +603,6 @@ func (p *CloudflareProvider) workerAlreadyAtHash(ctx context.Context, workerName
 	return slices.Contains(settings.Tags, want)
 }
 
-// tagWorkerDeployHash writes our deploy-hash tag onto the Worker,
-// preserving any user tags. Called after a successful upload so the next
-// deploy can skip when nothing relevant changed.
-//
-// We Get current tags first, drop any old `nextdeploy-deploy-hash:` entry,
-// append the fresh one, and PATCH back. This is safe even if the Worker
-// has no tags yet (the slice just starts empty).
 func (p *CloudflareProvider) tagWorkerDeployHash(ctx context.Context, workerName, hash string) error {
 	current, err := p.cf.Workers.Scripts.Settings.Get(ctx, workerName, workers.ScriptSettingGetParams{
 		AccountID: cloudflare.F(p.accountID),
@@ -838,15 +630,6 @@ func (p *CloudflareProvider) tagWorkerDeployHash(ctx context.Context, workerName
 	return nil
 }
 
-// resolveStandaloneDir returns a path the Cloudflare adapter can read the
-// raw Next.js standalone tree from, plus a cleanup closure.
-//
-// Preferred path: pkg.StandaloneTarPath is the target-agnostic artifact the
-// packager produces — extract it to a temp dir so we work from a pristine
-// copy and can't accidentally pollute the user's .next/standalone (the
-// adapter writes _nextdeploy_worker.mjs into it). Fallback: the live
-// standalone directory on disk, which is what older builds and non-Package
-// callers hand us.
 func resolveStandaloneDir(pkg *packaging.PackageResult, meta *nextcore.NextCorePayload, log *shared.Logger) (string, func(), error) {
 	noop := func() {}
 
@@ -876,11 +659,6 @@ func resolveStandaloneDir(pkg *packaging.PackageResult, meta *nextcore.NextCoreP
 	return standaloneDir, noop, nil
 }
 
-// DeployCompute adapts the Next.js standalone build into a Worker bundle
-// (using esbuild + the embedded shim) and uploads it via the SDK.
-//
-// For static-export sites, no compute deploy is needed — DeployStatic + a
-// catch-all R2 worker is sufficient. We skip in that case.
 func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageResult, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) error {
 	if meta != nil && meta.OutputMode == nextcore.OutputModeExport {
 		if len(p.pendingSecrets) > 0 {
@@ -906,10 +684,6 @@ func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.P
 		return fmt.Errorf("worker bundle build failed: %w", err)
 	}
 
-	// Fingerprint the bundle by streaming it through SHA-256 — never read the
-	// (multi-MB, esbuild-bundled) worker.mjs into memory. The upload below
-	// re-opens the file and streams it too, so the whole bundle is only ever
-	// in flight 32KB at a time.
 	bundleSum, err := sha256OfFile(bundlePath)
 	if err != nil {
 		return fmt.Errorf("failed to fingerprint worker bundle: %w", err)
@@ -932,14 +706,11 @@ func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.P
 		resolve = p.provisioned.get
 	}
 
-	// Guard: a Worker upload is replace-not-merge. If the incoming set omits a
-	// secret currently live on the Worker, abort unless the operator opted into
-	// a wipe. GetSecrets lists live names (CF never returns values).
 	if cfBlock == nil || !cfBlock.AllowSecretWipe {
 		live, err := p.GetSecrets(ctx, cfg.App.Name)
 		if err != nil {
 			p.log.Warn("Could not list live Worker secrets to check for an accidental wipe (%v) — proceeding without the guard", err)
-		} else if err := refuseSecretWipe(p.pendingSecrets, live); err != nil {
+		} else if err := refuseSecretWipe(p.pendingSecrets, live, false); err != nil {
 			return err
 		}
 	}
@@ -955,15 +726,8 @@ func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.P
 	deployHash := computeDeployHash(bundleSum, scriptMeta, p.pendingSecrets)
 	if p.workerAlreadyAtHash(ctx, workerName, deployHash) {
 		p.log.Info("Worker bundle and bindings unchanged (hash %s) — skipping upload", deployHash[:12])
-		// Still drop the secret stash even on skip — the deployed worker
-		// already carries them, and keeping pendingSecrets around would
-		// fold them again on the next call.
 		p.pendingSecrets = nil
 	} else {
-		// Open the bundle for the upload stream. Wrap with a progress tracker
-		// so the operator sees live byte-counts during the multipart upload —
-		// without it the CLI looks hung, and we've watched 3MB Worker uploads
-		// run for several minutes on residential connections.
 		bundleFile, err := os.Open(bundlePath) // #nosec G304 — packager output path
 		if err != nil {
 			return fmt.Errorf("failed to open worker bundle: %w", err)
@@ -981,11 +745,7 @@ func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.P
 			return fmt.Errorf("worker upload failed: %w", err)
 		}
 		p.log.Info("Worker deployed: %s", workerName)
-		// Stamp the deployed hash on the worker so the next deploy can
-		// compare without re-uploading.
 		if err := p.tagWorkerDeployHash(ctx, workerName, deployHash); err != nil {
-			// Non-fatal: failure here just means next deploy can't skip,
-			// it has to re-upload. The deploy itself succeeded.
 			p.log.Warn("Failed to stamp deploy-hash tag (non-fatal — next deploy won't be able to skip): %v", err)
 		}
 		p.pendingSecrets = nil
@@ -1002,8 +762,6 @@ func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.P
 	return nil
 }
 
-// applyWorkerTriggers applies cron schedules declared under the cloudflare
-// block. Nil means "leave whatever's in the dashboard alone".
 func (p *CloudflareProvider) applyWorkerTriggers(ctx context.Context, workerName string, cfBlock *config.CloudflareConfig) error {
 	if cfBlock == nil || cfBlock.Triggers == nil {
 		return nil
@@ -1014,9 +772,6 @@ func (p *CloudflareProvider) applyWorkerTriggers(ctx context.Context, workerName
 	return nil
 }
 
-// wireQueueConsumers attaches each declared queue consumer to the worker.
-// Producer queues themselves are created by ProvisionResources; consumers
-// connect them to the script.
 func (p *CloudflareProvider) wireQueueConsumers(ctx context.Context, workerName string, cfBlock *config.CloudflareConfig) error {
 	if cfBlock == nil || cfBlock.Bindings == nil || cfBlock.Bindings.Queues == nil {
 		return nil
@@ -1029,21 +784,6 @@ func (p *CloudflareProvider) wireQueueConsumers(ctx context.Context, workerName 
 	return nil
 }
 
-// attachEdgeRoutes wires custom domains + explicit routes. Each attempt is
-// independent and non-fatal so one bad hostname doesn't sink the deploy.
-//
-// When the user has not declared an explicit cloudflare.custom_domains or
-// cloudflare.routes block, we auto-promote cfg.App.Domain.Name to a Custom
-// Domain attachment (Workers.Domains.Update). Custom Domains provision
-// DNS + worker route + SSL atomically — the user does not need to create
-// any DNS records by hand. This replaces an older fallback that called
-// ensureWorkerRoute, which only set up the route pattern and left the
-// user wondering why their domain didn't resolve.
-//
-// Failure is logged but non-fatal: the Worker still serves on its
-// *.workers.dev URL, and the deployment report includes the manual DNS
-// instructions as a fallback for permission-denied or rate-limited
-// cases (commonly: API token missing Workers Routes:Edit / DNS:Edit).
 func (p *CloudflareProvider) attachEdgeRoutes(ctx context.Context, workerName string, cfg *config.NextDeployConfig, cfBlock *config.CloudflareConfig) {
 	if cfBlock != nil {
 		for _, cd := range cfBlock.CustomDomains {
@@ -1057,10 +797,6 @@ func (p *CloudflareProvider) attachEdgeRoutes(ctx context.Context, workerName st
 			}
 		}
 	}
-	// Auto-attach: when the user gave us cfg.App.Domain.Name but no explicit
-	// edge block, treat it as a Custom Domain. We attach the apex + the
-	// www subdomain so a typical "https://example.com" / "https://www.example.com"
-	// pair works out of the box. Each call is idempotent.
 	if cfg.App.Domain.Name != "" && hasNoExplicitEdge(cfBlock) {
 		hostnames := autoCustomDomainHostnames(cfg.App.Domain.Name)
 		for _, hostname := range hostnames {
@@ -1076,11 +812,6 @@ func (p *CloudflareProvider) attachEdgeRoutes(ctx context.Context, workerName st
 	}
 }
 
-// autoCustomDomainHostnames returns the set of hostnames to auto-attach
-// when only cfg.App.Domain.Name is set. For an apex (example.com) we attach
-// both apex and www. For a subdomain (app.example.com) we attach only
-// the subdomain — adding `www.app.example.com` is rarely what users
-// want.
 func autoCustomDomainHostnames(domain string) []string {
 	domain = strings.TrimSpace(strings.TrimSuffix(domain, "."))
 	if domain == "" {
@@ -1101,10 +832,6 @@ func hasNoExplicitEdge(cfBlock *config.CloudflareConfig) bool {
 	return len(cfBlock.CustomDomains) == 0 && len(cfBlock.Routes) == 0
 }
 
-// ensureCustomDomain attaches a hostname to the worker via Workers.Domains.Update.
-// The endpoint is upsert-style — calling repeatedly with the same hostname is
-// safe and idempotent. Zone is resolved from cd.ZoneID if set, else derived
-// from the hostname's apex.
 func (p *CloudflareProvider) ensureCustomDomain(ctx context.Context, workerName string, cd config.CFCustomDomain) error {
 	params := workers.DomainUpdateParams{
 		AccountID: cloudflare.F(p.accountID),
@@ -1117,11 +844,6 @@ func (p *CloudflareProvider) ensureCustomDomain(ctx context.Context, workerName 
 	default:
 		params.ZoneName = cloudflare.F(zoneNameFromHostname(cd.Hostname))
 	}
-	// Re-point the hostname to THIS worker even if it's already bound to another
-	// one (e.g. a prior deploy under a different worker name). Without these, the
-	// API returns 409 "already in use by other custom domain" and the domain
-	// keeps serving the stale worker — the "my domain won't update" trap. The
-	// SDK's typed params don't expose these yet, so set them on the request body.
 	overrides := []option.RequestOption{
 		option.WithJSONSet("override_existing_origin", true),
 		option.WithJSONSet("override_existing_dns_record", true),
@@ -1133,10 +855,6 @@ func (p *CloudflareProvider) ensureCustomDomain(ctx context.Context, workerName 
 	return nil
 }
 
-// zoneNameFromHostname returns the apex zone for a hostname. Naive heuristic:
-// last two DNS labels. Works for example.com, sub.example.com — does not
-// handle public suffix exceptions like .co.uk. Users with multi-label TLDs
-// should set zone_id explicitly.
 func zoneNameFromHostname(host string) string {
 	parts := strings.Split(host, ".")
 	if len(parts) <= 2 {
@@ -1145,10 +863,6 @@ func zoneNameFromHostname(host string) string {
 	return strings.Join(parts[len(parts)-2:], ".")
 }
 
-// applyCronTriggers replaces the worker's full cron schedule with the given
-// list. The CF Schedules.Update endpoint is not additive — it overwrites.
-// An empty list intentionally clears all crons (this is opt-in: caller must
-// have already determined the user explicitly wants schedule management).
 func (p *CloudflareProvider) applyCronTriggers(ctx context.Context, workerName string, crons []string) error {
 	body := make([]workers.ScriptScheduleUpdateParamsBody, len(crons))
 	for i, c := range crons {
@@ -1171,18 +885,6 @@ func (p *CloudflareProvider) applyCronTriggers(ctx context.Context, workerName s
 	return nil
 }
 
-// UpdateSecrets stashes a batch of secrets onto the provider so DeployCompute
-// can fold them into the next Workers.Scripts.Update call as secret_text
-// bindings. This bypasses CF's per-secret PUT endpoint (rate-limited at ~13
-// req/s, error 10013) and lands every secret atomically in a single upload.
-//
-// Trade-off: secret rotation requires a Worker re-upload. That re-upload is
-// cheap because the bundle is content-hashed and reused — only the metadata
-// changes — but it does mean `nextdeploy secrets set FOO=bar` outside of a
-// full deploy uses the per-secret path (SetSecret/UnsetSecret) instead of
-// going through here.
-//
-// Calling UpdateSecrets with an empty map clears the staged set.
 func (p *CloudflareProvider) UpdateSecrets(ctx context.Context, appName string, secrets map[string]string) error {
 	_ = ctx
 	_ = appName
@@ -1197,14 +899,8 @@ func (p *CloudflareProvider) UpdateSecrets(ctx context.Context, appName string, 
 	return nil
 }
 
-// refuseSecretWipe guards against a Worker upload that would strip live
-// secrets. CF uploads are replace-not-merge: uploading `pending` as the full
-// secret_text set removes any live secret whose name it omits. If pending drops
-// names the live Worker still has, this returns a fatal error naming the
-// at-risk secrets. No live secrets makes it a no-op. GetSecrets returns
-// map[name]"[secret]" — only the keys matter here.
-func refuseSecretWipe(pending, live map[string]string) error {
-	if len(live) == 0 {
+func refuseSecretWipe(pending, live map[string]string, allow bool) error {
+	if allow || len(live) == 0 {
 		return nil
 	}
 	dropped := map[string]string{}
@@ -1222,7 +918,6 @@ func refuseSecretWipe(pending, live map[string]string) error {
 		len(dropped), strings.Join(sortedKeys(dropped), ", "))
 }
 
-// GetSecrets lists secret names. The CF API never returns secret values.
 func (p *CloudflareProvider) GetSecrets(ctx context.Context, appName string) (map[string]string, error) {
 	workerName := p.workerName(appName)
 	iter := p.cf.Workers.Scripts.Secrets.ListAutoPaging(ctx, workerName, workers.ScriptSecretListParams{
@@ -1264,7 +959,6 @@ func (p *CloudflareProvider) putWorkerSecret(ctx context.Context, workerName, ke
 	return err
 }
 
-// InvalidateCache purges the Cloudflare zone cache for the configured domain.
 func (p *CloudflareProvider) InvalidateCache(ctx context.Context, cfg *config.NextDeployConfig) error {
 	if cfg.App.Domain.Name == "" {
 		p.log.Info("No domain configured, skipping cache purge.")
@@ -1290,9 +984,6 @@ func (p *CloudflareProvider) InvalidateCache(ctx context.Context, cfg *config.Ne
 	return nil
 }
 
-// Rollback reverts the Worker to a previous deployment version.
-// Cloudflare's deployment API does not surface git commit metadata, so
-// --to <commit> is unsupported and falls back to step-based rollback.
 func (p *CloudflareProvider) Rollback(ctx context.Context, cfg *config.NextDeployConfig, opts RollbackOptions) error {
 	if opts.ToCommit != "" {
 		p.log.Warn("Cloudflare rollback does not support --to <commit>; using step-based rollback instead")
@@ -1339,9 +1030,6 @@ func (p *CloudflareProvider) Rollback(ctx context.Context, cfg *config.NextDeplo
 		return fmt.Errorf("failed to activate previous deployment: %w", err)
 	}
 
-	// Purge the edge cache so the rolled-back version is served immediately
-	// (the Provider contract promises this). Non-fatal — the version swap
-	// already took effect.
 	if err := p.InvalidateCache(ctx, cfg); err != nil {
 		p.log.Warn("Rollback: cache invalidation failed (edge may serve stale HTML): %v", err)
 	}
@@ -1353,11 +1041,6 @@ func (p *CloudflareProvider) Rollback(ctx context.Context, cfg *config.NextDeplo
 	return nil
 }
 
-// pickActiveVersion returns the VersionID that was actually receiving traffic in
-// a deployment — the one with the highest rollout percentage. Falls back to the
-// first version. A single-version deployment (the common case) is unaffected;
-// this only matters for a gradual/percentage rollout where Versions[0] was
-// arbitrary.
 func pickActiveVersion(versions []workers.DeploymentVersion) string {
 	best := versions[0]
 	for _, v := range versions[1:] {
@@ -1368,20 +1051,12 @@ func pickActiveVersion(versions []workers.DeploymentVersion) string {
 	return best.VersionID
 }
 
-// Destroy tears down everything nextdeploy created for this app: the Worker
-// (its routes + secrets go with it), the R2 bucket (objects swept first, since
-// CF refuses to delete a non-empty bucket), every provisioned resource recorded
-// in the cfstate manifest (D1/KV/Hyperdrive/Queues/Vectorize/AI Gateway), and
-// the DNS records it added. Anything that can't be deleted is reported and makes
-// Destroy return an error, so the operator is never told "done" while resources
-// (and billing) survive. 404s are treated as already-gone.
 func (p *CloudflareProvider) Destroy(ctx context.Context, cfg *config.NextDeployConfig) error {
 	workerName := p.getWorkerName(cfg)
 	bucketName := p.getBucketName(cfg)
 
 	var problems []string
 
-	// 1. Worker — its routes and secret_text bindings are removed with it.
 	p.log.Info("Deleting Worker: %s...", workerName)
 	if _, err := p.cf.Workers.Scripts.Delete(ctx, workerName, workers.ScriptDeleteParams{
 		AccountID: cloudflare.F(p.accountID),
@@ -1402,10 +1077,8 @@ func (p *CloudflareProvider) Destroy(ctx context.Context, cfg *config.NextDeploy
 		problems = append(problems, "r2 bucket "+bucketName)
 	}
 
-	// 3. Provisioned resources recorded in the state manifest (incl. orphans).
 	problems = append(problems, p.teardownProvisionedResources(ctx)...)
 
-	// 4. DNS records nextdeploy added (matched by value; siblings untouched).
 	problems = append(problems, p.teardownDeclaredDNS(ctx, cfg)...)
 
 	if len(problems) > 0 {
@@ -1428,8 +1101,6 @@ func (p *CloudflareProvider) GetResourceMap(ctx context.Context, cfg *config.Nex
 	}, nil
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
 func (p *CloudflareProvider) getWorkerName(cfg *config.NextDeployConfig) string {
 	return p.workerName(cfg.App.Name)
 }
@@ -1438,13 +1109,6 @@ func (p *CloudflareProvider) getBucketName(cfg *config.NextDeployConfig) string 
 	return p.bucketNameFromApp(cfg.App.Name)
 }
 
-// ensureR2BucketExists checks for the bucket and creates it on 404.
-// Other API errors propagate, with one well-known case translated into
-// a friendlier message: code 10042 ("Please enable R2 through the
-// Cloudflare Dashboard") fires before R2 is opted in on the account
-// and there is nothing the API token can do about it — the user has
-// to click through the dashboard once to add a payment method and
-// accept R2's terms. Same shape as AWS's S3 ToS gate.
 func (p *CloudflareProvider) ensureR2BucketExists(ctx context.Context, name string) error {
 	_, err := p.cf.R2.Buckets.Get(ctx, name, r2.BucketGetParams{
 		AccountID: cloudflare.F(p.accountID),
@@ -1469,16 +1133,10 @@ func (p *CloudflareProvider) ensureR2BucketExists(ctx context.Context, name stri
 	return err
 }
 
-// isR2NotEnabled returns true when an error is CF code 10042, which
-// means the account hasn't enabled R2 yet. The SDK doesn't expose error
-// codes as constants; we string-match on the well-known number.
 func isR2NotEnabled(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "10042")
 }
 
-// r2NotEnabledError returns a clear, actionable error for the one-time
-// R2 enablement gate. Includes the dashboard URL so the user goes
-// straight to the right page instead of digging through CF's nav.
 func r2NotEnabledError(accountID string) error {
 	return fmt.Errorf(
 		"R2 is not enabled on your Cloudflare account yet.\n\n"+
@@ -1490,16 +1148,10 @@ func r2NotEnabledError(accountID string) error {
 	)
 }
 
-// ensureWorkerRoute creates a route `<domain>/*` for the worker, deriving the
-// zone from the domain. Convenience wrapper around ensureWorkerRouteForZone.
 func (p *CloudflareProvider) ensureWorkerRoute(ctx context.Context, workerName, domain string) error {
 	return p.ensureWorkerRouteForZone(ctx, workerName, domain+"/*", domain)
 }
 
-// ensureWorkerRouteForZone creates the given route pattern for the worker in
-// the named zone. Skips creation if an identical route already exists.
-// Resolves zoneName via Zones.List; if zoneName is empty, derives it from the
-// pattern using zoneNameFromPattern.
 func (p *CloudflareProvider) ensureWorkerRouteForZone(ctx context.Context, workerName, pattern, zoneName string) error {
 	if zoneName == "" {
 		zoneName = zoneNameFromPattern(pattern)
@@ -1532,9 +1184,6 @@ func (p *CloudflareProvider) ensureWorkerRouteForZone(ctx context.Context, worke
 	return err
 }
 
-// zoneNameFromPattern strips the trailing /* and any wildcard subdomain to
-// extract the apex zone (e.g. "*.example.com/*" → "example.com"). Used as a
-// fallback when zone is not explicitly set on a route.
 func zoneNameFromPattern(pattern string) string {
 	host := pattern
 	if i := strings.Index(host, "/"); i >= 0 {
@@ -1557,13 +1206,6 @@ func (p *CloudflareProvider) getZoneID(ctx context.Context, domain string) (stri
 	return page.Result[0].ID, nil
 }
 
-// progressReader wraps an io.Reader and logs cumulative bytes-read at
-// regular intervals. Used to give the operator visibility into a
-// long-running multipart upload that would otherwise look indistinguishable
-// from a hung connection.
-//
-// Logging is throttled to one line per second + final summary, so a fast
-// upload doesn't spam the terminal and a slow one doesn't go silent.
 type progressReader struct {
 	r       io.Reader
 	total   int64
@@ -1591,8 +1233,6 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// namedFile is an io.Reader that the CF SDK's multipart marshaller can name.
-// The SDK reflects on Filename() / ContentType() when assembling form parts.
 type namedFile struct {
 	io.Reader
 	filename    string

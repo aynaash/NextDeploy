@@ -31,6 +31,31 @@
     socket_dir: /run/nextdeployd
 
   # ────────────────────────────────────────────────────────────────────────────
+  # PHASE 0 – Preflight: require a supported Python on the target
+  # ansible-core >= 2.19 refuses to run ANY module against a target whose Python
+  # is older than 3.9. Bootstrapping a parallel python3.9 doesn't help on apt/yum
+  # distros: the apt/dnf modules need the distro-compiled python3-apt / rpm C
+  # bindings, which only exist for the *system* interpreter (Python 3.8 on Ubuntu
+  # 20.04 / CentOS 7). So instead we fail fast, over `raw` (needs no target
+  # Python), with an actionable message. Supported targets ship Python >= 3.9
+  # natively (Ubuntu 22.04+, Debian 11+, RHEL/Rocky/Alma 9+, Amazon Linux 2023).
+  # ────────────────────────────────────────────────────────────────────────────
+  pre_tasks:
+    - name: "Phase 0 | Preflight | Require Python >= 3.9 on the target"
+      ansible.builtin.raw: |
+        set -eu
+        v=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo 0.0)
+        maj=${v%%.*}; min=${v#*.}
+        if [ "$maj" -lt 3 ] || { [ "$maj" -eq 3 ] && [ "$min" -lt 9 ]; }; then
+          echo "NEXTDEPLOY_UNSUPPORTED_PYTHON: target has Python ${v}; NextDeploy requires >= 3.9." >&2
+          echo "Ubuntu 20.04 and CentOS 7 ship Python 3.8 and are unsupported (both are EOL)." >&2
+          echo "Use Ubuntu 22.04+, Debian 11+, RHEL/Rocky/Alma 9+, or Amazon Linux 2023." >&2
+          exit 78
+        fi
+        echo "python-ok ${v}"
+      changed_when: false
+
+  # ────────────────────────────────────────────────────────────────────────────
   # PHASE 1 – System bootstrap & info
   # ────────────────────────────────────────────────────────────────────────────
   tasks:

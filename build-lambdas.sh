@@ -37,5 +37,5 @@ ls -lh assets/lambda/imgopt/bootstrap
 ls -lh assets/lambda/revalidator/bootstrap
 echo ""
 echo "Next steps:"
-echo "  1. Build CLI: go build -o nextdeploy ./cli/main.go"
-echo "  2. Test deployment: ./nextdeploy build && ./nextdeploy ship"
+echo "  1. Build CLI: go build -o nextdeploy 
+

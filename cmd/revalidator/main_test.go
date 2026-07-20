@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 	"testing"
+
+	"github.com/aws/aws-lambda-go/events"
 )
 
 func TestRevalidateMessage_Unmarshal(t *testing.T) {
@@ -52,6 +55,48 @@ func TestTagPathMap_Unmarshal(t *testing.T) {
 	}
 	if m.Intervals["t"] != 60 {
 		t.Errorf(`Intervals["t"] = %d, want 60`, m.Intervals["t"])
+	}
+}
+
+// TestLoadTagMap_CachedFastPath covers the cache short-circuit without any S3
+// call. The S3-fetch body of loadTagMap needs a client-injection refactor to
+// test hermetically (it builds s3.NewFromConfig from a package global inside
+// the function) — out of scope for a test-only change.
+func TestLoadTagMap_CachedFastPath(t *testing.T) {
+	origCached, origMap := cachedMap, tagMap
+	t.Cleanup(func() { cachedMap, tagMap = origCached, origMap })
+
+	want := TagPathMap{Tags: map[string][]string{"t": {"/a"}}}
+	cachedMap = true
+	tagMap = want
+
+	got, err := loadTagMap(context.Background())
+	if err != nil {
+		t.Fatalf("loadTagMap: unexpected error %v", err)
+	}
+	if len(got.Tags["t"]) != 1 || got.Tags["t"][0] != "/a" {
+		t.Fatalf("loadTagMap cached = %+v, want %+v", got, want)
+	}
+}
+
+// TestHandler_NoPathsReturnsNil drives the handler's early-exit branch: when no
+// record yields an invalidatable path it must return nil BEFORE reaching the
+// CloudFront call. The cache is primed so loadTagMap never touches S3.
+func TestHandler_NoPathsReturnsNil(t *testing.T) {
+	origCached, origMap := cachedMap, tagMap
+	t.Cleanup(func() { cachedMap, tagMap = origCached, origMap })
+	cachedMap = true
+	tagMap = TagPathMap{Tags: map[string][]string{"known": {"/x"}}}
+
+	// Empty object, malformed JSON, and a tag with no map entry — none produce a
+	// path, so no invalidation (real AWS) is attempted.
+	ev := events.SQSEvent{Records: []events.SQSMessage{
+		{Body: `{}`},
+		{Body: `{bad json`},
+		{Body: `{"tag":"unknown"}`},
+	}}
+	if err := handler(context.Background(), ev); err != nil {
+		t.Fatalf("handler with no invalidatable paths: want nil, got %v", err)
 	}
 }
 

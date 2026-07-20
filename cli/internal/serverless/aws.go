@@ -33,15 +33,15 @@ import (
 )
 
 type AWSProvider struct {
-	log                 *shared.Logger
-	cfg                 aws.Config
-	accountID           string
-	callerArn           string // STS caller ARN, used for audit tagging of secret writes
-	environment         string // populated in Initialize from appCfg.App.Environment
-	lambdaTimeout       int32  // configured Lambda timeout in seconds, used to size CloudFront OriginReadTimeout
-	secretsLayerVersion string // resolved AWS-Parameters-and-Secrets layer version; "" = use default const
-	secretsKmsKeyId     string // optional customer-managed KMS key for Secrets Manager; "" = default aws/secretsmanager
-	verbose             bool
+	log             *shared.Logger
+	cfg             aws.Config
+	accountID       string
+	callerArn       string // STS caller ARN, used for audit tagging of secret writes
+	environment     string // populated in Initialize from appCfg.App.Environment
+	lambdaTimeout   int32  // configured Lambda timeout in seconds, used to size CloudFront OriginReadTimeout
+	secretsLayerARN string // resolved AWS-Parameters-and-Secrets layer ARN (SSM); "" = use per-region fallback map
+	secretsKmsKeyId string // optional customer-managed KMS key for Secrets Manager; "" = default aws/secretsmanager
+	verbose         bool
 }
 
 // originReadTimeout returns the CloudFront OriginReadTimeout value to use for

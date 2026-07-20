@@ -10,9 +10,18 @@ import (
 	"github.com/aynaash/nextdeploy/shared/config"
 )
 
-// hintCloudflarePermissions must turn a raw CF auth failure into actionable
-// token-scope guidance, while passing non-auth errors through untouched. This
-// is what makes a 403 during resource provisioning diagnosable.
+func TestSecretsDeclared(t *testing.T){
+	dir := t.TempDir()
+	chdir(t,dir)
+	cases := []struct {
+		name string 
+		cfg *config.NextDeployConfig
+		want bool 
+	}{
+		{"nil",nil, false},
+		{"empty"}
+	}
+}
 func TestHintCloudflarePermissions(t *testing.T) {
 	cases := map[string]bool{ // error text -> should add the token-scope hint
 		"403 Forbidden": true,
@@ -32,23 +41,15 @@ func TestHintCloudflarePermissions(t *testing.T) {
 	}
 }
 
-// TestLoadLocalSecrets_Precedence verifies the merge order:
-//
-//	.env  <  cfg.Secrets.Files  <  managed JSON store
-//
-// This is the regression net for the YAML-merge fix in deploy.go.
 func TestLoadLocalSecrets_Precedence(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)
 
-	// 1. Project-root .env (lowest precedence)
 	writeFile(t, ".env", "FOO=from_dotenv\nSHARED=dotenv_loses\nDOTENV_ONLY=1\n")
 
-	// 2. YAML-declared file (middle precedence)
 	yamlFile := filepath.Join(dir, "secrets.env")
 	writeFile(t, yamlFile, "BAR=from_yaml\nSHARED=yaml_loses\nYAML_ONLY=1\n")
 
-	// 3. Managed JSON store (highest precedence)
 	if err := os.MkdirAll(".nextdeploy", 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +87,6 @@ func TestLoadLocalSecrets_Precedence(t *testing.T) {
 	}
 }
 
-// TestLoadLocalSecrets_NoSources returns an empty map without error.
 func TestLoadLocalSecrets_NoSources(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)
@@ -100,7 +100,6 @@ func TestLoadLocalSecrets_NoSources(t *testing.T) {
 	}
 }
 
-// TestLoadLocalSecrets_MissingYamlFile fails loudly (no silent skip).
 func TestLoadLocalSecrets_MissingYamlFile(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)
@@ -138,7 +137,6 @@ func TestSecretsEqual(t *testing.T) {
 	}
 }
 
-// chdir switches CWD for the duration of a test, restoring on cleanup.
 func chdir(t *testing.T, dir string) {
 	t.Helper()
 	prev, err := os.Getwd()

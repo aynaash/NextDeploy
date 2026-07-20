@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdaTypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
 
@@ -25,16 +26,65 @@ import (
 	"github.com/aynaash/nextdeploy/shared/nextcore"
 )
 
-// secretsExtensionLayerAccount is the AWS-published account ID that hosts the
-// Parameters & Secrets Lambda Extension layer. Pinned per AWS documentation.
-// The *version* is resolved at deploy time via ListLayerVersions and cached on
-// the provider (p.secretsLayerVersion); the default below is only used as a
-// fallback when lambda:ListLayerVersions is unavailable. Last verified: 2026-04.
-const (
-	secretsExtensionLayerAccount        = "177933130628"
-	secretsExtensionLayerName           = "AWS-Parameters-and-Secrets-Lambda-Extension"
-	defaultSecretsExtensionLayerVersion = "11"
-)
+// secretsExtensionLatestParam is the AWS-published public SSM parameter that
+// resolves to the current x86_64 Parameters & Secrets Lambda Extension layer
+// ARN for the caller's region — correct owner account AND latest version in a
+// single ssm:GetParameter call. This is AWS's recommended resolution method
+// (see "Retrieving the latest Lambda extension ARN version" in the Systems
+// Manager user guide) and the only one that works cross-account: the layer is
+// AWS-owned, so lambda:ListLayerVersions never succeeds against it. We attach
+// the extension only to x86_64 functions (we never set Architectures, so Lambda
+// defaults to x86_64).
+const secretsExtensionLatestParam = "/aws/service/aws-parameters-and-secrets-lambda-extension/x86/latest"
+
+// secretsExtensionLayerFallback maps a region to the x86_64 extension layer ARN
+// to use when the SSM public parameter is unavailable (e.g. ssm:GetParameter is
+// denied). The owner account ID differs per region and the version drifts as AWS
+// republishes, so these are a pinned snapshot from the AWS docs (x86_64 table,
+// last verified 2026-07). Layer versions are immutable, so a pinned version keeps
+// resolving even after AWS publishes a newer one — this only misses new versions,
+// it never breaks. Prefer secretsExtensionLatestParam; this is the safety net.
+var secretsExtensionLayerFallback = map[string]string{
+	"us-east-2":      "arn:aws:lambda:us-east-2:590474943231:layer:AWS-Parameters-and-Secrets-Lambda-Extension:94",
+	"us-east-1":      "arn:aws:lambda:us-east-1:177933569100:layer:AWS-Parameters-and-Secrets-Lambda-Extension:88",
+	"us-west-1":      "arn:aws:lambda:us-west-1:997803712105:layer:AWS-Parameters-and-Secrets-Lambda-Extension:84",
+	"us-west-2":      "arn:aws:lambda:us-west-2:345057560386:layer:AWS-Parameters-and-Secrets-Lambda-Extension:88",
+	"af-south-1":     "arn:aws:lambda:af-south-1:317013901791:layer:AWS-Parameters-and-Secrets-Lambda-Extension:85",
+	"ap-east-1":      "arn:aws:lambda:ap-east-1:768336418462:layer:AWS-Parameters-and-Secrets-Lambda-Extension:81",
+	"ap-east-2":      "arn:aws:lambda:ap-east-2:890742577149:layer:AWS-Parameters-and-Secrets-Lambda-Extension:54",
+	"ap-south-2":     "arn:aws:lambda:ap-south-2:070087711984:layer:AWS-Parameters-and-Secrets-Lambda-Extension:76",
+	"ap-southeast-3": "arn:aws:lambda:ap-southeast-3:490737872127:layer:AWS-Parameters-and-Secrets-Lambda-Extension:79",
+	"ap-southeast-4": "arn:aws:lambda:ap-southeast-4:090732460067:layer:AWS-Parameters-and-Secrets-Lambda-Extension:69",
+	"ap-southeast-5": "arn:aws:lambda:ap-southeast-5:381492012281:layer:AWS-Parameters-and-Secrets-Lambda-Extension:68",
+	"ap-southeast-6": "arn:aws:lambda:ap-southeast-6:995508174458:layer:AWS-Parameters-and-Secrets-Lambda-Extension:63",
+	"ap-south-1":     "arn:aws:lambda:ap-south-1:176022468876:layer:AWS-Parameters-and-Secrets-Lambda-Extension:83",
+	"ap-northeast-3": "arn:aws:lambda:ap-northeast-3:576959938190:layer:AWS-Parameters-and-Secrets-Lambda-Extension:79",
+	"ap-northeast-2": "arn:aws:lambda:ap-northeast-2:738900069198:layer:AWS-Parameters-and-Secrets-Lambda-Extension:84",
+	"ap-southeast-1": "arn:aws:lambda:ap-southeast-1:044395824272:layer:AWS-Parameters-and-Secrets-Lambda-Extension:86",
+	"ap-southeast-2": "arn:aws:lambda:ap-southeast-2:665172237481:layer:AWS-Parameters-and-Secrets-Lambda-Extension:90",
+	"ap-southeast-7": "arn:aws:lambda:ap-southeast-7:941377119484:layer:AWS-Parameters-and-Secrets-Lambda-Extension:69",
+	"ap-northeast-1": "arn:aws:lambda:ap-northeast-1:133490724326:layer:AWS-Parameters-and-Secrets-Lambda-Extension:85",
+	"ca-central-1":   "arn:aws:lambda:ca-central-1:200266452380:layer:AWS-Parameters-and-Secrets-Lambda-Extension:92",
+	"ca-west-1":      "arn:aws:lambda:ca-west-1:243964427225:layer:AWS-Parameters-and-Secrets-Lambda-Extension:56",
+	"cn-north-1":     "arn:aws-cn:lambda:cn-north-1:287114880934:layer:AWS-Parameters-and-Secrets-Lambda-Extension:86",
+	"cn-northwest-1": "arn:aws-cn:lambda:cn-northwest-1:287310001119:layer:AWS-Parameters-and-Secrets-Lambda-Extension:81",
+	"eu-central-1":   "arn:aws:lambda:eu-central-1:187925254637:layer:AWS-Parameters-and-Secrets-Lambda-Extension:86",
+	"eu-west-1":      "arn:aws:lambda:eu-west-1:015030872274:layer:AWS-Parameters-and-Secrets-Lambda-Extension:90",
+	"eu-west-2":      "arn:aws:lambda:eu-west-2:133256977650:layer:AWS-Parameters-and-Secrets-Lambda-Extension:84",
+	"eu-south-1":     "arn:aws:lambda:eu-south-1:325218067255:layer:AWS-Parameters-and-Secrets-Lambda-Extension:79",
+	"eu-west-3":      "arn:aws:lambda:eu-west-3:780235371811:layer:AWS-Parameters-and-Secrets-Lambda-Extension:83",
+	"eu-south-2":     "arn:aws:lambda:eu-south-2:524103009944:layer:AWS-Parameters-and-Secrets-Lambda-Extension:75",
+	"eusc-de-east-1": "arn:aws-eusc:lambda:eusc-de-east-1:041683371183:layer:AWS-Parameters-and-Secrets-Lambda-Extension:5",
+	"eu-north-1":     "arn:aws:lambda:eu-north-1:427196147048:layer:AWS-Parameters-and-Secrets-Lambda-Extension:79",
+	"il-central-1":   "arn:aws:lambda:il-central-1:148806536434:layer:AWS-Parameters-and-Secrets-Lambda-Extension:56",
+	"eu-central-2":   "arn:aws:lambda:eu-central-2:772501565639:layer:AWS-Parameters-and-Secrets-Lambda-Extension:63",
+	"mx-central-1":   "arn:aws:lambda:mx-central-1:241533131596:layer:AWS-Parameters-and-Secrets-Lambda-Extension:53",
+	"me-south-1":     "arn:aws:lambda:me-south-1:832021897121:layer:AWS-Parameters-and-Secrets-Lambda-Extension:58",
+	"me-central-1":   "arn:aws:lambda:me-central-1:858974508948:layer:AWS-Parameters-and-Secrets-Lambda-Extension:60",
+	"sa-east-1":      "arn:aws:lambda:sa-east-1:933737806257:layer:AWS-Parameters-and-Secrets-Lambda-Extension:88",
+	"us-gov-east-1":  "arn:aws-us-gov:lambda:us-gov-east-1:129776340158:layer:AWS-Parameters-and-Secrets-Lambda-Extension:79",
+	"us-gov-west-1":  "arn:aws-us-gov:lambda:us-gov-west-1:127562683043:layer:AWS-Parameters-and-Secrets-Lambda-Extension:83",
+}
 
 // isMissingGetLayerVersion reports whether err is an IAM AccessDenied on
 // lambda:GetLayerVersion — the one error code we want to react to with the
@@ -54,46 +104,50 @@ func isMissingGetLayerVersion(err error) bool {
 	return strings.Contains(err.Error(), "lambda:GetLayerVersion")
 }
 
-// secretsExtensionLayerARN returns the layer ARN for the given region using
-// the version cached on the provider, falling back to the pinned default when
-// none has been resolved yet.
+// secretsExtensionLayerARN returns the full x86_64 extension layer ARN for the
+// given region: the value resolved from SSM and cached on the provider, else the
+// pinned per-region fallback. Returns "" when neither is available (an unknown
+// region with SSM denied) — callers must treat "" as "attach no layer".
 func (p *AWSProvider) secretsExtensionLayerARN(region string) string {
-	version := p.secretsLayerVersion
-	if version == "" {
-		version = defaultSecretsExtensionLayerVersion
+	if p.secretsLayerARN != "" {
+		return p.secretsLayerARN
 	}
-	return fmt.Sprintf(
-		"arn:aws:lambda:%s:%s:layer:%s:%s",
-		region,
-		secretsExtensionLayerAccount,
-		secretsExtensionLayerName,
-		version,
-	)
+	return secretsExtensionLayerFallback[region]
 }
 
-// resolveSecretsExtensionLayerVersion asks AWS for the latest published version
-// of the Secrets Extension layer. Returns the version as a string, or "" when
-// the caller lacks lambda:ListLayerVersions or the call fails — the caller
-// should then fall back to defaultSecretsExtensionLayerVersion.
-func (p *AWSProvider) resolveSecretsExtensionLayerVersion(ctx context.Context, client *lambda.Client, region string) string {
-	layerNameARN := fmt.Sprintf(
-		"arn:aws:lambda:%s:%s:layer:%s",
-		region,
-		secretsExtensionLayerAccount,
-		secretsExtensionLayerName,
-	)
-	out, err := client.ListLayerVersions(ctx, &lambda.ListLayerVersionsInput{
-		LayerName: aws.String(layerNameARN),
-		MaxItems:  aws.Int32(1),
+// resolveSecretsExtensionLayerARN reads the AWS-published public SSM parameter
+// that points at the current x86_64 extension layer for the caller's region.
+// Returns the full ARN, or "" when ssm:GetParameter is unavailable or the value
+// is empty — the caller then falls back to secretsExtensionLayerFallback.
+func (p *AWSProvider) resolveSecretsExtensionLayerARN(ctx context.Context) string {
+	client := ssm.NewFromConfig(p.cfg)
+	out, err := client.GetParameter(ctx, &ssm.GetParameterInput{
+		Name: aws.String(secretsExtensionLatestParam),
 	})
 	if err != nil {
-		p.log.Warn("Could not list Secrets Extension layer versions (falling back to pinned :%s): %v", defaultSecretsExtensionLayerVersion, err)
+		p.log.Warn("Could not resolve Secrets Extension layer from SSM %s (falling back to pinned ARN): %v", secretsExtensionLatestParam, err)
 		return ""
 	}
-	if len(out.LayerVersions) == 0 {
+	if out.Parameter == nil || out.Parameter.Value == nil {
 		return ""
 	}
-	return fmt.Sprintf("%d", out.LayerVersions[0].Version)
+	return *out.Parameter.Value
+}
+
+// layerNameAndVersion splits a full layer version ARN
+// (arn:...:layer:NAME:VERSION) into the version-less layer ARN and the numeric
+// version, as required by lambda:GetLayerVersion. ok is false when the ARN has
+// no trailing numeric version.
+func layerNameAndVersion(arn string) (nameARN string, version int64, ok bool) {
+	i := strings.LastIndex(arn, ":")
+	if i < 0 {
+		return "", 0, false
+	}
+	v := mustAtoi64(arn[i+1:])
+	if v == nil {
+		return "", 0, false
+	}
+	return arn[:i], *v, true
 }
 
 // probeSecretsExtensionLayer calls GetLayerVersion as a lightweight IAM probe.
@@ -117,24 +171,33 @@ func (p *AWSProvider) probeSecretsExtensionLayer(ctx context.Context, appCfg *cf
 		return nil
 	}
 
-	client := lambda.NewFromConfig(p.cfg)
-
-	// Resolve the latest version up front so every subsequent CreateFunction /
-	// UpdateFunctionConfiguration uses the same ARN. Silent fallback to the
-	// pinned default if List is unavailable — non-fatal.
-	if v := p.resolveSecretsExtensionLayerVersion(ctx, client, region); v != "" {
-		p.secretsLayerVersion = v
+	// Resolve the full layer ARN up front (correct owner account + latest
+	// version) so every subsequent CreateFunction / UpdateFunctionConfiguration
+	// uses the same value. Silent fallback to the pinned per-region ARN if SSM
+	// is unavailable — non-fatal.
+	if arn := p.resolveSecretsExtensionLayerARN(ctx); arn != "" {
+		p.secretsLayerARN = arn
 	}
 
 	layerARN := p.secretsExtensionLayerARN(region)
-	probeVersion := p.secretsLayerVersion
-	if probeVersion == "" {
-		probeVersion = defaultSecretsExtensionLayerVersion
+	if layerARN == "" {
+		// Unknown region with SSM denied — no ARN to probe or attach. Advisory
+		// only; the CreateFunction/UpdateFunctionConfiguration paths treat an
+		// empty ARN as "attach no layer".
+		p.log.Warn("No Secrets Extension layer ARN known for region %s and SSM lookup failed; deploying without the extension.", region)
+		return nil
 	}
 
+	nameARN, version, ok := layerNameAndVersion(layerARN)
+	if !ok {
+		p.log.Warn("Could not parse Secrets Extension layer ARN %q; skipping IAM probe.", layerARN)
+		return nil
+	}
+
+	client := lambda.NewFromConfig(p.cfg)
 	_, err := client.GetLayerVersion(ctx, &lambda.GetLayerVersionInput{
-		LayerName:     aws.String(layerARN),
-		VersionNumber: mustAtoi64(probeVersion),
+		LayerName:     aws.String(nameARN),
+		VersionNumber: aws.Int64(version),
 	})
 	if err == nil {
 		return nil
@@ -168,14 +231,24 @@ func mustAtoi64(s string) *int64 {
 // `lambda:GetLayerVersion` AND `serverless.allow_secrets_in_env` is NOT set.
 // We fail loudly rather than silently leaking secrets into Lambda env vars.
 const missingLayerBlockedBanner = `════════════════════ DEPLOYMENT BLOCKED ════════════════════
-IAM user lacks 'lambda:GetLayerVersion' for the AWS Secrets Extension Layer.
+AccessDenied on lambda:GetLayerVersion for the AWS Secrets Extension layer.
+The layer is AWS-owned, so this is a cross-account read — both your identity
+policy AND the layer's resource policy must allow it. Depending on your setup:
 
-Recommended fix: add this permission to your IAM policy:
-    {
-      "Effect": "Allow",
-      "Action": "lambda:GetLayerVersion",
-      "Resource": "arn:aws:lambda:*:177933130628:layer:AWS-Parameters-and-Secrets-Lambda-Extension:*"
-    }
+  • Standard IAM user/role: add this to your identity policy —
+      {
+        "Effect": "Allow",
+        "Action": "lambda:GetLayerVersion",
+        "Resource": "arn:aws:lambda:*:*:layer:AWS-Parameters-and-Secrets-Lambda-Extension:*"
+      }
+
+  • Already an admin or the account root (root has every identity permission):
+    the block is NOT your identity policy. Check, in order —
+      - an AWS Organizations SCP denying cross-account lambda:GetLayerVersion;
+      - a permissions boundary on the role;
+      - a wrong region/ARN (owner account differs per region — NextDeploy
+        resolves it from the public SSM parameter, but a denied ssm:GetParameter
+        falls back to a pinned list that may not cover a brand-new region).
 
 Insecure escape hatch (NOT RECOMMENDED): set ` + "`serverless.allow_secrets_in_env: true`" + `
 in nextdeploy.yml. This injects every secret directly into Lambda environment
@@ -455,7 +528,10 @@ func (p *AWSProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageR
 	}
 
 	maxRetries := 5
-	layersToApply := []string{secretsExtensionLayer}
+	var layersToApply []string
+	if secretsExtensionLayer != "" {
+		layersToApply = []string{secretsExtensionLayer}
+	}
 	layerFallbackApplied := false
 	for i := 0; i < maxRetries; i++ {
 		// If we're in fallback mode, we need to manually fetch and merge secrets into the environment
@@ -656,8 +732,14 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 
 	p.log.Info("Lambda function %s does not exist, creating with role %s (Handler: %s, Runtime: %s)...", name, roleArn, handler, runtime)
 
-	// Managed Layer for Secrets Extension (Node.js 20 compatible)
+	// Managed Layer for Secrets Extension (Node.js 20 compatible). Empty when
+	// the ARN could not be resolved (unknown region + SSM denied) — attach no
+	// layer in that case rather than a malformed one.
 	secretsExtensionLayer := p.secretsExtensionLayerARN(p.cfg.Region)
+	var createLayers []string
+	if secretsExtensionLayer != "" {
+		createLayers = []string{secretsExtensionLayer}
+	}
 
 	createInput := &lambda.CreateFunctionInput{
 		Code: &lambdaTypes.FunctionCode{
@@ -676,7 +758,7 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 		},
 		Timeout:    aws.Int32(timeout),
 		MemorySize: aws.Int32(memory),
-		Layers:     []string{secretsExtensionLayer},
+		Layers:     createLayers,
 	}
 
 	maxRetries := 10
