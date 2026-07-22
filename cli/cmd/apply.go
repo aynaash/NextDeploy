@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// applyYes skips the confirmation prompt (for CI / non-interactive use).
 var applyYes bool
 
 var applyCmd = &cobra.Command{
@@ -50,7 +49,6 @@ Exit codes:
 			os.Exit(1)
 		}
 
-		// Show the plan first, then (unless --yes) confirm before mutating.
 		plan, err := provider.Plan(ctx, cfg)
 		if err != nil {
 			log.Error("Plan failed: %v", err)
@@ -82,7 +80,6 @@ Exit codes:
 	},
 }
 
-// pendingChanges counts plan items that would create or update.
 func pendingChanges(r *serverless.PlanResult) int {
 	n := 0
 	for _, it := range r.Items {
@@ -93,7 +90,6 @@ func pendingChanges(r *serverless.PlanResult) int {
 	return n
 }
 
-// confirm reads a y/N answer from stdin.
 func confirm(prompt string) bool {
 	fmt.Printf("%s [y/N]: ", prompt)
 	var answer string

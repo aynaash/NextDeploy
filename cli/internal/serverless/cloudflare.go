@@ -939,7 +939,7 @@ func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.P
 		live, err := p.GetSecrets(ctx, cfg.App.Name)
 		if err != nil {
 			p.log.Warn("Could not list live Worker secrets to check for an accidental wipe (%v) — proceeding without the guard", err)
-		} else if err := refuseSecretWipe(p.pendingSecrets, live); err != nil {
+		} else if err := refuseSecretWipe(p.pendingSecrets, live, false); err != nil {
 			return err
 		}
 	}
@@ -1203,8 +1203,9 @@ func (p *CloudflareProvider) UpdateSecrets(ctx context.Context, appName string, 
 // names the live Worker still has, this returns a fatal error naming the
 // at-risk secrets. No live secrets makes it a no-op. GetSecrets returns
 // map[name]"[secret]" — only the keys matter here.
-func refuseSecretWipe(pending, live map[string]string) error {
-	if len(live) == 0 {
+func refuseSecretWipe(pending, live map[string]string, allow bool) error {
+
+	if allow || len(live) == 0 {
 		return nil
 	}
 	dropped := map[string]string{}
@@ -1289,7 +1290,6 @@ func (p *CloudflareProvider) InvalidateCache(ctx context.Context, cfg *config.Ne
 	p.log.Info("Cloudflare cache purged for zone %s", zoneID)
 	return nil
 }
-
 // Rollback reverts the Worker to a previous deployment version.
 // Cloudflare's deployment API does not surface git commit metadata, so
 // --to <commit> is unsupported and falls back to step-based rollback.

@@ -22,7 +22,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-//go:embed ansible/playbooks/prepare.yml
 var preparePlaybookYAML string
 
 var (
@@ -51,8 +50,6 @@ See: https://docs.ansible.com/ansible/latest/installation_guide/`,
 
 var prepareAllowRoot bool
 
-// rootCredentialBlocked reports whether provisioning must be refused because the
-// configured SSH user is root. Pure, so it's unit-tested. --allow-root overrides.
 func rootCredentialBlocked(username string, allowRoot bool) (bool, string) {
 	if username == "root" && !allowRoot {
 		return true, "refusing to provision over the 'root' SSH login. Use a sudo-capable " +
@@ -94,9 +91,6 @@ func runPrepare(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Refuse to provision over a naked root login — a compliance non-starter in
-	// most professional networks. Apps run as the unprivileged `nextdeploy`
-	// user; provisioning only needs a sudo-capable account.
 	if blocked, reason := rootCredentialBlocked(serverCfg.Username, prepareAllowRoot); blocked {
 		PrepLogs.Error("%s", reason)
 		os.Exit(1)
@@ -245,7 +239,6 @@ func resolveTargetServer() (string, config.ServerConfig, error) {
 		return "", config.ServerConfig{}, fmt.Errorf("no servers configured in nextdeploy.yml")
 	}
 
-	// Always use the first server for now as the primary target
 	first := cfg.Servers[0]
 	PrepLogs.Debug("Using primary server: %s (%s)", first.Name, first.Host)
 	return first.Name, first, nil

@@ -39,18 +39,18 @@ func TestRefuseSecretWipe(t *testing.T) {
 	live := map[string]string{"DATABASE_URL": "[secret]", "AUTH_SECRET": "[secret]"}
 
 	// Empty incoming set with live secrets → refuse, naming the dropped ones.
-	err := refuseSecretWipe(map[string]string{}, live)
+	err := refuseSecretWipe(map[string]string{}, live, false)
 	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
 		t.Fatalf("expected wipe refusal naming DATABASE_URL, got %v", err)
 	}
 
 	// Superset (keeps all live names) → allowed.
-	if err := refuseSecretWipe(map[string]string{"DATABASE_URL": "x", "AUTH_SECRET": "y", "NEW": "z"}, live); err != nil {
+	if err := refuseSecretWipe(map[string]string{"DATABASE_URL": "x", "AUTH_SECRET": "y", "NEW": "z"}, live, false); err != nil {
 		t.Errorf("superset must be allowed, got %v", err)
 	}
 
 	// No live secrets → no-op.
-	if err := refuseSecretWipe(map[string]string{}, nil); err != nil {
+	if err := refuseSecretWipe(map[string]string{}, nil, false); err != nil {
 		t.Errorf("no live secrets must be a no-op, got %v", err)
 	}
 }

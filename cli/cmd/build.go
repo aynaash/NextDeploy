@@ -13,13 +13,6 @@ import (
 
 var forceBuild bool
 
-// buildCmd is a thin wrapper over buildflow.Run. The same flow runs from
-// `nextdeploy ship` automatically, so build is here for two cases:
-//   - CI pipelines that want a separate build stage (cache, parallel
-//     fan-out, smaller blast radius for failures).
-//   - Local "did this compile?" checks before committing.
-//
-// All target-aware logic lives in cli/internal/buildflow.
 var buildCmd = &cobra.Command{
 	Use:   "build",
 	Short: "Validate, run `next build`, and prepare a deployable artifact",

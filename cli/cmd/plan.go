@@ -12,10 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// planOnlyFlag is a comma-separated list of module names to scope the plan to.
-// Recognized values: dataplane (hyperdrive, queues, vectorize, ai_gateway),
-// edge (dns). Empty means "all modules". Unknown values error out — typos
-// silently scoping to nothing would be a footgun on a production cutover.
 var planOnlyFlag string
 
 var planCmd = &cobra.Command{
@@ -125,8 +121,6 @@ func renderPlan(r *serverless.PlanResult) {
 	}
 }
 
-// kindToModule maps a PlanItem.Kind to the module bucket --only filters by.
-// Unmapped kinds are dropped from any --only output.
 var kindToModule = map[string]string{
 	"hyperdrive": "dataplane",
 	"queue":      "dataplane",

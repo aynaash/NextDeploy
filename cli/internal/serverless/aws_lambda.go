@@ -600,7 +600,7 @@ func (p *AWSProvider) Rollback(ctx context.Context, appCfg *cfgTypes.NextDeployC
 		p.log.Warn("Cache invalidation after rollback failed (non-fatal): %v", err)
 	}
 
-	p.log.Info("✅ Rollback complete! Lambda is running the previous deployment.")
+	p.log.Info("Rollback complete! Lambda is running the previous deployment.")
 	return nil
 }
 
@@ -708,6 +708,7 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 				continue
 			}
 		}
+
 
 		var invalidParam *lambdaTypes.InvalidParameterValueException
 		if errors.As(createErr, &invalidParam) && strings.Contains(createErr.Error(), "role") && i < maxRetries-1 {

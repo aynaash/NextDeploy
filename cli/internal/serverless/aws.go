@@ -36,17 +36,14 @@ type AWSProvider struct {
 	log                 *shared.Logger
 	cfg                 aws.Config
 	accountID           string
-	callerArn           string // STS caller ARN, used for audit tagging of secret writes
-	environment         string // populated in Initialize from appCfg.App.Environment
-	lambdaTimeout       int32  // configured Lambda timeout in seconds, used to size CloudFront OriginReadTimeout
-	secretsLayerVersion string // resolved AWS-Parameters-and-Secrets layer version; "" = use default const
-	secretsKmsKeyId     string // optional customer-managed KMS key for Secrets Manager; "" = default aws/secretsmanager
+	callerArn           string 
+	environment         string 
+	lambdaTimeout       int32  
+	secretsLayerVersion string 
+	secretsKmsKeyId     string 
 	verbose             bool
 }
 
-// originReadTimeout returns the CloudFront OriginReadTimeout value to use for
-// the Lambda origin. CloudFront caps this at 60 seconds for non-Enterprise
-// distributions, so we clamp to that ceiling. See C19 in REVIEW.md.
 func (p *AWSProvider) originReadTimeout() int32 {
 	t := p.lambdaTimeout
 	if t <= 0 {
@@ -58,9 +55,6 @@ func (p *AWSProvider) originReadTimeout() int32 {
 	return t
 }
 
-// secretName returns the canonical AWS Secrets Manager name for an app.
-// It is environment-scoped so that staging and production never share secrets.
-// Falls back to "production" only when Environment is unset (legacy configs).
 func (p *AWSProvider) secretName(appName string) string {
 	env := p.environment
 	if env == "" {
@@ -76,7 +70,6 @@ func NewAWSProvider(verbose bool) *AWSProvider {
 	}
 }
 
-// verboseLog logs a message only when --verbose is enabled.
 func (p *AWSProvider) verboseLog(msg string, args ...any) {
 	if p.verbose {
 		p.log.Info(msg, args...)
@@ -117,21 +110,13 @@ func getEmbeddedLambdaZip(name string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// awsStaticCreds is what loadAWSStaticCreds returns; empty accessKey means
-// "fall through to SDK default chain (env vars / profile / IAM role)".
 type awsStaticCreds struct {
 	accessKey    string
 	secretKey    string
 	sessionToken string
-	source       string // human-readable, used in logs
+	source       string 
 }
 
-// loadAWSStaticCreds resolves explicit static credentials in this order:
-//  1. credstore (encrypted at rest, mode 0600)
-//  2. nextdeploy.yml CloudProvider.AccessKey/SecretKey (LEGACY — emits WARN)
-//
-// Env vars and AWS profiles are NOT handled here — the AWS SDK's default
-// credential chain picks those up automatically when this returns empty.
 func loadAWSStaticCreds(cfg *cfgTypes.NextDeployConfig, log *shared.Logger) awsStaticCreds {
 	if stored, err := credstore.Load("aws"); err == nil {
 		ak := stored["access_key_id"]
@@ -146,8 +131,8 @@ func loadAWSStaticCreds(cfg *cfgTypes.NextDeployConfig, log *shared.Logger) awsS
 		}
 	}
 	if cfg.CloudProvider != nil && cfg.CloudProvider.AccessKey != "" && cfg.CloudProvider.SecretKey != "" {
-		log.Warn("⚠️  AWS access key loaded from nextdeploy.yml — committing this file leaks creds.")
-		log.Warn("⚠️  Recommended: 'nextdeploy creds set --provider aws' (encrypted, mode 0600).")
+		log.Warn("AWS access key loaded from nextdeploy.yml — committing this file leaks creds.")
+		log.Warn("Recommended: 'nextdeploy creds set --provider aws' (encrypted, mode 0600).")
 		return awsStaticCreds{
 			accessKey: cfg.CloudProvider.AccessKey,
 			secretKey: cfg.CloudProvider.SecretKey,
@@ -168,7 +153,6 @@ func (p *AWSProvider) Initialize(ctx context.Context, appCfg *cfgTypes.NextDeplo
 
 	var opts []func(*config.LoadOptions) error
 
-	// Determine region (priority: serverless block > cloudprovider block)
 	region := appCfg.Serverless.Region
 	if region == "" && appCfg.CloudProvider != nil {
 		region = appCfg.CloudProvider.Region
@@ -177,7 +161,6 @@ func (p *AWSProvider) Initialize(ctx context.Context, appCfg *cfgTypes.NextDeplo
 		opts = append(opts, config.WithRegion(region))
 	}
 
-	// Determine Profile (priority: serverless block > cloudprovider block)
 	profile := appCfg.Serverless.Profile
 	if profile == "" && appCfg.CloudProvider != nil {
 		profile = appCfg.CloudProvider.Profile
@@ -188,8 +171,6 @@ func (p *AWSProvider) Initialize(ctx context.Context, appCfg *cfgTypes.NextDeplo
 		opts = append(opts, config.WithSharedConfigProfile(profile))
 	}
 
-	// Explicit credentials precedence: credstore > yaml > SDK default chain
-	// (which itself covers env vars, profile, and IAM role).
 	staticCreds := loadAWSStaticCreds(appCfg, p.log)
 	if staticCreds.accessKey != "" && staticCreds.secretKey != "" {
 		sensitive.Register(staticCreds.accessKey, staticCreds.secretKey, staticCreds.sessionToken)
@@ -211,7 +192,6 @@ func (p *AWSProvider) Initialize(ctx context.Context, appCfg *cfgTypes.NextDeplo
 	}
 	p.cfg = cfg
 
-	// Fetch Account ID for unique resource naming
 	stsClient := sts.NewFromConfig(cfg)
 	identity, err := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
 	if err != nil {
@@ -225,15 +205,10 @@ func (p *AWSProvider) Initialize(ctx context.Context, appCfg *cfgTypes.NextDeplo
 		}
 	}
 
-	// 4. Check Service Quotas (CloudFront distributions limit)
 	if err := p.CheckServiceQuotas(ctx); err != nil {
 		p.log.Warn("Quota check: %v", err)
 	}
 
-	// 5. Probe lambda:GetLayerVersion *before* any deploy-time mutation so a
-	// missing-permission config fails loudly upfront instead of mid-way through
-	// an UpdateFunctionConfiguration retry loop after we've already uploaded to
-	// S3 and touched IAM. See S5 in REVIEW.md.
 	if err := p.probeSecretsExtensionLayer(ctx, appCfg); err != nil {
 		return err
 	}
@@ -248,7 +223,6 @@ func (p *AWSProvider) Destroy(ctx context.Context, appCfg *cfgTypes.NextDeployCo
 	bucketName := p.getS3BucketName(appCfg)
 	secretName := p.secretName(appCfg.App.Name)
 
-	// 1. CloudFront Distribution (Paginated discovery by comment or CNAME)
 	clientCF := cloudfront.NewFromConfig(p.cfg)
 	callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
 	domain := appCfg.App.Domain.Name
@@ -269,7 +243,6 @@ func (p *AWSProvider) Destroy(ctx context.Context, appCfg *cfgTypes.NextDeployCo
 
 		etag := getDist.ETag
 
-		// Disable if still enabled
 		if getDist.DistributionConfig.Enabled != nil && *getDist.DistributionConfig.Enabled {
 			p.log.Info("Disabling CloudFront Distribution: %s...", distId)
 			getDist.DistributionConfig.Enabled = aws.Bool(false)
@@ -302,7 +275,6 @@ func (p *AWSProvider) Destroy(ctx context.Context, appCfg *cfgTypes.NextDeployCo
 		}
 	}
 
-	// 2. Lambda Function
 	p.log.Info("Deleting Lambda Function: %s...", functionName)
 	clientLambda := lambda.NewFromConfig(p.cfg)
 	_, err = clientLambda.DeleteFunction(ctx, &lambda.DeleteFunctionInput{
@@ -317,7 +289,6 @@ func (p *AWSProvider) Destroy(ctx context.Context, appCfg *cfgTypes.NextDeployCo
 		}
 	}
 
-	// 3. S3 Bucket (Empty and Delete)
 	p.log.Info("Emptying and deleting S3 Bucket: %s...", bucketName)
 	clientS3 := s3.NewFromConfig(p.cfg)
 	if err := p.emptyS3Bucket(ctx, clientS3, bucketName); err != nil {
@@ -336,7 +307,6 @@ func (p *AWSProvider) Destroy(ctx context.Context, appCfg *cfgTypes.NextDeployCo
 		}
 	}
 
-	// 4. Secrets Manager
 	p.log.Info("Deleting Secret: %s...", secretName)
 	clientSM := secretsmanager.NewFromConfig(p.cfg)
 	_, err = clientSM.DeleteSecret(ctx, &secretsmanager.DeleteSecretInput{
@@ -369,7 +339,6 @@ func (p *AWSProvider) GetResourceMap(ctx context.Context, appCfg *cfgTypes.NextD
 		DeploymentTime: time.Now(),
 	}
 
-	// 1. Lambda Info
 	clientLambda := lambda.NewFromConfig(p.cfg)
 	fn, err := clientLambda.GetFunction(ctx, &lambda.GetFunctionInput{FunctionName: aws.String(functionName)})
 	if err == nil && fn.Configuration != nil {
@@ -381,21 +350,18 @@ func (p *AWSProvider) GetResourceMap(ctx context.Context, appCfg *cfgTypes.NextD
 		res.FunctionURL = *fUrl.FunctionUrl
 	}
 
-	// 2. CloudFront Info
 	clientCF := cloudfront.NewFromConfig(p.cfg)
 	callerRef := fmt.Sprintf("nextdeploy-%s", strings.ToLower(bucketName))
 	cfDists, _ := p.findManagedDistributions(ctx, clientCF, callerRef, appCfg.App.Domain.Name)
 	if len(cfDists) > 0 {
 		distID := cfDists[0]
 		res.CloudFrontID = distID
-		// Get domain name for report
 		getDist, _ := clientCF.GetDistribution(ctx, &cloudfront.GetDistributionInput{Id: aws.String(distID)})
 		if getDist != nil && getDist.Distribution != nil {
 			res.CloudFrontDomain = *getDist.Distribution.DomainName
 		}
 	}
 
-	// 3. Custom Domain & cert
 	res.CustomDomain = appCfg.App.Domain.Name
 	if appCfg.SSLConfig != nil {
 		res.DNSProvider = appCfg.SSLConfig.DNSProvider
@@ -404,14 +370,12 @@ func (p *AWSProvider) GetResourceMap(ctx context.Context, appCfg *cfgTypes.NextD
 	}
 
 	if res.CustomDomain != "" {
-		// ACM certs for CloudFront must be in us-east-1
 		acmCfg, acmErr := config.LoadDefaultConfig(ctx, config.WithRegion("us-east-1"))
 		if acmErr == nil {
 			acmClient := acm.NewFromConfig(acmCfg)
 			certARN, _ := p.findExistingCertificate(ctx, acmClient, res.CustomDomain)
 			if certARN != "" {
 				res.CertificateARN = certARN
-				// Fetch validation records
 				desc, descErr := acmClient.DescribeCertificate(ctx, &acm.DescribeCertificateInput{
 					CertificateArn: aws.String(certARN),
 				})
@@ -433,7 +397,6 @@ func (p *AWSProvider) GetResourceMap(ctx context.Context, appCfg *cfgTypes.NextD
 	return res, nil
 }
 
-// findManagedDistributions finds CloudFront distributions by matching comment or domain aliases.
 func (p *AWSProvider) findManagedDistributions(ctx context.Context, client *cloudfront.Client, callerRef, domain string) ([]string, error) {
 	var distIDs []string
 	var marker *string
@@ -449,11 +412,9 @@ func (p *AWSProvider) findManagedDistributions(ctx context.Context, client *clou
 		if listOutput.DistributionList != nil {
 			for _, dist := range listOutput.DistributionList.Items {
 				matched := false
-				// Match by comment
 				if dist.Comment != nil && *dist.Comment == callerRef {
 					matched = true
 				}
-				// Match by domain alias (CNAME conflict prevention)
 				if !matched && domain != "" && dist.Aliases != nil {
 					if slices.Contains(dist.Aliases.Items, domain) {
 						matched = true
@@ -493,7 +454,7 @@ func (p *AWSProvider) CheckServiceQuotas(ctx context.Context) error {
 	limit := int32(200) // Default CloudFront distribution limit
 
 	if currentCount >= limit {
-		p.log.Warn("⚠️ CloudFront distribution limit reached (%d/%d used). Deploys may fail.", currentCount, limit)
+		p.log.Warn("CloudFront distribution limit reached (%d/%d used). Deploys may fail.", currentCount, limit)
 		return fmt.Errorf("CloudFront distribution limit reached (%d/%d)", currentCount, limit)
 	}
 

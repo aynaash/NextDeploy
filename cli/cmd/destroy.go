@@ -20,8 +20,6 @@ var (
 	destroyYes   bool
 )
 
-// destroyBlocked reports whether a destroy must be refused. deletion_protection
-// blocks unconditionally unless --force is passed. Pure so it can be unit-tested.
 func destroyBlocked(protected, force bool) (bool, string) {
 	if protected && !force {
 		return true, "deletion_protection is enabled for this app — refusing to destroy. " +
@@ -46,8 +44,6 @@ var destroyCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		// Deletion guard: refuse if protected (unless --force), then require an
-		// explicit confirmation (unless --yes) before anything is removed.
 		if blocked, reason := destroyBlocked(cfg.App.DeletionProtection, destroyForce); blocked {
 			log.Error("%s", reason)
 			os.Exit(1)
@@ -156,8 +152,6 @@ var destroyCmd = &cobra.Command{
 	},
 }
 
-// confirmExact reads a line from stdin and reports whether it matches expected.
-// Used for destructive confirmations where typing the exact app name is required.
 func confirmExact(expected string) bool {
 	var answer string
 	if _, err := fmt.Scanln(&answer); err != nil {

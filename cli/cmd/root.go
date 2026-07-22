@@ -14,7 +14,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Semantic color functions.
 var (
 	title     = color.New(color.FgHiBlue, color.Bold).SprintFunc()
 	success   = color.New(color.FgHiGreen).SprintFunc()
@@ -24,7 +23,6 @@ var (
 	highlight = color.New(color.Bold).SprintFunc()
 )
 
-// rootCmd is the main command.
 var rootCmd = &cobra.Command{
 	Use:     "nextdeploy",
 	Version: shared.Version,
@@ -71,7 +69,6 @@ Deploy your Next.js app to *any* VPS — with SSL, logs, and zero downtime.
 }
 
 func Execute() {
-	// Run a background update check — never blocks the CLI.
 	go updater.CheckAndPrint(shared.Version)
 
 	if err := rootCmd.Execute(); err != nil {

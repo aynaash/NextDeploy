@@ -103,3 +103,4 @@ func TestBuildScriptMetadata_SecretsStoreValidation(t *testing.T) {
 		t.Error("expected error for secrets_store binding missing store_id")
 	}
 }
+

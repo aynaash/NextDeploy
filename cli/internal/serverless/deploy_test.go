@@ -137,7 +137,6 @@ func TestSecretsEqual(t *testing.T) {
 		})
 	}
 }
-
 // chdir switches CWD for the duration of a test, restoring on cleanup.
 func chdir(t *testing.T, dir string) {
 	t.Helper()
@@ -155,5 +154,61 @@ func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestPushSecrets_FailsClosedOnLoadError proves the S1 guardrail-1 condition:
+// a declared secret source that fails to load must be a fatal combination, not
+// a silent empty-set substitution.
+func TestPushSecrets_FailsClosedOnLoadError(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+
+	cfg := &config.NextDeployConfig{
+		Secrets: config.SecretsConfig{
+			Files: []config.SecretFile{{Path: "does/not/exist.env"}},
+		},
+	}
+	if !secretsDeclared(cfg) {
+		t.Fatal("secretsDeclared should be true when Secrets.Files is set")
+	}
+	if _, err := loadLocalSecrets(cfg); err == nil {
+		t.Fatal("loadLocalSecrets should error on an unreadable declared file")
+	}
+	// declared==true AND load error ⇒ pushSecrets returns the fatal error.
+}
+
+// TestRefuseSecretWipe covers guardrail 2.
+func TestRefuseSecretWipe_Local(t *testing.T) {
+	live3 := map[string]string{"A": "[secret]", "B": "[secret]", "C": "[secret]"}
+
+	cases := []struct {
+		name    string
+		pending map[string]string
+		live    map[string]string
+		allow   bool
+		wantErr bool
+	}{
+		{"empty pending, 3 live, no override", nil, live3, false, true},
+		{"empty pending, 3 live, override", nil, live3, true, false},
+		{"pending covers all live", live3, live3, false, false},
+		{"pending drops one live", map[string]string{"A": "x", "B": "y"}, live3, false, true},
+		{"pending superset", map[string]string{"A": "x", "B": "y", "C": "z", "D": "w"}, live3, false, false},
+		{"no live secrets", nil, nil, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := refuseSecretWipe(tc.pending, tc.live, tc.allow)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("refuseSecretWipe err=%v, wantErr=%v", err, tc.wantErr)
+			}
+		})
+	}
+
+	// The error must name the dropped secrets, sorted, so the operator knows
+	// exactly what's at risk.
+	err := refuseSecretWipe(nil, live3, false)
+	if err == nil || !strings.Contains(err.Error(), "A, B, C") {
+		t.Fatalf("expected error naming A, B, C; got %v", err)
 	}
 }

@@ -15,8 +15,6 @@ import (
 	"github.com/aynaash/nextdeploy/shared/credstore"
 )
 
-// providerSchemas declares the credential fields each supported provider has.
-// Keep ordering deterministic — the prompt order matters for UX.
 var providerSchemas = map[string][]credField{
 	"cloudflare": {
 		{Key: "api_token", Label: "Cloudflare API token", Required: true, Hidden: true},
