@@ -20,6 +20,7 @@
   become: false
 
   vars:
+    node_major: "22" # NodeSource apt repo major (tier-0, the deterministic path)
     node22_version: "22.22.0" # used only for the glibc-217 tier-3 Node fallback
     go_version_fallback: "1.25.7" # used only if go.dev/VERSION cannot be fetched
     app_root: /opt/nextdeploy
@@ -29,6 +30,43 @@
     # This allows ProtectSystem=strict without needing extra ReadWritePaths.
     socket_path: /run/nextdeployd/nextdeployd.sock
     socket_dir: /run/nextdeployd
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # PHASE 0 – Python bootstrap (must run BEFORE any module)
+  # ────────────────────────────────────────────────────────────────────────────
+  #
+  # Every ansible.builtin.* module ships Python to the target and executes it
+  # there. If the host has no python3 — or has one the control node's discovery
+  # doesn't expect — the run dies on the very first task with an interpreter
+  # error that reads like a NextDeploy bug but is really a Python version
+  # mismatch between two machines.
+  #
+  # `raw` is the one module that needs no Python (it is a bare SSH command), so
+  # it is the only thing that can bootstrap the interpreter. The inventory sets
+  # ansible_python_interpreter=auto_silent so discovery finds whatever this
+  # installs rather than assuming a hard-coded path.
+  #
+  # This is also the sharpest argument for the `nextdeployd prepare` direction:
+  # a static Go binary would need none of this dance.
+  pre_tasks:
+    - name: "Phase 0 | Bootstrap | Detect a usable Python on the target"
+      ansible.builtin.raw: command -v python3 || command -v python
+      register: python_probe
+      changed_when: false
+      failed_when: false
+
+    - name: "Phase 0 | Bootstrap | Fail with an explanation, not an interpreter error"
+      ansible.builtin.fail:
+        msg: >-
+          No Python interpreter on the target, so Ansible cannot run any task here.
+          This playbook is the LEGACY prepare path. Prefer the agent path, which is a
+          static Go binary and needs nothing pre-installed on the server:
+
+              nextdeploy prepare --agent
+
+          To keep using this playbook instead, install Python first
+          (e.g. `apt-get install -y python3`) and re-run.
+      when: python_probe.rc != 0
 
   # ────────────────────────────────────────────────────────────────────────────
   # PHASE 1 – System bootstrap & info
@@ -153,6 +191,59 @@
       ansible.builtin.set_fact:
         node_installed: "{{ 'missing' not in (sysinfo.stdout_lines | select('match', '^node.*') | first | default('missing')) }}"
 
+    # Tier 0 – NodeSource apt (preferred on Debian/Ubuntu).
+    #
+    # The webi/unofficial-builds tiers below are `curl | sh` from third-party
+    # mirrors with no version pin and no signature check: a deploy's runtime
+    # should be reproducible and auditable, and those aren't. NodeSource ships a
+    # GPG-signed apt repo with the major version pinned in the setup script, so
+    # apt verifies what it installs. The webi tiers stay as fallbacks for hosts
+    # where this doesn't apply (yum, or a NodeSource outage).
+    - name: "Phase 2 | Node.js | Tier-0: add NodeSource apt repo (signed, pinned major)"
+      ansible.builtin.shell: |
+        set -euo pipefail
+        curl -fsSL --retry 3 --retry-delay 2 https://deb.nodesource.com/setup_{{ node_major }}.x | bash -
+      args:
+        executable: /bin/bash
+        creates: /etc/apt/sources.list.d/nodesource.list
+      become: true
+      register: nodesource_repo
+      failed_when: false
+      when:
+        - not node_installed
+        - ansible_pkg_mgr == "apt"
+
+    - name: "Phase 2 | Node.js | Tier-0: install from NodeSource"
+      ansible.builtin.apt:
+        name: nodejs
+        state: present
+        update_cache: true
+      become: true
+      failed_when: false
+      when:
+        - not node_installed
+        - ansible_pkg_mgr == "apt"
+        - nodesource_repo is defined
+        - nodesource_repo.rc | default(1) == 0
+
+    - name: "Phase 2 | Node.js | Re-check after NodeSource"
+      ansible.builtin.shell: >
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        node --version
+      register: node_after_nodesource
+      failed_when: false
+      changed_when: false
+      when: not node_installed
+
+    # NodeSource covered it — skip the unpinned tiers entirely.
+    - name: "Phase 2 | Node.js | Mark installed if NodeSource succeeded"
+      ansible.builtin.set_fact:
+        node_installed: true
+      when:
+        - not node_installed
+        - node_after_nodesource is defined
+        - node_after_nodesource.rc | default(1) == 0
+
     - name: "Phase 2 | Node.js | Tier-1: install via webi latest"
       ansible.builtin.shell: |
         set -euo pipefail
@@ -232,9 +323,65 @@
       ansible.builtin.assert:
         that: node_final.rc == 0
         fail_msg: >-
-          node is not runnable after all three install tiers.
+          node is not runnable after all install tiers.
           glibc on this host may be older than 2.17 — manual intervention required.
       when: not node_installed
+
+    # ────────────────────────────────────────────────────────────────────────────
+    # PHASE 2 – Corepack (pnpm / yarn)
+    # ────────────────────────────────────────────────────────────────────────────
+    #
+    # The daemon supports four package managers (npm/yarn/pnpm/bun) and
+    # resolveExecStart emits `ExecStart=/usr/local/bin/<pm> run start` for
+    # whichever the app declares. Installing only Node and Bun meant a pnpm or
+    # yarn app SHIPPED successfully and then failed at unit start on a missing
+    # binary. A support matrix in the daemon and a provisioning list here that
+    # disagree is a latent outage — they have to stay in sync.
+    #
+    # Corepack is Node's built-in package-manager manager (bundled since 16.9).
+    # The shim reads the app's own "packageManager" field and fetches that exact
+    # version on first run, so the version follows the app rather than the host.
+    - name: "Phase 2 | Corepack | Enable pnpm & yarn shims"
+      ansible.builtin.shell: |
+        set -euo pipefail
+        corepack enable
+        corepack prepare pnpm@latest --activate
+        corepack prepare yarn@stable --activate
+        # systemd units do not inherit a login PATH, so ExecStart needs an
+        # absolute path — which is why resolveBinary hard-codes /usr/local/bin.
+        for BIN in pnpm yarn; do
+          SHIM="$(command -v "$BIN" || true)"
+          if [ -n "$SHIM" ] && [ "$SHIM" != "/usr/local/bin/$BIN" ]; then
+            sudo ln -sf "$SHIM" "/usr/local/bin/$BIN"
+          fi
+        done
+      args:
+        executable: /bin/bash
+      register: corepack_enable
+      failed_when: false
+      changed_when: corepack_enable.rc == 0
+
+    - name: "Phase 2 | Corepack | Verify pnpm and yarn are runnable"
+      ansible.builtin.shell: >
+        env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        {{ item }} --version
+      register: corepack_check
+      loop:
+        - pnpm
+        - yarn
+      failed_when: false
+      changed_when: false
+
+    - name: "Phase 2 | Corepack | Warn if a supported package manager is unavailable"
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ item.item }} is not runnable at /usr/local/bin/{{ item.item }}.
+          An app whose package manager is {{ item.item }} will ship successfully and
+          then fail to start. Install it manually or use npm/bun for that app.
+      loop: "{{ corepack_check.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.rc != 0
 
     # ────────────────────────────────────────────────────────────────────────────
     # PHASE 2 – Bun
@@ -901,13 +1048,54 @@
         mode: "0644"
       become: true
 
+    - name: "Phase 5 | Caddy | Ensure audit.log exists (Coraza WAF interventions)"
+      ansible.builtin.file:
+        path: /var/log/caddy/audit.log
+        state: touch
+        owner: caddy
+        group: caddy
+        mode: "0644"
+      become: true
+
+    # Log rotation. Caddy appends to access.log forever, and Coraza writes
+    # audit.log plus a debug.log at SecDebugLogLevel 3 (verbose). A full /var
+    # takes down the daemon, Caddy and the app together — anything appended to
+    # indefinitely needs a retention policy provisioned alongside it.
+    #
+    # copytruncate because Caddy holds the log file open: a plain rotate renames
+    # the inode and Caddy keeps writing to the old one until reload. copytruncate
+    # copies then truncates in place so the running process keeps its handle. The
+    # trade is a tiny race window (writes between copy and truncate are lost) vs.
+    # a `postrotate systemctl reload caddy` that costs a reload — for access logs
+    # the race is the cheaper side.
+    - name: "Phase 5 | Caddy | logrotate policy"
+      ansible.builtin.copy:
+        dest: /etc/logrotate.d/caddy
+        content: |
+          /var/log/caddy/*.log {
+            daily
+            rotate 14
+            compress
+            delaycompress
+            missingok
+            notifempty
+            copytruncate
+            su caddy caddy
+          }
+        mode: "0644"
+      become: true
+
+    # The access-log filter matches an explicit field rather than relying on
+    # remote_ip textually preceding status. JSON guarantees no key order, so the
+    # old positional regex would silently stop matching after a Caddy format
+    # change — and you would only notice while under attack.
     - name: "Phase 5 | Fail2Ban | Create Caddy filter"
       ansible.builtin.copy:
         dest: /etc/fail2ban/filter.d/caddy-auth.conf
         content: |
           [Definition]
-          failregex = ^.*"remote_ip":"<HOST>".*"status":401.*$
-                      ^.*"remote_ip":"<HOST>".*"status":403.*$
+          # Both fields must be present on the line, in either order.
+          failregex = ^(?=.*"status":\s*(401|403))(?=.*"remote_ip":\s*"<HOST>").*$
           ignoreregex =
         mode: "0644"
       become: true
@@ -923,6 +1111,44 @@
           logpath = /var/log/caddy/access.log
           maxretry = 5
           bantime = 3600
+        mode: "0644"
+      become: true
+
+    # Second jail: Coraza (the OWASP CRS WAF) writes its blocks to audit.log,
+    # NOT access.log — so until now the WAF detected attacks that fail2ban never
+    # saw. Two defensive layers that don't talk to each other. This closes the
+    # detect→ban gap.
+    #
+    # Verify the field name against a real line on YOUR Coraza/CRS version before
+    # relying on it: trigger a block (curl 'https://host/?x=/etc/passwd'), read
+    # /var/log/caddy/audit.log, then test with
+    #   fail2ban-regex /var/log/caddy/audit.log /etc/fail2ban/filter.d/caddy-waf.conf
+    # which reports how many lines matched.
+    - name: "Phase 5 | Fail2Ban | Coraza WAF filter"
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/filter.d/caddy-waf.conf
+        content: |
+          [Definition]
+          # Match the client-IP field explicitly, not by position. Serial audit
+          # logs vary between Coraza versions, so accept the common spellings.
+          failregex = "client_ip":\s*"<HOST>"
+                      "clientIp":\s*"<HOST>"
+                      \[client "<HOST>"\]
+          ignoreregex =
+        mode: "0644"
+      become: true
+
+    - name: "Phase 5 | Fail2Ban | Coraza WAF jail"
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.d/caddy-waf.conf
+        content: |
+          [caddy-waf]
+          enabled  = true
+          port     = http,https
+          filter   = caddy-waf
+          logpath  = /var/log/caddy/audit.log
+          maxretry = 3
+          bantime  = 7200
         mode: "0644"
       become: true
 

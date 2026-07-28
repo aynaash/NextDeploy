@@ -134,8 +134,17 @@ type CFProtection struct {
 	PublicPaths []string     `yaml:"public_paths,omitempty"` // never guarded (globs, e.g. "/", "/login", "/api/webhooks/*")
 	Auth        *CFAuth      `yaml:"auth,omitempty"`
 	RateLimit   *CFRateLimit `yaml:"rate_limit,omitempty"`
-	Allow       []string     `yaml:"allow,omitempty"` // IP allowlist (exact IP); if set, only these pass
-	Deny        []string     `yaml:"deny,omitempty"`  // IP denylist (exact IP)
+	Allow       []string     `yaml:"allow,omitempty"` // IP allowlist (exact IP or CIDR); if set, only these pass
+	Deny        []string     `yaml:"deny,omitempty"`  // IP denylist (exact IP or CIDR)
+
+	// TrustForwardedFor lets the guard fall back to x-forwarded-for /
+	// x-real-ip when cf-connecting-ip is absent. Those headers are
+	// CLIENT-CONTROLLED unless a proxy you operate sets them and strips
+	// inbound copies — trusting them off-Cloudflare lets an attacker forge an
+	// allowlisted IP or rotate out of their rate-limit bucket. Default false:
+	// only cf-connecting-ip is believed. Set true only when the app is fronted
+	// by a proxy you control.
+	TrustForwardedFor bool `yaml:"trust_forwarded_for,omitempty"`
 }
 
 // CFAuth configures stateless session-cookie protection. The cookie is verified
@@ -403,6 +412,10 @@ type ServerConfig struct {
 }
 
 type AppConfig struct {
+	// Name is the app IDENTIFIER used for the systemd unit, the app directory,
+	// and the Caddy fragment filename. MUST satisfy ValidateAppName: lowercase
+	// letters, digits and hyphens only (^[a-z0-9-]+$), 3–63 chars. This is a
+	// SLUG, not a domain — the domain belongs in Domain.Name.
 	Name        string          `yaml:"name"`
 	Port        int             `yaml:"port"`
 	Environment string          `yaml:"environment"`

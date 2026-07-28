@@ -21,6 +21,8 @@ func buildProtectionRuntime(cfg *config.NextDeployConfig) (*protection.Runtime, 
 		PublicPaths: p.PublicPaths,
 		Allow:       p.Allow,
 		Deny:        p.Deny,
+
+		TrustForwardedFor: p.TrustForwardedFor,
 	}
 	if p.Auth != nil {
 		c.Auth = &protection.Auth{
@@ -71,6 +73,8 @@ func toCompilePayload(meta *nextcore.NextCorePayload, _ *config.NextDeployConfig
 		BuildID:      meta.NextBuildMetadata.BuildID,
 		GitCommit:    meta.GitCommit,
 		Routes:       convertRoutes(meta.RouteInfo),
+		ImageConfig:  convertImageConfig(meta.ImageConfig),
+		PublicFiles:  publicFileKeys(meta.StaticAssets),
 	}
 
 	if meta.Middleware != nil {
@@ -82,6 +86,35 @@ func toCompilePayload(meta *nextcore.NextCorePayload, _ *config.NextDeployConfig
 	}
 
 	return p
+}
+
+func convertImageConfig(in *nextcore.ImageConfig) *nextcompile.ImageConfig {
+	if in == nil {
+		return nil
+	}
+	out := &nextcompile.ImageConfig{
+		RemotePatterns: convertImageRemotePatterns(in.RemotePatterns),
+		Domains:        append([]string(nil), in.Domains...),
+		Formats:        append([]string(nil), in.Formats...),
+		Unoptimized:    in.Unoptimized,
+	}
+	return out
+}
+
+func convertImageRemotePatterns(in []nextcore.ImageRemotePattern) []nextcompile.ImageRemotePattern {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]nextcompile.ImageRemotePattern, len(in))
+	for i, r := range in {
+		out[i] = nextcompile.ImageRemotePattern{
+			Protocol: r.Protocol,
+			Hostname: r.Hostname,
+			Port:     r.Port,
+			Pathname: r.Pathname,
+		}
+	}
+	return out
 }
 
 func convertRoutes(in nextcore.RouteInfo) nextcompile.RouteInfo {
@@ -123,6 +156,17 @@ func convertMiddlewareMatchers(in []nextcore.MiddlewareRoute) []nextcompile.Midd
 			Pathname: m.Pathname,
 			Pattern:  m.Pattern,
 		}
+	}
+	return out
+}
+
+func publicFileKeys(sa *nextcore.StaticAssets) []string {
+	if sa == nil || len(sa.PublicDir) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(sa.PublicDir))
+	for _, a := range sa.PublicDir {
+		out = append(out, a.Path)
 	}
 	return out
 }

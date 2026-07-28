@@ -9,6 +9,7 @@ import {
   pathMatches,
   matchesAny,
   ipDenied,
+  ipMatches,
   readCookie,
   clientIP,
   timingSafeEqual,
@@ -69,6 +70,37 @@ test("ipDenied: empty config allows all", () => {
   assert.ok(!ipDenied("1.1.1.1", {}));
 });
 
+test("ipDenied: CIDR entries match, not just exact IPs", () => {
+  // Operators write allow: ["10.0.0.0/8"] and expect it to work; before CIDR
+  // support this silently matched nothing, so the allowlist denied everyone.
+  assert.ok(!ipDenied("10.4.5.6", { allow: ["10.0.0.0/8"] }));
+  assert.ok(ipDenied("11.4.5.6", { allow: ["10.0.0.0/8"] }));
+  assert.ok(ipDenied("192.168.1.7", { deny: ["192.168.0.0/16"] }));
+  assert.ok(!ipDenied("192.169.1.7", { deny: ["192.168.0.0/16"] }));
+});
+
+test("ipDenied: unknown IP cannot satisfy an allowlist", () => {
+  // "" means no trustworthy header was available. It must fail closed against
+  // a non-empty allowlist rather than sneak through as a non-match.
+  assert.ok(ipDenied("", { allow: ["1.2.3.4"] }));
+  assert.ok(!ipDenied("", {}));
+});
+
+test("ipMatches: boundaries and malformed rules", () => {
+  assert.ok(ipMatches("1.2.3.4", "1.2.3.4"));
+  assert.ok(ipMatches("1.2.3.4", "1.2.3.4/32"));
+  assert.ok(ipMatches("255.255.255.255", "0.0.0.0/0"));
+  assert.ok(ipMatches("10.255.255.255", "10.0.0.0/8"));
+  assert.ok(!ipMatches("10.0.0.1", "10.0.0.0/33")); // out-of-range prefix
+  assert.ok(!ipMatches("10.0.0.1", "10.0.0.0/abc"));
+  assert.ok(!ipMatches("10.0.0.1", "not-an-ip/8"));
+  assert.ok(!ipMatches("999.0.0.1", "999.0.0.0/8")); // octet > 255
+  assert.ok(!ipMatches("", "10.0.0.0/8"));
+  // IPv6 has no CIDR support here; exact match still works.
+  assert.ok(ipMatches("2001:db8::1", "2001:db8::1"));
+  assert.ok(!ipMatches("2001:db8::2", "2001:db8::/32"));
+});
+
 // --- readCookie / clientIP ---------------------------------------------------
 
 test("readCookie", () => {
@@ -77,11 +109,37 @@ test("readCookie", () => {
   assert.equal(readCookie("other=1", "session"), "");
 });
 
-test("clientIP prefers cf-connecting-ip", () => {
+test("clientIP prefers cf-connecting-ip regardless of trust config", () => {
   const req = new Request("https://x/", {
     headers: { "cf-connecting-ip": "1.1.1.1", "x-forwarded-for": "2.2.2.2" },
   });
-  assert.equal(clientIP(req), "1.1.1.1");
+  assert.equal(clientIP(req, {}), "1.1.1.1");
+  assert.equal(clientIP(req, { trustForwardedFor: true }), "1.1.1.1");
+});
+
+test("clientIP ignores spoofable headers by default", () => {
+  // Off-Cloudflare, x-forwarded-for is set by the client. Believing it lets an
+  // attacker forge an allowlisted IP or rotate out of a rate-limit bucket.
+  const req = new Request("https://x/", {
+    headers: { "x-forwarded-for": "2.2.2.2", "x-real-ip": "3.3.3.3" },
+  });
+  assert.equal(clientIP(req, {}), "");
+  assert.equal(clientIP(req, undefined), "");
+  assert.equal(clientIP(req, { trustForwardedFor: false }), "");
+});
+
+test("clientIP honours x-forwarded-for only when opted in", () => {
+  const req = new Request("https://x/", {
+    headers: { "x-forwarded-for": "1.1.1.1, 2.2.2.2, 3.3.3.3" },
+  });
+  // Left-most entry is the originating client.
+  assert.equal(clientIP(req, { trustForwardedFor: true }), "1.1.1.1");
+});
+
+test("clientIP falls back to x-real-ip under opt-in", () => {
+  const req = new Request("https://x/", { headers: { "x-real-ip": " 4.4.4.4 " } });
+  assert.equal(clientIP(req, { trustForwardedFor: true }), "4.4.4.4");
+  assert.equal(clientIP(req, {}), "");
 });
 
 // --- timingSafeEqual ---------------------------------------------------------

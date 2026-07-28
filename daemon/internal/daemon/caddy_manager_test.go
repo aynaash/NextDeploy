@@ -8,7 +8,7 @@ import (
 )
 
 func TestSanitizeAppName(t *testing.T) {
-	valid := []string{"app", "my-app", "my_app", "App123", "a"}
+	valid := []string{"app", "my-app", "app123"}
 	for _, name := range valid {
 		if err := sanitizeAppName(name); err != nil {
 			t.Errorf("expected %q valid, got %v", name, err)
@@ -17,7 +17,13 @@ func TestSanitizeAppName(t *testing.T) {
 
 	// Path traversal / separators / directive-ish characters must be rejected
 	// before appName reaches filepath.Join(configDir, name+".caddy").
-	invalid := []string{"", "../etc/cron.d/x", "a/b", "a.b", "a b", "a;b", "..", "app$"}
+	// Uppercase, underscores and 1–2 char names are rejected too: sanitizeAppName
+	// now shares one rule with the CLI and the daemon's validateAppName, so a
+	// fragment can't be written under a name that ship would refuse.
+	invalid := []string{
+		"", "../etc/cron.d/x", "a/b", "a.b", "a b", "a;b", "..", "app$",
+		"my_app", "App123", "a",
+	}
 	for _, name := range invalid {
 		if err := sanitizeAppName(name); err == nil {
 			t.Errorf("expected %q to be rejected", name)

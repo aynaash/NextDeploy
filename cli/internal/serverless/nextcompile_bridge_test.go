@@ -34,6 +34,12 @@ func TestToCompilePayload_MapsAllFields(t *testing.T) {
 				{Pathname: "/api/:path*", Pattern: "^/api/.*"},
 			},
 		},
+		ImageConfig: &nextcore.ImageConfig{
+			RemotePatterns: []nextcore.ImageRemotePattern{{Protocol: "https", Hostname: "cdn.example.com"}},
+			Domains:        []string{"images.example.com"},
+			Formats:        []string{"image/avif"},
+			Unoptimized:    false,
+		},
 	}
 
 	got := toCompilePayload(meta, nil)
@@ -80,6 +86,17 @@ func TestToCompilePayload_MapsAllFields(t *testing.T) {
 	}
 	if got.Middleware.Matchers[0].Pathname != "/api/:path*" {
 		t.Errorf("matcher pathname: %+v", got.Middleware.Matchers[0])
+	}
+
+	// Image config is preserved into the manifest payload for the runtime SSRF guard.
+	if got.ImageConfig == nil {
+		t.Fatal("ImageConfig nil")
+	}
+	if len(got.ImageConfig.RemotePatterns) != 1 {
+		t.Fatalf("expected 1 remote pattern, got %d", len(got.ImageConfig.RemotePatterns))
+	}
+	if got.ImageConfig.RemotePatterns[0].Hostname != "cdn.example.com" {
+		t.Errorf("remote pattern hostname: got %q", got.ImageConfig.RemotePatterns[0].Hostname)
 	}
 }
 

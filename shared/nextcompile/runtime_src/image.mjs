@@ -1,4 +1,4 @@
-// /_next/image handler — Next.js's image optimization endpoint.
+89// /_next/image handler — Next.js's image optimization endpoint.
 //
 // Contract:
 //   GET /_next/image?url=<src>&w=<width>&q=<quality>[&fm=<format>]

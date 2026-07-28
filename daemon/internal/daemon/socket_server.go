@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -17,6 +16,12 @@ import (
 
 	"github.com/aynaash/nextdeploy/daemon/internal/types"
 )
+
+// localSocketIdentity labels a Unix-socket peer in rate-limit keys and audit
+// logs. It is a display/bucketing label only — authorization for the local
+// transport is decided by the isLocal flag threaded from the listener, never by
+// comparing this string.
+const localSocketIdentity = "local-unix-socket"
 
 type SocketServer struct {
 	config         *types.DaemonConfig
@@ -98,7 +103,7 @@ func (ss *SocketServer) loadTLSConfig() (*tls.Config, error) {
 	}
 
 	if ss.config.TLSCAFile != "" {
-		caCert, err := ioutil.ReadFile(ss.config.TLSCAFile)
+		caCert, err := os.ReadFile(ss.config.TLSCAFile)
 		if err != nil {
 			return nil, err
 		}
@@ -111,7 +116,7 @@ func (ss *SocketServer) loadTLSConfig() (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
-func (ss *SocketServer) handleConnection(conn net.Conn) {
+func (ss *SocketServer) handleConnection(conn net.Conn, isLocal bool) {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Minute))
 	decoder := json.NewDecoder(conn)
@@ -119,7 +124,7 @@ func (ss *SocketServer) handleConnection(conn net.Conn) {
 
 	clientIdentity := conn.RemoteAddr().String()
 	if clientIdentity == "" || clientIdentity == "@" {
-		clientIdentity = "local-unix-socket"
+		clientIdentity = localSocketIdentity
 	}
 	var cmd types.Command
 	if err := decoder.Decode(&cmd); err != nil {
@@ -133,7 +138,7 @@ func (ss *SocketServer) handleConnection(conn net.Conn) {
 		_ = encoder.Encode(resp)
 		return
 	}
-	response := ss.commandHandler.HandleCommand(cmd, clientIdentity)
+	response := ss.commandHandler.HandleCommand(cmd, clientIdentity, isLocal)
 	CommandsHandled.Add(2)
 	_ = encoder.Encode(response)
 }
@@ -175,14 +180,18 @@ func (ss *SocketServer) setSocketPermissions() error {
 
 func (ss *SocketServer) AcceptConnections() {
 	if ss.unixListener != nil {
-		go ss.acceptOnListener(ss.unixListener)
+		// isLocal is decided by the LISTENER, not by inspecting the connection.
+		// Which transport accepted a peer is the one fact about its trust model
+		// we know for certain; deriving it later from an address string is how
+		// a sentinel typo silently reopens the hole.
+		go ss.acceptOnListener(ss.unixListener, true)
 	}
 	if ss.tcpListener != nil {
-		go ss.acceptOnListener(ss.tcpListener)
+		go ss.acceptOnListener(ss.tcpListener, false)
 	}
 }
 
-func (ss *SocketServer) acceptOnListener(l net.Listener) {
+func (ss *SocketServer) acceptOnListener(l net.Listener, isLocal bool) {
 	for {
 		conn, err := l.Accept()
 		if err != nil {
@@ -193,7 +202,7 @@ func (ss *SocketServer) acceptOnListener(l net.Listener) {
 			}
 			return
 		}
-		go ss.handleConnection(conn)
+		go ss.handleConnection(conn, isLocal)
 	}
 }
 

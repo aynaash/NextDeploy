@@ -5,6 +5,8 @@ import (
 	"log"
 	"os/exec"
 	"regexp"
+
+	"github.com/aynaash/nextdeploy/shared/config"
 )
 
 func resolveTool(name string) string {
@@ -31,14 +33,11 @@ func resolveTool(name string) string {
 	return path
 }
 
+// validateAppName delegates to the shared rule so the daemon and the CLI can
+// never disagree about what a valid app identifier is — a divergence that
+// previously let a name pass client-side and detonate here.
 func validateAppName(name string) error {
-	if matched, _ := regexp.MatchString(`^[a-z0-9-]+$`, name); !matched {
-		return fmt.Errorf("invalid app name: must contain only lowercase alphanumeric and hyphens")
-	}
-	if len(name) < 3 || len(name) > 63 {
-		return fmt.Errorf("invalid app name length (3-63 chars)")
-	}
-	return nil
+	return config.ValidateAppName(name)
 }
 
 func validateDomain(domain string) error {

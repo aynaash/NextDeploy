@@ -27,7 +27,14 @@ import { runWithContext, createRequestContext } from "./context.mjs";
 // through a dedicated API route instead. This cap prevents malicious
 // clients from exhausting the Worker's memory budget with a huge form.
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
-
+export class BodyTooLargeError extends Error {
+  constructor(len) {
+    const got = Number.isFinite(len ) ? len : "unknown";
+    super(`action body ${got} bytes exceeds ${MAX_BODY_BYTES}`);
+    this.name = "BodyTooLargeError";
+    this.status = 413;
+  }
+}
 /**
  * Returns true when this request looks like a Server Action invocation.
  * Cheap — just a header + method check.

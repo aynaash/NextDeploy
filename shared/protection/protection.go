@@ -24,6 +24,10 @@ type Config struct {
 	RateLimit   *RateLimit
 	Allow       []string
 	Deny        []string
+	// TrustForwardedFor opts into believing x-forwarded-for / x-real-ip when
+	// cf-connecting-ip is absent. See config.CFProtection.TrustForwardedFor —
+	// off-Cloudflare those headers are client-controlled.
+	TrustForwardedFor bool
 }
 
 type Auth struct {
@@ -60,6 +64,9 @@ type Runtime struct {
 	Deny        []string     `json:"deny,omitempty"`
 	Auth        *AuthRT      `json:"auth,omitempty"`
 	RateLimit   *RateLimitRT `json:"rateLimit,omitempty"`
+	// TrustForwardedFor is emitted only when true, so an existing
+	// protection.json stays byte-identical unless the operator opts in.
+	TrustForwardedFor bool `json:"trustForwardedFor,omitempty"`
 }
 
 type AuthRT struct {
@@ -88,9 +95,10 @@ func BuildRuntime(c *Config) (*Runtime, error) {
 	}
 
 	rt := &Runtime{
-		Version: 1,
-		Allow:   nonEmpty(c.Allow),
-		Deny:    nonEmpty(c.Deny),
+		Version:           1,
+		Allow:             nonEmpty(c.Allow),
+		Deny:              nonEmpty(c.Deny),
+		TrustForwardedFor: c.TrustForwardedFor,
 	}
 
 	public := append([]string{}, alwaysPublic...)

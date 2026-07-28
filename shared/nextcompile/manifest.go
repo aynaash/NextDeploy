@@ -42,6 +42,7 @@ type Manifest struct {
 	// this to decide which handlers to wire; operators can eyeball it to
 	// confirm the deployed bundle actually supports what they expect.
 	Features ManifestFeatures `json:"features"`
+	PublicFiles []string         `json:"publicFiles,omitempty"`
 }
 
 // ManifestFeatures is the detected capability summary. True = the app
@@ -127,6 +128,7 @@ func BuildManifest(p Payload, next NextVersion, react ReactVersion, refs []Modul
 		Routes:        buildManifestRoutes(p.Routes),
 		ISR:           buildManifestISR(p.Routes.ISRDetail),
 		Features:      buildFeatures(p, refs),
+	PublicFiles:   sortedCopy(p.PublicFiles),
 	}
 
 	if p.Middleware != nil {

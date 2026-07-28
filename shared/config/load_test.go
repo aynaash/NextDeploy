@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -78,18 +79,36 @@ func TestLoad_Errors(t *testing.T) {
 		}
 	})
 
-	t.Run("empty file is a zero-value config", func(t *testing.T) {
+	t.Run("empty file is rejected for a missing app.name", func(t *testing.T) {
+		// Every command that calls Load operates on a named app, so a config
+		// without app.name is not a usable zero value — catch it here rather
+		// than three layers down in the daemon.
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte(""), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		t.Chdir(dir)
 		cfg, err := Load()
-		if err != nil {
-			t.Fatalf("empty file: unexpected error %v", err)
+		if err == nil {
+			t.Fatal("want error for a config with no app.name")
 		}
-		if cfg == nil {
-			t.Fatal("want non-nil cfg for empty doc")
+		if !strings.Contains(err.Error(), "app.name is required") {
+			t.Fatalf("error should name the missing field, got %v", err)
+		}
+		if cfg != nil {
+			t.Fatalf("want nil cfg on validation error, got %+v", cfg)
+		}
+	})
+
+	t.Run("domain as app.name is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		yml := "version: \"1\"\napp:\n  name: ressencesystems.com\n  port: 3000\n"
+		if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte(yml), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Chdir(dir)
+		if _, err := Load(); err == nil {
+			t.Fatal("want error for a domain in app.name")
 		}
 	})
 

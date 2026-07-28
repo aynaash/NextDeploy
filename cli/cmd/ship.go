@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -27,6 +28,7 @@ var (
 	shipVerbose     bool
 	shipNoProvision bool
 	shipVerify      bool
+	shipForce       bool
 )
 
 var shipCmd = &cobra.Command{
@@ -61,7 +63,7 @@ var shipCmd = &cobra.Command{
 		result, err := buildflow.Run(ctx, buildflow.Opts{
 			ProjectDir: ".",
 			Cfg:        cfg,
-			Force:      false,
+			Force:      shipForce,
 			Log:        log,
 		})
 		if err != nil {
@@ -147,6 +149,41 @@ func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow
 		os.Exit(1)
 	}
 
+	// Echo the effective inputs before acting on them. Half of "silent" bugs
+	// are the tool never saying what it was about to do — a reused cached build
+	// on a dirty tree is exactly the state where config and artifact diverge.
+	log.Info("┌─ SHIP ────────────────────────────────────────────────")
+	log.Info("│  app.name : %s", cfg.App.Name)
+	log.Info("│  domain   : %s", cfg.App.Domain.Name)
+	log.Info("│  target   : %s", result.EffectiveTarget)
+	log.Info("│  server   : %s", deploymentServer)
+	log.Info("│  artifact : %s", tarballName)
+	if result.Skipped {
+		log.Warn("│  build    : REUSED CACHED BUILD (no `next build` this run)")
+		if git.IsDirty() {
+			log.Warn("│             working tree is DIRTY — pass --force to rebuild if")
+			log.Warn("│             the cached compile predates your latest source edit.")
+		}
+	} else {
+		log.Info("│  build    : fresh")
+	}
+	log.Info("└───────────────────────────────────────────────────────")
+
+	// Cheap invariant, checked before a multi-MB upload: the artifact's own
+	// metadata.json is what the daemon validates, so if it disagrees with the
+	// config we are shipping something stale. With the config fingerprint in
+	// the build lock this should never trip — which is exactly what makes it a
+	// good assertion: it catches a future regression of that mechanism.
+	if artifactName, err := tarballAppName(tarballName); err == nil {
+		if artifactName != cfg.App.Name {
+			log.Error("Artifact app name %q does not match config app.name %q — the build is stale.\n"+
+				"  Run `nextdeploy ship --force` to rebuild and repackage.", artifactName, cfg.App.Name)
+			os.Exit(1)
+		}
+	} else if !errors.Is(err, errNoMetadata) {
+		log.Warn("Could not read app name from %s (%v) — skipping the pre-upload staleness check.", tarballName, err)
+	}
+
 	remotePath := fmt.Sprintf("/opt/nextdeploy/uploads/nextdeploy_%s_%d.tar.gz", cfg.App.Name, time.Now().Unix())
 	log.Info("Uploading %s to %s on %s...", tarballName, remotePath, deploymentServer)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -212,5 +249,11 @@ func init() {
 	shipCmd.Flags().BoolVarP(&shipVerbose, "verbose", "v", false, "Print detailed deployment logs (S3 uploads, Lambda steps, CloudFront status)")
 	shipCmd.Flags().BoolVar(&shipNoProvision, "no-provision", false, "Skip reconciling declared Cloudflare resources (KV/Hyperdrive/D1) before deploying")
 	shipCmd.Flags().BoolVar(&shipVerify, "verify", false, "Fail the deploy if the post-deploy smoke check does not pass (for CI)")
+	// Every cache needs a manual invalidation escape hatch for the moment the
+	// automatic one is wrong. `build` had --force; `ship` — the command people
+	// actually run — did not, so working around a stale artifact meant dropping
+	// to a sibling command or deleting lock files by hand.
+	shipCmd.Flags().BoolVarP(&shipForce, "force", "f", false,
+		"Force a full rebuild even if the incremental state matches")
 	rootCmd.AddCommand(shipCmd)
 }

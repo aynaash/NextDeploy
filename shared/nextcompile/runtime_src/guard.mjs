@@ -13,14 +13,33 @@
 // proceed to the app. Every exported helper is pure (or takes its effects as
 // arguments) so the whole policy can be unit-tested without a Worker.
 
-/** Best-effort client IP from Cloudflare / proxy headers. */
-export function clientIP(request) {
-  return (
-    request.headers.get("cf-connecting-ip") ||
-    request.headers.get("x-forwarded-for") ||
-    request.headers.get("x-real-ip") ||
-    ""
-  );
+/**
+ * Client IP, under an explicit trust model.
+ *
+ * `cf-connecting-ip` is set by Cloudflare, which strips any inbound copy — so
+ * it is trustworthy on CF and believed unconditionally. `x-forwarded-for` and
+ * `x-real-ip` are NOT: off-Cloudflare (a direct origin, a different proxy)
+ * they are client-controlled, and this value drives both the allow/deny gate
+ * and the rate-limit bucket key. Forging them would satisfy an allowlist or
+ * rotate out of a rate limit at will.
+ *
+ * So they are read only when the operator asserts a trusted proxy fronts the
+ * app (`trustForwardedFor: true` in protection.json). Returns "" when no
+ * trustworthy source exists — callers must treat that as "unknown IP", not as
+ * a matchable value.
+ */
+export function clientIP(request, cfg) {
+  const cf = request.headers.get("cf-connecting-ip");
+  if (cf) return cf.trim();
+  if (cfg && cfg.trustForwardedFor) {
+    // XFF is a comma list "client, proxy1, proxy2"; the left-most entry is the
+    // originating client.
+    const xff = request.headers.get("x-forwarded-for");
+    if (xff) return xff.split(",")[0].trim();
+    const xr = request.headers.get("x-real-ip");
+    if (xr) return xr.trim();
+  }
+  return "";
 }
 
 /**
@@ -48,12 +67,65 @@ export function matchesAny(path, patterns) {
 }
 
 /**
+ * Parse a dotted-quad IPv4 address to its 32-bit integer form, or null if it
+ * isn't one. Used for CIDR containment; IPv6 falls back to exact match.
+ */
+function ipv4ToInt(ip) {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const octet = Number(part);
+    if (octet > 255) return null;
+    n = n * 256 + octet;
+  }
+  return n;
+}
+
+/**
+ * Does `ip` match the list entry `rule`? A rule is either an exact address or
+ * an IPv4 CIDR block ("10.0.0.0/8"). Operators reasonably expect CIDR to work;
+ * before this it was exact-match only and a CIDR entry silently matched
+ * nothing — an allowlist that quietly denied everyone.
+ */
+export function ipMatches(ip, rule) {
+  if (!ip || !rule) return false;
+  if (ip === rule) return true;
+
+  const slash = rule.indexOf("/");
+  if (slash < 0) return false;
+
+  const bits = Number(rule.slice(slash + 1));
+  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+
+  const base = ipv4ToInt(rule.slice(0, slash));
+  const addr = ipv4ToInt(ip);
+  if (base === null || addr === null) return false;
+
+  // A /0 mask must be 0, but `<<< 32` in JS is a no-op shift (it masks the
+  // shift count to 5 bits), so special-case it.
+  if (bits === 0) return true;
+  const mask = (0xffffffff << (32 - bits)) >>> 0;
+  return (base & mask) >>> 0 === (addr & mask) >>> 0;
+}
+
+function listMatches(ip, list) {
+  return Array.isArray(list) && list.some((rule) => ipMatches(ip, rule));
+}
+
+/**
  * IP gating. An allowlist, when non-empty, is exclusive: anything not on it is
- * denied. The denylist always blocks. Deny wins over allow.
+ * denied. The denylist always blocks. Deny wins over allow. Entries may be
+ * exact addresses or IPv4 CIDR blocks.
+ *
+ * An unknown IP ("" — no trustworthy header, see clientIP) can never satisfy
+ * an allowlist, so a non-empty allowlist fails closed rather than letting an
+ * unidentifiable client through.
  */
 export function ipDenied(ip, cfg) {
-  if (cfg.deny && cfg.deny.includes(ip)) return true;
-  if (cfg.allow && cfg.allow.length > 0 && !cfg.allow.includes(ip)) return true;
+  if (listMatches(ip, cfg.deny)) return true;
+  if (Array.isArray(cfg.allow) && cfg.allow.length > 0 && !listMatches(ip, cfg.allow)) return true;
   return false;
 }
 
@@ -170,7 +242,7 @@ export async function runGuard(request, env, ctx, cfg, nowMs = Date.now()) {
   // Public paths bypass everything (also covers /_next/*, login, etc.).
   if (matchesAny(path, cfg.publicPaths)) return null;
 
-  const ip = clientIP(request);
+  const ip = clientIP(request, cfg);
 
   // 1. IP gate.
   if (ipDenied(ip, cfg)) return new Response("Forbidden", { status: 403 });
@@ -185,6 +257,10 @@ export async function runGuard(request, env, ctx, cfg, nowMs = Date.now()) {
       console.error(`rate_limit kvBinding "${cfg.rateLimit.kvBinding}" not bound`);
       return new Response("Service Unavailable", { status: 503 });
     }
+    // An unknown IP ("") keys one shared bucket. That is deliberate: with no
+    // trustworthy client identity the only safe options are one shared limit
+    // or no limit, and no limit is worse. On Cloudflare cf-connecting-ip is
+    // always present, so this is the off-CF / misconfigured path.
     const { limited } = await checkRateLimit(kv, ip, cfg.rateLimit.requestsPerMinute, nowMs);
     if (limited) {
       return new Response("Too Many Requests", {

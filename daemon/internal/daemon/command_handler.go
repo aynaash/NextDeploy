@@ -122,15 +122,25 @@ func (ch *CommandHandler) ValidateCommand(cmd types.Command) error {
 	return nil
 }
 
-func (ch *CommandHandler) HandleCommand(cmd types.Command, clientIdentity string) types.Response {
+// HandleCommand authorizes and dispatches one command. isLocal says the peer
+// arrived on the Unix socket, which the caller knows from WHICH listener
+// accepted it — the two transports have different identity models and must not
+// share one authz check.
+func (ch *CommandHandler) HandleCommand(cmd types.Command, clientIdentity string, isLocal bool) types.Response {
 	// 1. Rate Limiting
 	if !ch.rateLimiter.Allow(clientIdentity) {
 		return types.Response{Success: false, Message: "rate limit exceeded"}
 	}
 
-	// 2. IP Whitelisting (for non-Unix socket identities)
-	if !IsIPAllowed(clientIdentity, ch.config.IPWhitelist) {
-		return types.Response{Success: false, Message: "IP not whitelisted"}
+	// 2. IP allow-listing applies only to networked (TCP) peers. The Unix socket
+	// is already gated by filesystem permissions (root + nextdeploy group, 0660)
+	// and has no IP at all — running its identity through IsIPAllowed parsed to
+	// nil and returned false, so adding ip_whitelist to lock down TCP silently
+	// killed every local ship/rollback/status through the primary channel.
+	if !isLocal {
+		if !IsIPAllowed(clientIdentity, ch.config.IPWhitelist) {
+			return types.Response{Success: false, Message: "IP not whitelisted"}
+		}
 	}
 
 	// 3. Signature Verification
@@ -974,6 +984,15 @@ func (ch *CommandHandler) handleDestroy(args map[string]interface{}) types.Respo
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
 	}
+	// Validate the path component BEFORE any filesystem op touches it. destroy
+	// runs os.RemoveAll(filepath.Join(appsDir, appName)), and filepath.Join
+	// *cleans* its result — "../../../etc" resolves to "/etc", turning cleanup
+	// into an arbitrary recursive delete as the daemon user. RemoveConfig also
+	// validates, but its error is only appended to warnings, so execution falls
+	// through: a best-effort step is not a security boundary.
+	if err := validateAppName(appName); err != nil {
+		return types.Response{Success: false, Message: err.Error()}
+	}
 
 	release, ok := ch.deployLocks.tryAcquire(appName)
 	if !ok {
@@ -1060,6 +1079,11 @@ func (ch *CommandHandler) handleStopApp(args map[string]interface{}) types.Respo
 	appName, ok := StringArg(args, "appName")
 	if !ok {
 		return types.Response{Success: false, Message: "missing 'appName' argument"}
+	}
+	// Same guard as ship/rollback/destroy: appName feeds systemd unit lookups,
+	// so it must be known-safe before it leaves this function.
+	if err := validateAppName(appName); err != nil {
+		return types.Response{Success: false, Message: err.Error()}
 	}
 
 	log.Printf("[stop] Stopping app: %s", appName)

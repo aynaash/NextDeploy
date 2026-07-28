@@ -53,3 +53,12 @@ test("a malformed percent-escape falls back to the raw key, never throws", async
   assert.strictEqual(res, null); // miss, but no throw
   assert.strictEqual(calls[0], "_next/static/chunks/bad%E0%A4%A.js");
 });
+
+
+test("serveRootPublicFromR2 also tolerates a malformed percent-escape", async () => {
+  const { env } = mockEnv({"robots.txt": "User-agent:*"});
+  const manifest = {publicFiles: ["robots.txt","favicon.ico"]};
+  const res = await serveRootPublicFromR2(env, "/robots.txt", manifest);
+  assert.ok(res);
+  assert.strictEqual(calls[0], "my file.txt")
+})

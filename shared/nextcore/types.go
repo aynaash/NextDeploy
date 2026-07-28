@@ -25,6 +25,7 @@ type NextCorePayload struct {
 	Config            config.SafeConfig `json:"config,omitempty"`
 	ImageAssets       ImageAssets       `json:"image_assets"`
 	RouteInfo         RouteInfo         `json:"route_info"`
+	ImageConfig       *ImageConfig      `json:"image_config,omitempty"`
 	DetectedFeatures  *DetectedFeatures `json:"detected_features,omitempty"`
 	DistDir           string            `json:"dist_dir"`
 	ExportDir         string            `json:"export_dir"`
@@ -44,6 +45,13 @@ type BuildLock struct {
 	GitDirty    bool   `json:"git_dirty"`
 	GeneratedAt string `json:"generated_at"`
 	Metadata    string `json:"metadata_file"`
+	// ConfigHash fingerprints the nextdeploy.yml fields that end up baked into
+	// the artifact's metadata.json. The git commit alone is only a PROXY for
+	// the build inputs: an uncommitted config edit changes the output without
+	// changing the commit, so the build was skipped and a stale tarball
+	// shipped. Empty on locks written before this field existed, which is
+	// treated as "unknown" → rebuild.
+	ConfigHash string `json:"config_hash,omitempty"`
 }
 
 type StaticAsset struct {

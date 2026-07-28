@@ -400,10 +400,17 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 	}
 	stdoutMulti := io.MultiWriter(stdoutWriters...)
 
-	var stderrDst = io.Discard
+	// stderr is ALWAYS captured, even when the caller passes stream == nil to
+	// collect stdout only. stdout is the result you parse; stderr is the
+	// diagnosis you show a human. Discarding it (the old behaviour) reduced
+	// every remote failure to a bare "exited with status 1" with the daemon's
+	// actual explanation thrown away.
+	stderrTail := &tailBuffer{limit: stderrTailLimit}
+	stderrWriters := []io.Writer{stderrTail}
 	if stream != nil {
-		stderrDst = stream
+		stderrWriters = append(stderrWriters, stream)
 	}
+	stderrMulti := io.MultiWriter(stderrWriters...)
 
 	err = session.Start(command)
 	if err != nil {
@@ -420,7 +427,7 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 
 	go func() {
 		defer wg.Done()
-		_, _ = io.Copy(stderrDst, stderrPipe)
+		_, _ = io.Copy(stderrMulti, stderrPipe)
 	}()
 
 	done := make(chan struct{})
@@ -439,12 +446,42 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 	client.LastUsed = time.Now()
 
 	if err != nil {
+		// Fold the remote process's own words into the error. An exit code alone
+		// is a dead end; exit code + stderr is the minimum viable diagnosis.
+		if msg := strings.TrimSpace(stderrTail.String()); msg != "" {
+			return output.String(), fmt.Errorf("command failed: %w: %s", err, msg)
+		}
 		return output.String(), fmt.Errorf("command failed: %w", err)
 	}
 
 	serverlogger.Debug("Executed command on %s: %s", serverName, command)
 	return output.String(), nil
 }
+
+// stderrTailLimit caps the retained stderr per command. A streaming command
+// (`logs -f`) can emit stderr for hours, so keep only the tail — the failure
+// message is at the end, and an unbounded buffer would be a leak.
+const stderrTailLimit = 8 << 10
+
+// tailBuffer is an io.Writer that retains only the last `limit` bytes written.
+type tailBuffer struct {
+	buf   []byte
+	limit int
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	n := len(p)
+	if len(p) > t.limit {
+		p = p[len(p)-t.limit:]
+	}
+	t.buf = append(t.buf, p...)
+	if over := len(t.buf) - t.limit; over > 0 {
+		t.buf = t.buf[over:]
+	}
+	return n, nil
+}
+
+func (t *tailBuffer) String() string { return string(t.buf) }
 
 func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, remotePath string) error {
 	client, err := s.getSSHClient(serverName)

@@ -12,7 +12,7 @@ var buildExplanation = explanation{
 		{
 			Num:       1,
 			Title:     "Incremental build gate",
-			Narrative: "Checks .nextdeploy/build.lock against the current git commit. If unchanged, exits 0 immediately. --force bypasses this gate.",
+			Narrative: "Checks .nextdeploy/build.lock against the current git commit AND a fingerprint of the build-affecting config (app.name, domain, environment, port, target, cdn). If both match, `next build` is skipped — but metadata and the VPS tarball are still regenerated so what ships matches the current config. --force bypasses this gate.",
 			Ref:       "cli/cmd/build.go:24",
 			Function:  "nextcore.ValidateBuildState",
 			Output:    "skip (exit 0) or proceed",

@@ -34,21 +34,26 @@ var (
 var prepareCmd = &cobra.Command{
 	Use:   "prepare",
 	Short: "Prepare target server with required tools",
-	Long: `Provisions the target server via Ansible: installs Node.js, Caddy, Doppler
-and other required tools.
+	Long: `Provisions the target server: installs the JS runtimes, Caddy support dirs,
+log rotation, fail2ban jails and the nextdeployd control plane.
 
-Steps:
-  1. Verify server connectivity / system info
-  2. Install base packages + Node.js + Bun + Caddy + Doppler
-  3. Install nextdeployd daemon control plane
-  4. Validate the full installation
+By default this runs in AGENT mode: the nextdeployd static binary is installed on
+the server and provisions it from there. The target needs only a shell and curl
+(or wget) — no Python interpreter — and this machine needs no Ansible. Every step
+checks before it changes, so re-running converges rather than redoing work.
 
-Requires ansible-playbook to be installed on the local machine.
-See: https://docs.ansible.com/ansible/latest/installation_guide/`,
+Pass --ansible to use the legacy playbook instead. That path requires
+ansible-playbook here AND python3 on the target, because Ansible executes its
+modules in Python on the managed host.`,
 	Run: runPrepare,
 }
 
-var prepareAllowRoot bool
+var (
+	prepareAllowRoot     bool
+	prepareUseAnsible    bool
+	prepareSkipRuntimes  bool
+	prepareSkipHardening bool
+)
 
 func rootCredentialBlocked(username string, allowRoot bool) (bool, string) {
 	if username == "root" && !allowRoot {
@@ -63,6 +68,9 @@ func init() {
 	prepareCmd.Flags().DurationVar(&timeout, "timeout", 10*time.Minute, "overall timeout for the preparation")
 	prepareCmd.Flags().BoolVar(&streamMode, "stream", false, "stream raw Ansible output (no colour filter)")
 	prepareCmd.Flags().BoolVar(&prepareAllowRoot, "allow-root", false, "allow provisioning over a root SSH login (not recommended)")
+	prepareCmd.Flags().BoolVar(&prepareUseAnsible, "ansible", false, "use the legacy Ansible playbook (requires ansible-playbook locally and python3 on the target)")
+	prepareCmd.Flags().BoolVar(&prepareSkipRuntimes, "skip-runtimes", false, "do not install Node/Corepack/Bun (the host manages runtimes separately)")
+	prepareCmd.Flags().BoolVar(&prepareSkipHardening, "skip-hardening", false, "do not install logrotate or the fail2ban jails")
 	rootCmd.AddCommand(prepareCmd)
 }
 
@@ -80,11 +88,6 @@ func runPrepare(cmd *cobra.Command, args []string) {
 
 	out := cmd.OutOrStdout()
 
-	if err := ensureAnsible(out); err != nil {
-		PrepLogs.Error("Ansible setup failed: %v", err)
-		os.Exit(1)
-	}
-
 	serverName, serverCfg, err := resolveTargetServer()
 	if err != nil {
 		PrepLogs.Error("Failed to resolve target server: %v", err)
@@ -93,6 +96,29 @@ func runPrepare(cmd *cobra.Command, args []string) {
 
 	if blocked, reason := rootCredentialBlocked(serverCfg.Username, prepareAllowRoot); blocked {
 		PrepLogs.Error("%s", reason)
+		os.Exit(1)
+	}
+
+	// Agent path by default: nextdeployd is a static binary, so the target needs
+	// no Python and this machine needs no Ansible. The playbook remains
+	// available behind --ansible until the Go path has proven parity in the
+	// field, but it is no longer what a new user pays for.
+	if !prepareUseAnsible {
+		if err := runPrepareAgent(ctx, serverName, serverCfg, out, agentOptions{
+			SkipRuntimes:  prepareSkipRuntimes,
+			SkipHardening: prepareSkipHardening,
+		}); err != nil {
+			PrepLogs.Error("Preparation failed: %v", err)
+			os.Exit(1)
+		}
+		_, _ = color.New(color.FgGreen, color.Bold).Fprintf(out, "\n✨  Server %s prepared successfully!\n", serverName)
+		PrepLogs.Success("Server %s prepared successfully!", serverName)
+		return
+	}
+
+	legacyAnsibleNotice(out)
+	if err := ensureAnsible(out); err != nil {
+		PrepLogs.Error("Ansible setup failed: %v", err)
 		os.Exit(1)
 	}
 
@@ -253,7 +279,13 @@ func writeInventory(tmpDir, serverName string, cfg config.ServerConfig) (string,
 	var sb strings.Builder
 	sb.WriteString("[target]\n")
 
-	line := fmt.Sprintf("%s ansible_host=%s ansible_port=%d ansible_user=%s",
+	// ansible_python_interpreter=auto_silent makes Ansible DISCOVER the target's
+	// Python at runtime instead of assuming a hard-coded /usr/bin/python3.
+	// Without it a host whose python3 lives elsewhere (or is a different minor
+	// than the control node's) fails the run with an interpreter error or a
+	// deprecation warning that looks like one — a version mismatch between two
+	// machines that has nothing to do with the deploy.
+	line := fmt.Sprintf("%s ansible_host=%s ansible_port=%d ansible_user=%s ansible_python_interpreter=auto_silent",
 		serverName, cfg.Host, port, cfg.Username)
 
 	switch {

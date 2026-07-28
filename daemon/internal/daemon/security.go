@@ -16,14 +16,53 @@ type RateLimiter struct {
 	mu     sync.Mutex
 	rate   float64
 	burst  float64
+	// idleTTL is how long a bucket may sit untouched before it's evicted. Both
+	// maps are keyed by client identity — on the TCP listener that's a peer
+	// address, so without eviction a peer rotating source ports grows them
+	// forever: a steady memory climb and a cheap exhaustion angle.
+	idleTTL time.Duration
+	// lastGC gates the sweep so the common path stays O(1).
+	lastGC time.Time
+	// now is swappable so tests can advance a fake clock instead of sleeping.
+	now func() time.Time
 }
 
 func NewRateLimiter(rate, burst float64) *RateLimiter {
-	return &RateLimiter{
-		tokens: make(map[string]float64),
-		last:   make(map[string]time.Time),
-		rate:   rate,
-		burst:  burst,
+	// Evict a bucket only once it has been idle for several full refills
+	// (burst/rate seconds is one full refill). By then a fresh bucket and the
+	// idle one hold exactly the same value — burst — so dropping it is
+	// behaviourally transparent.
+	idleTTL := 10 * time.Minute
+	if rate > 0 {
+		if refill := time.Duration(burst/rate*float64(time.Second)) * 10; refill > idleTTL {
+			idleTTL = refill
+		}
+	}
+	rl := &RateLimiter{
+		tokens:  make(map[string]float64),
+		last:    make(map[string]time.Time),
+		rate:    rate,
+		burst:   burst,
+		idleTTL: idleTTL,
+		now:     time.Now,
+	}
+	rl.lastGC = rl.now()
+	return rl
+}
+
+// gcLocked drops buckets that have been idle past idleTTL. Runs at most once per
+// idleTTL: the sweep itself is O(n), but amortized it costs nothing on the hot
+// path. Caller holds rl.mu.
+func (rl *RateLimiter) gcLocked(now time.Time) {
+	if now.Sub(rl.lastGC) < rl.idleTTL {
+		return
+	}
+	rl.lastGC = now
+	for id, last := range rl.last {
+		if now.Sub(last) > rl.idleTTL {
+			delete(rl.tokens, id)
+			delete(rl.last, id)
+		}
 	}
 }
 
@@ -31,7 +70,9 @@ func (rl *RateLimiter) Allow(id string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	now := time.Now()
+	now := rl.now()
+	rl.gcLocked(now)
+
 	// Initialize if not present
 	if _, ok := rl.tokens[id]; !ok {
 		rl.tokens[id] = rl.burst

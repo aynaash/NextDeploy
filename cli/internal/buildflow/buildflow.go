@@ -73,8 +73,10 @@ type Result struct {
 
 // Run executes the unified build flow:
 //
-//  1. Incremental skip (unless Force): if git commit is unchanged, return
-//     early with a fresh metadata payload.
+//  1. Incremental skip (unless Force): if the git commit AND the config
+//     fingerprint are unchanged, skip `next build` — but still regenerate
+//     metadata and repackage the VPS artifact, so what ships always matches
+//     the current config.
 //  2. Generate metadata (nextcore.GenerateMetadata) — reads next.config
 //     and the routes/prerender manifests.
 //  3. Validate output mode + features against the resolved target.
@@ -97,18 +99,33 @@ func Run(ctx context.Context, opts Opts) (*Result, error) {
 
 	// ── 1. Incremental skip ────────────────────────────────────────────
 	if !opts.Force {
-		if err := nextcore.ValidateBuildState(); err == nil {
-			opts.Log.Info("Git commit unchanged — skipping build (incremental state matched).")
+		if err := nextcore.ValidateBuildState(opts.Cfg); err == nil {
+			opts.Log.Info("Compile inputs unchanged — reusing build, refreshing artifact metadata.")
 			payload, mErr := nextcore.GenerateMetadata()
 			if mErr != nil {
 				return nil, fmt.Errorf("regenerate metadata after incremental skip: %w", mErr)
 			}
-			return &Result{
+			res := &Result{
 				Payload:         payload,
 				EffectiveTarget: opts.Cfg.ResolveTargetType(payload.Config.TargetType),
 				StandaloneDir:   filepath.Join(payload.DistDir, "standalone"),
 				Skipped:         true,
-			}, nil
+			}
+			// Repackage even on skip. Skipping `next build` (expensive) is the
+			// point; skipping the repackage (cheap — a copy and a tar) is what
+			// shipped a tarball whose metadata.json predated the config edit.
+			// Leaving TarballPath empty also made `ship` fall back to whatever
+			// app.tar.gz happened to be on disk. The invariant: the artifact
+			// uploaded is always a function of the CURRENT config plus code.
+			if res.EffectiveTarget == "vps" {
+				releaseDir, tarballPath, bErr := buildVPSArtifact(payload, opts.Log)
+				if bErr != nil {
+					return nil, fmt.Errorf("repackage on incremental skip: %w", bErr)
+				}
+				res.ReleaseDir = releaseDir
+				res.TarballPath = tarballPath
+			}
+			return res, nil
 		}
 	}
 

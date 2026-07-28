@@ -16,6 +16,7 @@ import (
 	daemoniclient "github.com/aynaash/nextdeploy/daemon/internal/client"
 	"github.com/aynaash/nextdeploy/daemon/internal/config"
 	"github.com/aynaash/nextdeploy/daemon/internal/daemon"
+	"github.com/aynaash/nextdeploy/daemon/internal/prepare"
 	daemontypes "github.com/aynaash/nextdeploy/daemon/internal/types"
 	"github.com/aynaash/nextdeploy/shared"
 	"github.com/aynaash/nextdeploy/shared/updater"
@@ -37,6 +38,9 @@ func main() {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
 			}
+			return
+		case "prepare":
+			handlePrepareSubcommand()
 			return
 		case "ship":
 			handleShipSubcommand()
@@ -283,6 +287,7 @@ func handleHelpSubcommand() {
 	fmt.Println("Usage: nextdeployd <command> [arguments]")
 	fmt.Println()
 	fmt.Println("Available commands:")
+	fmt.Println("  prepare                   Provision this host for NextDeploy (idempotent)")
 	fmt.Println("  ship --tarball=<path>     Deploy a new release")
 	fmt.Println("  status --appName=<name>   Check app status")
 	fmt.Println("  stop --appName=<name>     Stop an application")
@@ -296,6 +301,32 @@ func handleHelpSubcommand() {
 	fmt.Println()
 	fmt.Println("Run as daemon:")
 	fmt.Println("  nextdeployd [--config <path>] [--socket-path <path>] [--foreground]")
+}
+
+// handlePrepareSubcommand provisions the host in-process. This is the Go
+// replacement for the Ansible playbook: nextdeployd is a static binary, so the
+// target needs no Python interpreter and the control node needs no Ansible.
+func handlePrepareSubcommand() {
+	fs := flag.NewFlagSet("prepare", flag.ExitOnError)
+	skipRuntimes := fs.Bool("skip-runtimes", false, "Do not install Node/Corepack/Bun (host manages runtimes separately)")
+	skipHardening := fs.Bool("skip-hardening", false, "Do not install logrotate or fail2ban jails")
+	_ = fs.Parse(os.Args[2:])
+
+	if err := prepare.RequireRoot(); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+
+	report := prepare.Run(prepare.NewHost(), prepare.Options{
+		SkipRuntimes:  *skipRuntimes,
+		SkipHardening: *skipHardening,
+	}, os.Stdout)
+
+	if report.Failed() {
+		fmt.Fprintln(os.Stderr, "prepare failed — the host is NOT ready. Fix the failure above and re-run; completed steps are skipped.")
+		os.Exit(1)
+	}
+	fmt.Println("Host prepared. Run `nextdeploy ship` from your project to deploy.")
 }
 
 func handleDestroySubcommand() {

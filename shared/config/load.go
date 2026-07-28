@@ -25,6 +25,14 @@ func Load() (*NextDeployConfig, error) {
 		return nil, fmt.Errorf("%s Invalid config format: %w", EmojiWarning, err)
 	}
 
+	// Validate the app identifier at the earliest boundary that has it. The
+	// daemon enforces the same rule, but only after a build, a multi-MB upload
+	// and an SSH round-trip — by which point the error is attributed to the
+	// wrong layer and the value has already been baked into an artifact.
+	if err := ValidateAppName(cfg.App.Name); err != nil {
+		return nil, err
+	}
+
 	fmt.Printf("%s Configuration loaded successfully\n", EmojiSuccess)
 	return &cfg, nil
 }

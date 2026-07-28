@@ -18,6 +18,12 @@ func LoadConfig() (*NextDeployConfig, error) {
 		return nil, fmt.Errorf("%s Invalid config format: %w", EmojiWarning, err)
 	}
 
+	// Same boundary check as Load — LoadConfig is a duplicate entry point and
+	// must not be a way around the app-name rule.
+	if err := ValidateAppName(cfg.App.Name); err != nil {
+		return nil, err
+	}
+
 	fmt.Printf("%s Configuration loaded successfully\n", EmojiSuccess)
 	return &cfg, nil
 }

@@ -75,6 +75,11 @@ target_type: vps
 # APP METADATA
 # -----
 app:
+  # name: the app IDENTIFIER — a slug, NOT a domain.
+  #   allowed  : lowercase letters, digits, hyphens  (^[a-z0-9-]+$), 3-63 chars
+  #   forbidden: dots, uppercase, spaces, underscores
+  #   Your DOMAIN goes in app.domain below — do not put it here.
+  #   e.g. name: ressencesystems  (domain: ressencesystems.com)
   name: example-app # [REQUIRED] Unique app name used for identification
   environment: production # [REQUIRED] production | staging | development
   # domain can be a bare hostname, or a block recording the registrar and how
@@ -108,6 +113,11 @@ target_type: serverless
 # APP METADATA
 # -----
 app:
+  # name: the app IDENTIFIER — a slug, NOT a domain.
+  #   allowed  : lowercase letters, digits, hyphens  (^[a-z0-9-]+$), 3-63 chars
+  #   forbidden: dots, uppercase, spaces, underscores
+  #   Your DOMAIN goes in app.domain below — do not put it here.
+  #   e.g. name: ressencesystems  (domain: ressencesystems.com)
   name: example-app # [REQUIRED] Unique app name used for identification
   environment: production # [REQUIRED] production | staging | development
   # domain can be a bare hostname, or a block recording the registrar and how
@@ -158,6 +168,11 @@ target_type: serverless
 # APP METADATA
 # -----
 app:
+  # name: the app IDENTIFIER — a slug, NOT a domain.
+  #   allowed  : lowercase letters, digits, hyphens  (^[a-z0-9-]+$), 3-63 chars
+  #   forbidden: dots, uppercase, spaces, underscores
+  #   Your DOMAIN goes in app.domain below — do not put it here.
+  #   e.g. name: ressencesystems  (domain: ressencesystems.com)
   name: example-app # [REQUIRED] Unique app name used for identification
   environment: production # [REQUIRED] production | staging | development
   # domain can be a bare hostname, or a block recording the registrar and how

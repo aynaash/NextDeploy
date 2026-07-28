@@ -42,6 +42,11 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 	}
 
 	csp := nextcore.BuildCSP(features)
+	// Coraza's SecDebugLogLevel below is 1 (errors only), not 3. Level 3 logs
+	// every rule evaluation for every request — a dev default that fills the
+	// disk in production, and a full /var takes Caddy, the daemon and the app
+	// down together. Raise it temporarily when debugging a rule, then put it
+	// back. (logrotate for /var/log/caddy/*.log is provisioned in prepare.yml.)
 	commonHeaders := fmt.Sprintf(`
 	encode zstd gzip
 	header {
@@ -62,7 +67,7 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 			SecAuditLog /var/log/caddy/audit.log
 			SecAuditLogType Serial
 			SecDebugLog /var/log/caddy/debug.log
-			SecDebugLogLevel 3
+			SecDebugLogLevel 1
 		"
 	}`, csp)
 

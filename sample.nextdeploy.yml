@@ -16,6 +16,11 @@ target_type: vps  # "vps" | "serverless"
 # APP METADATA
 # -----
 app:
+  # name: the app IDENTIFIER — a slug, NOT a domain.
+  #   allowed  : lowercase letters, digits, hyphens  (^[a-z0-9-]+$), 3-63 chars
+  #   forbidden: dots, uppercase, spaces, underscores
+  #   Your DOMAIN goes in app.domain below — do not put it here.
+  #   e.g. name: ressencesystems  (domain: ressencesystems.com)
   name: example-app # Unique app name used for container naming and logging
   environment: production # Can be: development | staging | production. Affects env variables & caching.
   domain: app.example.com # Public domain where your app will be accessible

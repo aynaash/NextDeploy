@@ -1,6 +1,8 @@
 package nextcore
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -115,6 +117,7 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		CDNEnabled:       cfg.App.CDNEnabled,
 		Domain:           cfg.App.Domain.Name,
 		RouteInfo:        *routeInfo,
+		ImageConfig:      nextConfig.Images,
 		DetectedFeatures: features,
 		DistDir:          features.DistDir,
 		ExportDir:        features.ExportDir,
@@ -138,7 +141,7 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		}
 	}
 
-	if err := createBuildLock(&metadata); err != nil {
+	if err := createBuildLock(&metadata, ConfigFingerprint(cfg)); err != nil {
 		NextCoreLogger.Error("Failed to create build lock: %v", err)
 		return NextCorePayload{}, fmt.Errorf("failed to create build lock: %w", err)
 	}
@@ -225,8 +228,10 @@ func copyFile(src, dst string) error {
 }
 
 // createBuildLock writes the metadata payload and a build.lock using the git
-// state already captured on the payload.
-func createBuildLock(metadata *NextCorePayload) error {
+// state already captured on the payload, plus a fingerprint of the config
+// inputs (configHash) so ValidateBuildState can detect an uncommitted config
+// edit that the git commit alone would miss.
+func createBuildLock(metadata *NextCorePayload, configHash string) error {
 	payloadData, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		NextCoreLogger.Error("Failed to marshal metadata: %v", err)
@@ -242,6 +247,7 @@ func createBuildLock(metadata *NextCorePayload) error {
 		GitDirty:    metadata.GitDirty,
 		GeneratedAt: metadata.GeneratedAt,
 		Metadata:    MetadataFileName,
+		ConfigHash:  configHash,
 	}, "", "  ")
 	if err != nil {
 		NextCoreLogger.Error("Failed to marshal build lock: %v", err)
@@ -250,8 +256,35 @@ func createBuildLock(metadata *NextCorePayload) error {
 	return os.WriteFile(BuildLockFileName, lockData, 0600)
 }
 
-// ValidateBuildState checks if the current git state matches the build lock.
-func ValidateBuildState() error {
+// ConfigFingerprint hashes ONLY the config fields that change the built
+// artifact — the ones copied into metadata.json and read by the daemon. An
+// unrelated edit (a comment, an SSH setting) must not force a needless rebuild,
+// but any of these must.
+//
+// Every field added here means "changing this triggers a rebuild", so add
+// deliberately. Returns "" for a nil config, which callers treat as unknown.
+func ConfigFingerprint(cfg *config.NextDeployConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	h := sha256.New()
+	// NUL separators so "ab"+"c" and "a"+"bc" can't collide.
+	fmt.Fprintf(h, "v1\x00name=%s\x00domain=%s\x00env=%s\x00port=%d\x00target=%s\x00cdn=%t\x00",
+		cfg.App.Name,
+		cfg.App.Domain.Name,
+		cfg.App.Environment,
+		cfg.App.Port,
+		cfg.ResolveTargetType(""),
+		cfg.App.CDNEnabled,
+	)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// ValidateBuildState reports whether the previous build can be reused. A nil
+// error means "safe to skip". cfg may be nil, which forces a rebuild — the
+// caller couldn't prove the config is unchanged, and skipping on an unproven
+// key is the bug this guards against.
+func ValidateBuildState(cfg *config.NextDeployConfig) error {
 	lockPath := filepath.Join(".nextdeploy", "build.lock")
 	// #nosec G304
 	data, err := os.ReadFile(lockPath)
@@ -271,7 +304,6 @@ func ValidateBuildState() error {
 		NextCoreLogger.Error("Failed to get current git commit: %v", err)
 		return fmt.Errorf("failed to get current git commit: %w", err)
 	}
-	//TODO: use this data to avoid unnecessary builds
 	if currentCommit != lock.GitCommit {
 		NextCoreLogger.Error("Git commit mismatch: expected %s, got %s", lock.GitCommit, currentCommit)
 		return fmt.Errorf("git commit mismatch: expected %s, got %s", lock.GitCommit, currentCommit)
@@ -279,6 +311,16 @@ func ValidateBuildState() error {
 
 	if git.IsDirty() && !lock.GitDirty {
 		return errors.New("working directory is dirty but build lock expects clean state")
+	}
+
+	// The git checks above cover the CODE inputs. The config inputs need their
+	// own key: editing app.name in nextdeploy.yml without committing leaves the
+	// commit and the dirty flag unchanged, so the build was skipped and the
+	// previous tarball — carrying the OLD app name in its metadata.json — was
+	// shipped and rejected by the daemon.
+	current := ConfigFingerprint(cfg)
+	if current == "" || lock.ConfigHash == "" || lock.ConfigHash != current {
+		return errors.New("config changed since last build (app.name/domain/environment/port/target/cdn) — rebuilding")
 	}
 
 	return nil

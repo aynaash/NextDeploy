@@ -136,6 +136,7 @@ type Payload struct {
 	I18n         *I18nConfig
 	BuildID      string
 	GitCommit    string
+	PublicFiles  []string
 }
 
 // RouteInfo mirrors nextcore.RouteInfo. Duplicated here so the compiler
