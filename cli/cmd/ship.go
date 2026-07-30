@@ -132,11 +132,20 @@ func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow
 	}
 	log.Info("Deployment server: %s", deploymentServer)
 
+	// deploymentServer is the config NAME (the SSH client map key). The DNS guide
+	// and the report tell the operator where to point an A record, so they need
+	// the actual address — a record pointing at "production" is not a record.
+	serverHost, err := srv.ServerHost(deploymentServer)
+	if err != nil {
+		log.Error("Could not resolve the address of server %q: %v", deploymentServer, err)
+		os.Exit(1)
+	}
+
 	if cfg.App.Domain.Name != "" {
-		if err := dns.GenerateVPSGuide(cfg.App.Domain.Name, deploymentServer); err != nil {
+		if err := dns.GenerateVPSGuide(cfg.App.Domain.Name, serverHost); err != nil {
 			log.Warn("Failed to generate DNS guide: %v", err)
 		} else {
-			log.Info("   DNS Guide Generated: dns.md (Point %s to %s)", cfg.App.Domain.Name, deploymentServer)
+			log.Info("   DNS Guide Generated: dns.md (Point %s to %s)", cfg.App.Domain.Name, serverHost)
 		}
 	}
 
@@ -156,7 +165,7 @@ func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow
 	log.Info("│  app.name : %s", cfg.App.Name)
 	log.Info("│  domain   : %s", cfg.App.Domain.Name)
 	log.Info("│  target   : %s", result.EffectiveTarget)
-	log.Info("│  server   : %s", deploymentServer)
+	log.Info("│  server   : %s (%s)", deploymentServer, serverHost)
 	log.Info("│  artifact : %s", tarballName)
 	if result.Skipped {
 		log.Warn("│  build    : REUSED CACHED BUILD (no `next build` this run)")
@@ -223,7 +232,7 @@ func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow
 	resMap := server.VPSResourceMap{
 		AppName:        cfg.App.Name,
 		Environment:    "production",
-		ServerIP:       deploymentServer,
+		ServerIP:       serverHost,
 		CustomDomain:   cfg.App.Domain.Name,
 		Port:           port,
 		DeploymentTime: time.Now(),
@@ -237,7 +246,7 @@ func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow
 		log.Info("├────────────────────────────────────────────────────────────┤")
 		log.Info("│  Location: %s", reportPath)
 		log.Info("│                                                            │")
-		log.Info("│  🚨  DNS ACTION REQUIRED: Point your domain to %s     ", deploymentServer)
+		log.Info("│  🚨  DNS ACTION REQUIRED: Point your domain to %s     ", serverHost)
 		log.Info("│     Open this report for the full DNS setup strategy.      │")
 		log.Info("└────────────────────────────────────────────────────────────┘")
 	} else {

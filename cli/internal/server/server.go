@@ -130,6 +130,31 @@ func (s *ServerStruct) GetDeploymentServer() (string, error) {
 	}
 	return first.Name, nil
 }
+
+// ServerHost returns the network address configured for the named server.
+//
+// GetDeploymentServer deliberately returns the server's NAME — that is the key
+// sshClients is indexed by, so every Execute/Upload call needs it. But a name
+// is a nickname ("production"), not something a DNS A record can point at.
+// Anything user-facing that means "the address of the box" has to resolve it
+// through here; passing the name straight through is how dns.md ended up
+// instructing operators to point their domain at the string "production".
+func (s *ServerStruct) ServerHost(name string) (string, error) {
+	if s.config == nil {
+		return "", fmt.Errorf("no configuration loaded")
+	}
+	for _, srv := range s.config.Servers {
+		if srv.Name != name {
+			continue
+		}
+		if srv.Host == "" {
+			return "", fmt.Errorf("server %q has no host configured in nextdeploy.yml", name)
+		}
+		return srv.Host, nil
+	}
+	return "", fmt.Errorf("server %q not found in nextdeploy.yml", name)
+}
+
 func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 	if net.ParseIP(ip) == nil && !isValidHostname(ip) {
 		return fmt.Errorf("invalid IP address or hostname: %s", ip)
