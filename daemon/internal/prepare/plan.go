@@ -169,9 +169,17 @@ func Plan(h Host, opts Options) []Step {
 
 	if !opts.SkipRuntimes {
 		steps = append(steps, runtimeSteps(pm)...)
+		steps = append(steps, dopplerStep())
 	}
+
+	// Edge before control plane before hardening. The daemon unit is ordered
+	// After=caddy.service, and the hardening steps chown /var/log/caddy to the
+	// caddy user — which only exists once Caddy is installed.
+	steps = append(steps, caddySteps(pm)...)
+	steps = append(steps, daemonSteps()...)
+
 	if !opts.SkipHardening {
-		steps = append(steps, hardeningSteps()...)
+		steps = append(steps, hardeningSteps(pm)...)
 	}
 	return steps
 }
@@ -286,8 +294,25 @@ func linkIntoBinDir(h Host, names ...string) error {
 
 // hardeningSteps provisions the ops safety net: log rotation and the fail2ban
 // jails, including one that actually reads the WAF's audit log.
-func hardeningSteps() []Step {
+func hardeningSteps(pm PackageManager) []Step {
 	return []Step{
+		{
+			// The jail step below needs fail2ban to already be here. It used to
+			// only check for it and warn, which meant the ban-on-abuse layer
+			// was silently off on every host that didn't happen to ship it.
+			Name: "Install fail2ban",
+			Done: func(h Host) bool { _, ok := h.LookPath("fail2ban-client"); return ok },
+			Apply: func(h Host) error {
+				cmd, err := installCmd(pm, "fail2ban")
+				if err != nil {
+					return err
+				}
+				_, err = h.RunShell(cmd)
+				return err
+			},
+			// A host that can't reach its package mirror still serves traffic.
+			Optional: true,
+		},
 		{
 			Name: "Create " + CaddyLogDir + " and Caddy fragment dir",
 			Done: func(h Host) bool { return h.Exists(CaddyLogDir) && h.Exists(CaddyFragmentDir) },

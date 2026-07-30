@@ -34,8 +34,10 @@ var (
 var prepareCmd = &cobra.Command{
 	Use:   "prepare",
 	Short: "Prepare target server with required tools",
-	Long: `Provisions the target server: installs the JS runtimes, Caddy support dirs,
-log rotation, fail2ban jails and the nextdeployd control plane.
+	Long: `Provisions the target server end to end: the JS runtimes (Node, Corepack,
+Bun) and Doppler, Caddy with the Coraza WAF module, the nextdeployd control
+plane (systemd unit, HMAC secret, socket permissions), plus log rotation and
+fail2ban jails.
 
 By default this runs in AGENT mode: the nextdeployd static binary is installed on
 the server and provisions it from there. The target needs only a shell and curl

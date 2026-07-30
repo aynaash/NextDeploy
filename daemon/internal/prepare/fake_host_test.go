@@ -18,6 +18,10 @@ type fakeHost struct {
 	owners  map[string]string // path -> "user:group"
 	ran     []string          // every command/script, in order
 	failCmd map[string]error  // substring -> error to return
+	// outputs lets a command report something back (substring -> stdout), which
+	// Done predicates that interrogate the host need — `caddy list-modules` is
+	// only meaningful if the fake can answer it.
+	outputs map[string]string
 	// onRun lets a test mutate host state as a side effect of a command,
 	// modelling what a real installer would do.
 	onRun func(h *fakeHost, cmd string)
@@ -32,6 +36,7 @@ func newFakeHost() *fakeHost {
 		users:   map[string]bool{},
 		owners:  map[string]string{},
 		failCmd: map[string]error{},
+		outputs: map[string]string{},
 	}
 }
 
@@ -44,25 +49,30 @@ func aptHost() *fakeHost {
 	return h
 }
 
-func (h *fakeHost) record(cmd string) error {
+func (h *fakeHost) record(cmd string) (string, error) {
 	h.ran = append(h.ran, cmd)
 	for frag, err := range h.failCmd {
 		if strings.Contains(cmd, frag) {
-			return err
+			return "", err
 		}
 	}
 	if h.onRun != nil {
 		h.onRun(h, cmd)
 	}
-	return nil
+	for frag, out := range h.outputs {
+		if strings.Contains(cmd, frag) {
+			return out, nil
+		}
+	}
+	return "", nil
 }
 
 func (h *fakeHost) Run(name string, args ...string) (string, error) {
-	return "", h.record(strings.TrimSpace(name + " " + strings.Join(args, " ")))
+	return h.record(strings.TrimSpace(name + " " + strings.Join(args, " ")))
 }
 
 func (h *fakeHost) RunShell(script string) (string, error) {
-	return "", h.record(script)
+	return h.record(script)
 }
 
 func (h *fakeHost) LookPath(name string) (string, bool) {

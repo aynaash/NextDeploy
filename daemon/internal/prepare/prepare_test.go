@@ -22,10 +22,25 @@ func installEverything(h *fakeHost, cmd string) {
 		h.bins["yarn"] = "/usr/bin/yarn"
 	case strings.Contains(cmd, "bun.sh/install"):
 		h.files[BinDir+"/bun"] = []byte("elf")
+	case strings.Contains(cmd, "cli.doppler.com"):
+		h.bins["doppler"] = "/usr/bin/doppler"
+	case strings.Contains(cmd, "dl.cloudsmith.io"), strings.Contains(cmd, "copr enable"):
+		h.bins["caddy"] = "/usr/bin/caddy"
+		h.files["/lib/systemd/system/caddy.service"] = []byte("packaged unit")
+	case strings.Contains(cmd, "caddyserver.com/api/download"):
+		// The replacement binary is the one that reports the module.
+		h.outputs["caddy list-modules"] = "http.handlers.waf\n"
 	case strings.Contains(cmd, "apt-get install"):
 		for _, b := range []string{"curl", "tar", "unzip"} {
 			h.bins[b] = "/usr/bin/" + b
 		}
+		if strings.Contains(cmd, "fail2ban") {
+			h.bins["fail2ban-client"] = "/usr/bin/fail2ban-client"
+		}
+	}
+	// systemd starting the daemon is what materializes the control socket.
+	if strings.Contains(cmd, "enable --now nextdeployd") {
+		h.files[DaemonSockPath] = []byte("socket")
 	}
 	// `ln -sf <src> /usr/local/bin/<name>` materializes the link.
 	if strings.HasPrefix(cmd, "ln -sf ") {
@@ -34,11 +49,16 @@ func installEverything(h *fakeHost, cmd string) {
 			h.files[parts[3]] = []byte("symlink")
 		}
 	}
+	// Both invocations put the account name last. Read it rather than assuming
+	// the service account — prepare also creates the `caddy` user on the
+	// static-fallback path.
 	if strings.HasPrefix(cmd, "groupadd ") {
-		h.groups[ServiceGroup] = true
+		f := strings.Fields(cmd)
+		h.groups[f[len(f)-1]] = true
 	}
 	if strings.HasPrefix(cmd, "useradd ") {
-		h.users[ServiceUser] = true
+		f := strings.Fields(cmd)
+		h.users[f[len(f)-1]] = true
 	}
 }
 
@@ -218,17 +238,43 @@ func TestPrepareWritesHardeningConfigs(t *testing.T) {
 	}
 }
 
-func TestPrepareWarnsWhenFail2banIsAbsent(t *testing.T) {
+func TestPrepareInstallsFail2banRatherThanWarningAboutIt(t *testing.T) {
+	// Previously the jails step only checked for fail2ban and warned when it was
+	// absent, so on any host that didn't ship it the ban-on-abuse layer was
+	// quietly off while prepare reported success.
 	h := aptHost()
-	h.onRun = installEverything // no fail2ban-client in bins
+	h.onRun = installEverything // fail2ban-client is NOT pre-seeded
 
 	report := Run(h, Options{}, io.Discard)
 	if report.Failed() {
-		t.Fatalf("a host without fail2ban should still provision:\n%s", report.Summary())
+		t.Fatalf("prepare failed:\n%s", report.Summary())
+	}
+	if len(h.commandsMatching("fail2ban")) == 0 {
+		t.Fatal("prepare never tried to install fail2ban")
+	}
+	if _, ok := h.files["/etc/fail2ban/jail.d/caddy-waf.conf"]; !ok {
+		t.Error("jails were not installed after fail2ban was")
+	}
+	_, _, warned, _ := report.Counts()
+	if warned != 0 {
+		t.Errorf("a host where fail2ban installs cleanly should not warn:\n%s", report.Summary())
+	}
+}
+
+func TestPrepareWarnsWhenFail2banCannotBeInstalled(t *testing.T) {
+	// An unreachable package mirror must not fail the run: the host still
+	// serves traffic without fail2ban.
+	h := aptHost()
+	h.onRun = installEverything
+	h.failCmd["fail2ban"] = errors.New("could not reach the package mirror")
+
+	report := Run(h, Options{}, io.Discard)
+	if report.Failed() {
+		t.Fatalf("a failed fail2ban install must not fail the run:\n%s", report.Summary())
 	}
 	_, _, warned, _ := report.Counts()
 	if warned == 0 {
-		t.Error("missing fail2ban should warn, not pass silently")
+		t.Error("a failed fail2ban install should warn, not pass silently")
 	}
 }
 
