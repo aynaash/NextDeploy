@@ -161,6 +161,28 @@ func caddySteps(pm PackageManager) []Step {
 			},
 		},
 		{
+			// Caddy serves /_next/static/* straight from
+			// /opt/nextdeploy/apps/<app>/shared_static, but every directory on
+			// the way in is 0750 nextdeploy:nextdeploy. Without this membership
+			// the caddy user cannot even traverse /opt/nextdeploy, so every
+			// hashed asset 403s and the app loads without its JS or CSS while
+			// the deploy reports success.
+			//
+			// The playbook does this in its first phase with ignore_errors,
+			// because Caddy might not be installed yet. Running it here instead
+			// — right after the install step — means the account exists and a
+			// failure is real.
+			Name: "Add caddy to the " + ServiceGroup + " group",
+			Done: func(h Host) bool { return h.UserInGroup("caddy", ServiceGroup) },
+			Apply: func(h Host) error {
+				if !h.UserExists("caddy") {
+					return fmt.Errorf("the caddy user does not exist — cannot grant it %s group access", ServiceGroup)
+				}
+				_, err := h.Run("usermod", "-aG", ServiceGroup, "caddy")
+				return err
+			},
+		},
+		{
 			// The module ID is http.handlers.waf; the directive is coraza_waf.
 			// Match either so this doesn't start silently rebuilding Caddy on
 			// every run if upstream renames one of them.

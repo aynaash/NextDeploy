@@ -47,6 +47,46 @@ func TestPrepareProvisionsTheEdgeAndControlPlane(t *testing.T) {
 	}
 }
 
+func TestCaddyIsGrantedAccessToTheAppTree(t *testing.T) {
+	// /opt/nextdeploy and /opt/nextdeploy/apps are 0750 nextdeploy:nextdeploy
+	// (plan.go), so `other` cannot traverse them. Caddy serves /_next/static/*
+	// straight out of apps/<app>/shared_static — without group membership every
+	// hashed asset 403s and the app loads with no JS or CSS, while the deploy
+	// reports success.
+	h := aptHost()
+	h.onRun = installEverything
+
+	report := Run(h, Options{}, io.Discard)
+	if report.Failed() {
+		t.Fatalf("prepare failed:\n%s", report.Summary())
+	}
+	if !h.UserInGroup("caddy", ServiceGroup) {
+		t.Fatalf("caddy was not added to the %s group — static assets would 403", ServiceGroup)
+	}
+}
+
+func TestCaddyGroupMembershipIsAppliedOnAHostThatAlreadyHasCaddy(t *testing.T) {
+	// The install step is skipped when caddy is already present, so this must
+	// not be a side effect of installing — an upgraded host needs it too.
+	h := aptHost()
+	h.onRun = installEverything
+	h.bins["caddy"] = "/usr/bin/caddy"
+	h.users["caddy"] = true
+	h.groups["caddy"] = true
+	h.files["/lib/systemd/system/caddy.service"] = []byte("packaged unit")
+
+	report := Run(h, Options{}, io.Discard)
+	if report.Failed() {
+		t.Fatalf("prepare failed:\n%s", report.Summary())
+	}
+	if len(h.commandsMatching("dl.cloudsmith.io")) != 0 {
+		t.Error("reinstalled Caddy on a host that already had it")
+	}
+	if !h.UserInGroup("caddy", ServiceGroup) {
+		t.Errorf("caddy was not added to the %s group on an already-installed host", ServiceGroup)
+	}
+}
+
 func TestSeededCaddyfileMatchesWhatTheDaemonExpects(t *testing.T) {
 	// The daemon's EnsureMainCaddyfile converges on this exact shape, and every
 	// generated fragment needs `order coraza_waf first` to parse. If the seed

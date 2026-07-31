@@ -10,14 +10,17 @@ import (
 // be exercised without a machine — which is the point of moving provisioning
 // into Go: hand-written idempotency is only trustworthy if it's tested.
 type fakeHost struct {
-	bins    map[string]string // name -> resolved path
-	files   map[string][]byte
-	dirs    map[string]bool
-	groups  map[string]bool
-	users   map[string]bool
-	owners  map[string]string // path -> "user:group"
-	ran     []string          // every command/script, in order
-	failCmd map[string]error  // substring -> error to return
+	bins   map[string]string // name -> resolved path
+	files  map[string][]byte
+	dirs   map[string]bool
+	groups map[string]bool
+	users  map[string]bool
+	owners map[string]string // path -> "user:group"
+	// memberships models secondary groups (user -> groups). Caddy's access to
+	// /opt/nextdeploy depends entirely on this.
+	memberships map[string][]string
+	ran         []string         // every command/script, in order
+	failCmd     map[string]error // substring -> error to return
 	// outputs lets a command report something back (substring -> stdout), which
 	// Done predicates that interrogate the host need — `caddy list-modules` is
 	// only meaningful if the fake can answer it.
@@ -29,14 +32,15 @@ type fakeHost struct {
 
 func newFakeHost() *fakeHost {
 	return &fakeHost{
-		bins:    map[string]string{},
-		files:   map[string][]byte{},
-		dirs:    map[string]bool{},
-		groups:  map[string]bool{},
-		users:   map[string]bool{},
-		owners:  map[string]string{},
-		failCmd: map[string]error{},
-		outputs: map[string]string{},
+		bins:        map[string]string{},
+		files:       map[string][]byte{},
+		dirs:        map[string]bool{},
+		groups:      map[string]bool{},
+		users:       map[string]bool{},
+		owners:      map[string]string{},
+		memberships: map[string][]string{},
+		failCmd:     map[string]error{},
+		outputs:     map[string]string{},
 	}
 }
 
@@ -116,6 +120,15 @@ func (h *fakeHost) Chown(path, owner, group string) error {
 
 func (h *fakeHost) GroupExists(name string) bool { return h.groups[name] }
 func (h *fakeHost) UserExists(name string) bool  { return h.users[name] }
+
+func (h *fakeHost) UserInGroup(username, group string) bool {
+	for _, g := range h.memberships[username] {
+		if g == group {
+			return true
+		}
+	}
+	return false
+}
 
 // commandsMatching returns every recorded command containing frag.
 func (h *fakeHost) commandsMatching(frag string) []string {

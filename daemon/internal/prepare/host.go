@@ -45,6 +45,10 @@ type Host interface {
 	// GroupExists / UserExists gate the create steps.
 	GroupExists(name string) bool
 	UserExists(name string) bool
+	// UserInGroup reports secondary-group membership. Caddy serves assets out
+	// of /opt/nextdeploy, which is 0750 nextdeploy:nextdeploy — group access is
+	// the only way in.
+	UserInGroup(username, group string) bool
 }
 
 // realHost is the production Host: it actually touches the machine.
@@ -121,4 +125,25 @@ func (h *realHost) GroupExists(name string) bool {
 func (h *realHost) UserExists(name string) bool {
 	_, err := user.Lookup(name)
 	return err == nil
+}
+
+func (h *realHost) UserInGroup(username, group string) bool {
+	u, err := user.Lookup(username)
+	if err != nil {
+		return false
+	}
+	g, err := user.LookupGroup(group)
+	if err != nil {
+		return false
+	}
+	gids, err := u.GroupIds()
+	if err != nil {
+		return false
+	}
+	for _, gid := range gids {
+		if gid == g.Gid {
+			return true
+		}
+	}
+	return false
 }

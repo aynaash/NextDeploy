@@ -60,6 +60,13 @@ func installEverything(h *fakeHost, cmd string) {
 		f := strings.Fields(cmd)
 		h.users[f[len(f)-1]] = true
 	}
+	// usermod -aG <group> <user>
+	if strings.HasPrefix(cmd, "usermod -aG ") {
+		f := strings.Fields(cmd)
+		if len(f) == 4 {
+			h.memberships[f[3]] = append(h.memberships[f[3]], f[2])
+		}
+	}
 }
 
 func TestDetectPackageManager(t *testing.T) {
