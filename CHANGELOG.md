@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.16.0](https://github.com/aynaash/NextDeploy/compare/v0.15.1...v0.16.0) (2026-07-31)
+
+
+### ⚠ BREAKING CHANGES
+
+* **prepare:** provision over static Go agent; fix deploy correctness - Fix silent failures, security path traversal, stale artifacts, domain collisions - BREAKING: prepare uses Go agent by default; app.name restricted to ^[a-z0-9-]+$
+
+### Features
+
+* Cloudflare SSR runtime, resource adoption, environments and shared CI ([4fe82fb](https://github.com/aynaash/NextDeploy/commit/4fe82fb2f4cf0de8aa3489f075fcd4dc93ddd52a))
+* **prepare:** provision Caddy, the daemon service and Doppler in agent mode ([d2aaf87](https://github.com/aynaash/NextDeploy/commit/d2aaf87690381c7e970e60195690dcc168cf81b7))
+* **prepare:** provision over static Go agent; fix deploy correctness - Fix silent failures, security path traversal, stale artifacts, domain collisions - BREAKING: prepare uses Go agent by default; app.name restricted to ^[a-z0-9-]+$ ([18591d1](https://github.com/aynaash/NextDeploy/commit/18591d19d25f94cae32657831a161fd8060b9f5e))
+
+
+### Bug Fixes
+
+* **cloudflare:** rollback now picks active version and purges cache ([b08afea](https://github.com/aynaash/NextDeploy/commit/b08afeab8a35475532f5773c37f0505c0730c852))
+* **prepare:** add caddy to the nextdeploy group so it can read app assets ([a9c0c6f](https://github.com/aynaash/NextDeploy/commit/a9c0c6f583e2e34783a931872aa69e1fe2818074))
+* **ship:** point the DNS guide at the server's address, not its config name ([05a43fc](https://github.com/aynaash/NextDeploy/commit/05a43fc116e4f071d132ed832a148e49af76ce0d))
+
+
+### Performance Improvements
+
+* **caddy:** serve public/ from Caddy instead of proxying it to Node ([115f9b5](https://github.com/aynaash/NextDeploy/commit/115f9b5d3a0bef56e6ba88549f876e225665c5c2))
+
 ## [0.15.1](https://github.com/aynaash/NextDeploy/compare/v0.15.0...v0.15.1) (2026-07-03)
 
 
