@@ -97,7 +97,33 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 	}
 
 	sharedStaticDir := filepath.Join(filepath.Dir(appDir), "shared_static")
+	publicDir := filepath.Join(appDir, "public")
 
+	// public/ is served by Caddy rather than proxied to Node.
+	//
+	// Next maps public/foo.png onto /foo.png, so these assets live in the ROOT
+	// URL namespace alongside every page route — the handler cannot simply own
+	// a prefix. The @publicAsset matcher only fires when the file actually
+	// exists on disk; everything else falls through to reverse_proxy, so routes
+	// are untouched. Before this, every favicon, OG image and font woke up the
+	// Node process for a byte-for-byte static read.
+	//
+	// try_files {path} pins it to an exact match: without it the file matcher
+	// resolves /  to public/index.html, which Next would never have served
+	// (the app route wins). `not path */` keeps trailing-slash requests — which
+	// are always route-shaped, never asset-shaped — on the proxy.
+	//
+	// Cache-Control mirrors what Next sends for public/: these files are NOT
+	// content-hashed, so a long max-age would pin a stale logo past a deploy.
+	// file_server still emits ETag/Last-Modified, so repeat hits are 304s.
+	//
+	// The route{} wrapper is load-bearing, not decoration. Caddy executes
+	// directives in ITS OWN fixed order, not written order, and in that order
+	// reverse_proxy comes before file_server. Written bare, the terminal
+	// reverse_proxy would answer every request and the file_server would never
+	// run — the whole handler silently reduced to a no-op. route{} preserves
+	// written order, so the matched file_server gets first refusal and the
+	// proxy is the fallthrough.
 	return fmt.Sprintf(`%s {%s
 	log {
 		output file /var/log/caddy/access.log
@@ -109,9 +135,20 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 		file_server
 	}
 	handle {
-		reverse_proxy localhost:%d
+		root * %s
+		@publicAsset {
+			not path */
+			file {
+				try_files {path}
+			}
+		}
+		header @publicAsset Cache-Control "public, max-age=0, must-revalidate"
+		route {
+			file_server @publicAsset
+			reverse_proxy localhost:%d
+		}
 	}
-}`, domainList, commonHeaders, sharedStaticDir, port)
+}`, domainList, commonHeaders, sharedStaticDir, publicDir, port)
 }
 
 func (cm *CaddyManager) GetConfig(ctx context.Context) (*Config, error) {
