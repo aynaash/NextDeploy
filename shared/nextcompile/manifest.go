@@ -27,6 +27,7 @@ type Manifest struct {
 	GeneratedAt   string          `json:"generatedAt"`
 	AppName       string          `json:"appName"`
 	BasePath      string          `json:"basePath,omitempty"`
+	AssetPrefix   string          `json:"assetPrefix,omitempty"`
 	NextVersion   string          `json:"nextVersion"`
 	ReactVersion  string          `json:"reactVersion,omitempty"`
 	BuildID       string          `json:"buildId,omitempty"`
@@ -41,7 +42,7 @@ type Manifest struct {
 	// Features is the app's detected capability surface. Runtime consults
 	// this to decide which handlers to wire; operators can eyeball it to
 	// confirm the deployed bundle actually supports what they expect.
-	Features ManifestFeatures `json:"features"`
+	Features    ManifestFeatures `json:"features"`
 	PublicFiles []string         `json:"publicFiles,omitempty"`
 }
 
@@ -86,8 +87,16 @@ type ManifestMiddle struct {
 }
 
 type ManifestMiddleMat struct {
-	Pathname string `json:"pathname,omitempty"`
-	Pattern  string `json:"pattern,omitempty"`
+	Pathname string               `json:"pathname,omitempty"`
+	Pattern  string               `json:"pattern,omitempty"`
+	Has      []ManifestMiddleCond `json:"has,omitempty"`
+	Missing  []ManifestMiddleCond `json:"missing,omitempty"`
+}
+
+type ManifestMiddleCond struct {
+	Type  string `json:"type"`
+	Key   string `json:"key,omitempty"`
+	Value string `json:"value,omitempty"`
 }
 
 type ManifestImages struct {
@@ -119,6 +128,7 @@ func BuildManifest(p Payload, next NextVersion, react ReactVersion, refs []Modul
 		GeneratedAt:   generatedAt.UTC().Format(time.RFC3339),
 		AppName:       p.AppName,
 		BasePath:      p.BasePath,
+		AssetPrefix:   p.AssetPrefix,
 		NextVersion:   next.Raw,
 		ReactVersion:  react.Raw,
 		BuildID:       p.BuildID,
@@ -128,7 +138,7 @@ func BuildManifest(p Payload, next NextVersion, react ReactVersion, refs []Modul
 		Routes:        buildManifestRoutes(p.Routes),
 		ISR:           buildManifestISR(p.Routes.ISRDetail),
 		Features:      buildFeatures(p, refs),
-	PublicFiles:   sortedCopy(p.PublicFiles),
+		PublicFiles:   sortedCopy(p.PublicFiles),
 	}
 
 	if p.Middleware != nil {
@@ -234,7 +244,25 @@ func convertMatchers(in []MiddlewareMatcher) []ManifestMiddleMat {
 	}
 	out := make([]ManifestMiddleMat, len(in))
 	for i, m := range in {
-		out[i] = ManifestMiddleMat(m)
+		// Not a struct conversion: Has/Missing are distinct named types on
+		// each side, so the fields must be copied explicitly.
+		out[i] = ManifestMiddleMat{
+			Pathname: m.Pathname,
+			Pattern:  m.Pattern,
+			Has:      convertConds(m.Has),
+			Missing:  convertConds(m.Missing),
+		}
+	}
+	return out
+}
+
+func convertConds(in []MiddlewareCondition) []ManifestMiddleCond {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ManifestMiddleCond, len(in))
+	for i, c := range in {
+		out[i] = ManifestMiddleCond{Type: c.Type, Key: c.Key, Value: c.Value}
 	}
 	return out
 }

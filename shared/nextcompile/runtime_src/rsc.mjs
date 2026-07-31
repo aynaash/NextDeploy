@@ -10,8 +10,8 @@
 //      in parallel.
 //   3. Compose layouts root → leaf → page.
 //   4. Pass composed tree + clientModules to renderToReadableStream.
-//   5. Wrap the resulting Flight stream in a minimal HTML shell so
-//      browsers get something renderable on first paint.
+//   5. Hand the Flight stream to ssr.mjs, which renders it to real HTML and
+//      inlines the same payload as self.__next_f so the browser can hydrate.
 //   6. Emit the response with context-propagated headers/cookies.
 //
 // Scope intentionally narrow:
@@ -21,11 +21,19 @@
 //   - Client manifest is passed verbatim as Flight's bundlerConfig.
 //     `clientModules` is the shape Next emits; renderToReadableStream
 //     consumes it directly.
-//   - HTML shell is minimal. Full Next-style shell (hydrator bootstrap,
-//     chunk preloads, RSC protocol tags) arrives with the next RSC
-//     milestone. For now it's enough to get HTML into a browser.
+//   - When the vendored SSR builds are absent (a bundle compiled before SSR
+//     vendoring landed), step 5 degrades to the original Flight-only shell:
+//     a blank but non-erroring page, same as the previous behaviour.
 
 import { runWithContext, createRequestContext } from "./context.mjs";
+import {
+  renderToHtml,
+  buildSSRManifest,
+  bootstrapScriptURLs,
+  stylesheetLinkTags,
+  ssrLoadFailure,
+} from "./ssr.mjs";
+import { resolveMetadata, renderMetadataTags } from "./metadata.mjs";
 
 let vendoredLoader = null;
 let vendoredLoadError = null;
@@ -50,9 +58,12 @@ async function loadVendored() {
  * @param {Record<string, any>} env
  * @param {{ waitUntil: (p: Promise<any>) => void }} ctx
  * @param {{ params, searchParams }} routeCtx
+ * @param {object} [manifest]  runtime manifest; supplies assetPrefix/basePath
+ *                             so hydration script URLs match where the client
+ *                             chunks were actually uploaded.
  * @returns {Promise<Response>}
  */
-export async function renderRSC(entry, request, env, ctx, routeCtx) {
+export async function renderRSC(entry, request, env, ctx, routeCtx, manifest) {
   // B7 — PPR marker. Our renderer doesn't implement the static-shell +
   // dynamic-holes protocol; surface a clear 501 so operators know why the
   // deploy won't handle this page yet.
@@ -79,11 +90,10 @@ export async function renderRSC(entry, request, env, ctx, routeCtx) {
 
     const PageComponent = resolveComponent(pageModule);
     if (typeof PageComponent !== "function") {
-      return new Response(
-        "nextcompile: page module did not export a Component. Received keys: " +
-          Object.keys(pageModule).join(", "),
-        { status: 500 },
-      );
+      return new Response(describeMissingComponent(pageModule, entry), {
+        status: 500,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
     }
 
     // Build the rendering tree — layouts wrap the page, root-first.
@@ -122,11 +132,27 @@ export async function renderRSC(entry, request, env, ctx, routeCtx) {
       );
     }
 
-    // B3 — wrap the Flight stream in an HTML shell. Browsers need something
-    // they can actually render at first paint. The shell is deliberately
-    // minimal; it will grow to match Next's full shell shape as the RSC
-    // renderer stabilizes.
-    const htmlStream = wrapFlightInHtmlShell(flightStream, reqCtx);
+    // Resolve `metadata` / `generateMetadata` across the same chain we just
+    // rendered. Next does this inside app-render, which we bypass — without it
+    // the page ships with no <title> or Open Graph tags whatsoever.
+    let metaMarkup = "";
+    try {
+      const chain = [...layoutModules, pageModule];
+      metaMarkup = renderMetadataTags(await resolveMetadata(chain, treeProps));
+    } catch (err) {
+      console.error("[nextcompile metadata]", err?.stack || String(err));
+    }
+
+    // Layer 2 — SSR. Renders the Flight stream to HTML and inlines the same
+    // payload as self.__next_f so Next's own client runtime can hydrate it.
+    const htmlStream = await renderHtmlOrShell(
+      flightStream,
+      entry,
+      clientManifest,
+      manifest,
+      reqCtx,
+      metaMarkup,
+    );
 
     const respHeaders = new Headers(reqCtx.responseHeaders);
     respHeaders.set("content-type", "text/html; charset=utf-8");
@@ -145,8 +171,47 @@ export async function renderRSC(entry, request, env, ctx, routeCtx) {
  * Pick the React component out of a compiled Next page module. Next
  * commonly puts it on default; some legacy emits use `Page`.
  */
-function resolveComponent(mod) {
+export function resolveComponent(mod) {
   return mod?.default || mod?.Page || mod?.Component;
+}
+
+/**
+ * Explain a module that carried no renderable component.
+ *
+ * This is the single most likely first failure of the whole RSC path, so the
+ * message earns its length. `resolveComponent` expects a plain component on
+ * `default`; a production `next build` may instead emit Next's internal route
+ * module (`routeModule` / `tree` / `pages`), which this renderer does not know
+ * how to drive. Detecting that shape specifically turns a generic 500 into an
+ * actionable one, rather than leaving someone to guess from a key list.
+ */
+export function describeMissingComponent(mod, entry) {
+  const keys = mod ? Object.keys(mod) : [];
+  const nextInternals = ["routeModule", "tree", "pages", "workAsyncStorage", "handler"].filter(
+    (k) => keys.includes(k),
+  );
+
+  let body =
+    "nextcompile: page module exported no renderable component.\n\n" +
+    `Route:    ${entry?.compiled ?? "(unknown)"}\n` +
+    `Exports:  ${keys.length ? keys.join(", ") : "(none)"}\n\n`;
+
+  if (nextInternals.length > 0) {
+    body +=
+      "This module is Next's INTERNAL route module (found: " +
+      nextInternals.join(", ") +
+      "), not a\n" +
+      "plain component. nextcompile's renderer composes layouts itself and needs a\n" +
+      "component on `default`; it cannot drive Next's route module yet.\n\n" +
+      "This is a known architectural gap, not a misconfiguration — see\n" +
+      "yussuf.md §6(a).\n";
+  } else {
+    body +=
+      "Expected a component on `default` (or `Page` / `Component`).\n" +
+      "If this page renders in `next dev`, the compiled output shape differs from\n" +
+      "what this renderer assumes — report the export list above.\n";
+  }
+  return body;
 }
 
 /**
@@ -171,6 +236,80 @@ async function buildLayoutTree(layoutModules, PageComponent, props) {
 }
 
 /**
+ * Render the Flight stream to hydratable HTML, degrading to the Flight-only
+ * shell if the SSR layer can't run.
+ *
+ * The stream is teed up front rather than after a failure: once renderToHtml
+ * has started consuming it the stream is locked, so there would be nothing
+ * left to build a fallback shell from. Teeing costs one buffered copy and
+ * makes the fallback always available; the unused branch is cancelled so it
+ * doesn't retain the payload.
+ */
+async function renderHtmlOrShell(
+  flightStream,
+  entry,
+  clientManifest,
+  manifest,
+  reqCtx,
+  headExtra = "",
+) {
+  const [primary, fallback] = flightStream.tee();
+
+  const assetOpts = {
+    assetPrefix: manifest?.assetPrefix,
+    basePath: manifest?.basePath,
+  };
+  const scripts = bootstrapScriptURLs(entry.bootstrap, assetOpts);
+  // Metadata before stylesheets: <title>/<meta> are what a crawler or preview
+  // bot reads out of a truncated head, so they should never sit behind a
+  // stylesheet list.
+  const headMarkup = headExtra + stylesheetLinkTags(entry.css, { ...assetOpts, nonce: reqCtx?.nonce });
+
+  try {
+    const html = await renderToHtml(
+      primary,
+      {
+        scripts,
+        headMarkup,
+        ssrManifest: buildSSRManifest(clientManifest),
+        nonce: reqCtx?.nonce,
+      },
+      reqCtx,
+    );
+    if (html) {
+      safeCancel(fallback);
+      return html;
+    }
+    // Vendored SSR builds absent — an older bundle. Not an error.
+    console.warn(
+      "[nextcompile ssr] SSR runtime unavailable, serving Flight shell (page will not hydrate):",
+      String(ssrLoadFailure()),
+    );
+  } catch (err) {
+    // A render failure must not 500 the route: a blank-but-served page beats
+    // an error page, and the Flight payload is still on the wire for debugging.
+    console.error(
+      "[nextcompile ssr] render failed, falling back to Flight shell:",
+      err?.stack || String(err),
+    );
+  }
+
+  safeCancel(primary);
+  return wrapFlightInHtmlShell(fallback, reqCtx, headMarkup);
+}
+
+// Cancelling a stream that renderToHtml already locked throws synchronously;
+// neither that nor a rejected cancel should affect the response.
+function safeCancel(stream) {
+  try {
+    const p = stream.cancel();
+    if (p && typeof p.catch === "function") p.catch(() => {});
+  } catch {
+    /* already locked or cancelled — nothing to reclaim */
+  }
+}
+
+/**
  * Minimal HTML shell around the Flight stream. Enough to give a browser
  * something to render. The shell does three things:
  *   1. Sets the doctype + charset so encoding is unambiguous.
@@ -183,10 +322,10 @@ async function buildLayoutTree(layoutModules, PageComponent, props) {
  * least shows "the server is alive" and puts the Flight data where a
  * follow-up client bootstrap can find it.
  */
-function wrapFlightInHtmlShell(flightStream, reqCtx) {
+function wrapFlightInHtmlShell(flightStream, reqCtx, headMarkup = "") {
   const encoder = new TextEncoder();
   const shellPrefix = encoder.encode(
-    `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><div id="__next"></div><script id="__NEXTCOMPILE_FLIGHT__" type="application/x-nextcompile-flight">`,
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${headMarkup}</head><body><div id="__next"></div><script id="__NEXTCOMPILE_FLIGHT__" type="application/x-nextcompile-flight">`,
   );
   const shellSuffix = encoder.encode(`</script></body></html>`);
 

@@ -16,8 +16,9 @@ import (
 )
 
 var (
-	destroyForce bool
-	destroyYes   bool
+	destroyForce       bool
+	destroyYes         bool
+	destroyEnvironment string
 )
 
 func destroyBlocked(protected, force bool) (bool, string) {
@@ -42,6 +43,17 @@ var destroyCmd = &cobra.Command{
 		if err != nil {
 			log.Error("Failed to load config: %v", err)
 			os.Exit(1)
+		}
+
+		// Env-scoped teardown. Because the environment is the namespace, a
+		// preview teardown can never reach production: a different environment
+		// means a different Worker script and a different R2 bucket entirely.
+		if err := applyEnvironmentOverride(cfg, destroyEnvironment); err != nil {
+			log.Error("%v", err)
+			os.Exit(1)
+		}
+		if destroyEnvironment != "" {
+			log.Info("Destroying environment: %s", cfg.App.Environment)
 		}
 
 		if blocked, reason := destroyBlocked(cfg.App.DeletionProtection, destroyForce); blocked {
@@ -163,5 +175,7 @@ func confirmExact(expected string) bool {
 func init() {
 	destroyCmd.Flags().BoolVar(&destroyForce, "force", false, "Override deletion_protection")
 	destroyCmd.Flags().BoolVar(&destroyYes, "yes", false, "Skip the interactive confirmation (non-interactive)")
+	destroyCmd.Flags().StringVarP(&destroyEnvironment, "environment", "e", "",
+		"Destroy a named environment's stack (e.g. pr-42) instead of the configured one")
 	rootCmd.AddCommand(destroyCmd)
 }

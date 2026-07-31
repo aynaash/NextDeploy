@@ -1,0 +1,53 @@
+{
+  "pages": {
+    "/_not-found/page": [
+      "static/chunks/webpack-5adebf9f62dc3001.js",
+      "static/chunks/3f94662f-dd617e91a515a3d2.js",
+      "static/chunks/323-52055915122e660b.js",
+      "static/chunks/main-app-da1490cb1b408188.js",
+      "static/chunks/app/_not-found/page-eda1cae01efd99ac.js"
+    ],
+    "/layout": [
+      "static/chunks/webpack-5adebf9f62dc3001.js",
+      "static/chunks/3f94662f-dd617e91a515a3d2.js",
+      "static/chunks/323-52055915122e660b.js",
+      "static/chunks/main-app-da1490cb1b408188.js",
+      "static/chunks/app/layout-e2f600b1b0564bef.js"
+    ],
+    "/page": [
+      "static/chunks/webpack-5adebf9f62dc3001.js",
+      "static/chunks/3f94662f-dd617e91a515a3d2.js",
+      "static/chunks/323-52055915122e660b.js",
+      "static/chunks/main-app-da1490cb1b408188.js",
+      "static/chunks/app/page-e1e2856be569970d.js"
+    ],
+    "/blog/layout": [
+      "static/chunks/webpack-5adebf9f62dc3001.js",
+      "static/chunks/3f94662f-dd617e91a515a3d2.js",
+      "static/chunks/323-52055915122e660b.js",
+      "static/chunks/main-app-da1490cb1b408188.js",
+      "static/chunks/app/blog/layout-781bd28b53a38f84.js"
+    ],
+    "/blog/[id]/page": [
+      "static/chunks/webpack-5adebf9f62dc3001.js",
+      "static/chunks/3f94662f-dd617e91a515a3d2.js",
+      "static/chunks/323-52055915122e660b.js",
+      "static/chunks/main-app-da1490cb1b408188.js",
+      "static/chunks/app/blog/[id]/page-538f6c65f98e7467.js"
+    ],
+    "/staff/(authed)/layout": [
+      "static/chunks/webpack-5adebf9f62dc3001.js",
+      "static/chunks/3f94662f-dd617e91a515a3d2.js",
+      "static/chunks/323-52055915122e660b.js",
+      "static/chunks/main-app-da1490cb1b408188.js",
+      "static/chunks/app/staff/(authed)/layout-f7b44ef468352a1d.js"
+    ],
+    "/staff/(authed)/dashboard/page": [
+      "static/chunks/webpack-5adebf9f62dc3001.js",
+      "static/chunks/3f94662f-dd617e91a515a3d2.js",
+      "static/chunks/323-52055915122e660b.js",
+      "static/chunks/main-app-da1490cb1b408188.js",
+      "static/chunks/app/staff/(authed)/dashboard/page-65bd53c7281c907f.js"
+    ]
+  }
+}

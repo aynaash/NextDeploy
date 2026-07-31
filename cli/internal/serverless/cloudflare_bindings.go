@@ -267,10 +267,10 @@ func buildBindings(cf *config.CloudflareConfig, defaultBucket string, resolveRef
 			})
 		}
 		// Queue consumers are NOT bindings — they are Worker-level consumer
-		// configuration. The SDK exposes them via a separate API surface
-		// (Workers.Scripts.Settings.Edit). We do not yet wire that here;
-		// users who need consumer wiring should still declare it in YAML so
-		// the plan command can surface the gap. TODO: consumer registration.
+		// configuration on a separate API surface, so they are deliberately
+		// absent from this metadata. They ARE registered: wireQueueConsumers
+		// → ensureQueueConsumer runs after the script upload (the consumer
+		// references the script by name, so the script must exist first).
 	}
 
 	for _, v := range b.Vectorize {

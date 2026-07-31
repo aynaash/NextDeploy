@@ -66,8 +66,8 @@ func Compile(ctx context.Context, opts CompileOpts) (*CompiledBundle, error) {
 	// Phase 4 — binding hints (stub until bindings.go lands).
 	hints := deriveBindingsStub(refs, opts.Payload)
 
-	// Phase 5 — elide dead routes (stub until dedupe.go lands).
-	kept, elided := elideDeadRoutesStub(refs, opts.Payload.Routes)
+	// Phase 5 — elide dead routes. Deliberately a no-op; see the function doc.
+	kept, elided := elideDeadRoutes(refs, opts.Payload.Routes)
 
 	// Phase 6 — ensure OutDir exists. Every emit below writes under
 	// <OutDir>/_nextdeploy/ so this covers them all.
@@ -134,6 +134,19 @@ func Compile(ctx context.Context, opts CompileOpts) (*CompiledBundle, error) {
 	hashInputs := append([]string{dispatchPath, actionManifestPath, protectionPath, entryPath}, runtimeFiles...)
 	if vendored != nil {
 		hashInputs = append(hashInputs, vendored.TargetPath)
+		if vendored.ShimPath != "" {
+			hashInputs = append(hashInputs, vendored.ShimPath)
+		}
+		// Every byte that ships must be in the hash. If a companion were
+		// omitted, bumping react-dom 19.0 → 19.1 would leave the hash
+		// unchanged, the adapter would skip the redeploy, and the Worker
+		// would keep serving the old React.
+		for _, ex := range vendored.Extra {
+			hashInputs = append(hashInputs, ex.TargetPath)
+			if ex.ShimPath != "" {
+				hashInputs = append(hashInputs, ex.ShimPath)
+			}
+		}
 	}
 	sort.Strings(hashInputs)
 	contentHash, totalBytes, err := hashBundle(opts.OutDir, &manifest, hashInputs)
@@ -188,25 +201,38 @@ func maybeVendorRSC(opts CompileOpts, features ManifestFeatures, react ReactVers
 
 	vendored, err := VendorRSC(opts.StandaloneDir, opts.OutDir)
 	if err == nil {
-		log.Info("nextcompile: vendored %s@%s (%s build, %d bytes)",
-			vendored.Name, vendored.Version, vendored.BuildKind, vendored.Bytes)
+		log.Info("nextcompile: vendored %s@%s (%s %s build, %d bytes) + %d SSR companion(s)",
+			vendored.Name, vendored.Version, vendored.BuildKind, vendored.Format,
+			vendored.Bytes, len(vendored.Extra))
+		for _, ex := range vendored.Extra {
+			log.Debug("nextcompile:   companion %s (%s %s, %d bytes)",
+				ex.Name, ex.BuildKind, ex.Format, ex.Bytes)
+		}
 		return vendored, nil
 	}
 
-	if errors.Is(err, ErrRSCPackageNotFound) {
+	// A missing primary OR SSR companion is fatal only when the app uses RSC.
+	// %w on each sentinel keeps errors.Is working for callers above and lets
+	// the message name the exact build that's absent.
+	if errors.Is(err, ErrRSCPackageNotFound) ||
+		errors.Is(err, ErrRSCServerEdgeNotFound) ||
+		errors.Is(err, ErrRSCClientEdgeNotFound) ||
+		errors.Is(err, ErrReactDOMPackageNotFound) ||
+		errors.Is(err, ErrReactDOMServerNotFound) {
 		if features.RSC {
 			return nil, fmt.Errorf(
-				"RSC pages detected but react-server-dom-webpack is not installed.\n"+
-					"Detected React: %s.\n"+
-					"Fix: at the app level, run `pnpm add react-server-dom-webpack@<matching-react>`\n"+
-					"or ensure the standalone build includes it under node_modules.\n"+
+				"RSC/SSR pages detected but a required React edge build is missing (%w).\n"+
+					"Detected React: %[2]s.\n"+
+					"Fix: at the app level, run `pnpm add react-dom@%[2]s react-server-dom-webpack@%[2]s`\n"+
+					"(matching your React version), or ensure the standalone build includes\n"+
+					"react, react-dom and react-server-dom-webpack under node_modules.\n"+
 					"See _nextdeploy/runtime/vendor/README.md for details",
-				react.Raw)
+				err, react.Raw)
 		}
-		log.Debug("nextcompile: RSC package not installed; app does not use RSC, skipping vendoring")
+		log.Debug("nextcompile: RSC/SSR edge builds not installed; app does not use RSC, skipping vendoring")
 		return nil, nil
 	}
-	return nil, fmt.Errorf("vendor RSC: %w", err)
+	return nil, fmt.Errorf("vendor RSC/SSR: %w", err)
 }
 
 // normalizeOpts fills in defensible defaults so the rest of the pipeline
@@ -290,6 +316,17 @@ func deriveBindingsStub(refs []ModuleRef, _ Payload) []BindingHint {
 	return hints
 }
 
-func elideDeadRoutesStub(refs []ModuleRef, _ RouteInfo) ([]ModuleRef, int) {
+// elideDeadRoutes intentionally ships every scanned route.
+//
+// This is a decision, not an unfinished stub. A "dead route" would be a
+// compiled module no request can reach — but the dispatcher resolves routes
+// dynamically from the manifest, and dynamic segments, rewrites and middleware
+// rewrites all defeat naive static reachability analysis. A wrong elision 404s
+// a live route: a correctness bug traded for a few KB of bundle. Bad trade.
+//
+// The count is retained in the signature because CompileStats reports it, and
+// because a future, *provably* safe elision (e.g. a compiled file with no
+// exported handler that is absent from every manifest table) could fill it in.
+func elideDeadRoutes(refs []ModuleRef, _ RouteInfo) ([]ModuleRef, int) {
 	return refs, 0
 }

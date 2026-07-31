@@ -24,6 +24,7 @@ func TestRuntimeSourceFiles_IncludesMVP(t *testing.T) {
 		"runtime_src/actions.mjs",
 		"runtime_src/cache.mjs",
 		"runtime_src/image.mjs",
+		"runtime_src/middleware_match.mjs",
 		"runtime_src/next_shims/cache.mjs",
 		"runtime_src/next_shims/headers.mjs",
 		"runtime_src/next_shims/server.mjs",
@@ -111,7 +112,7 @@ func TestExtractRuntime_WritesFiles(t *testing.T) {
 	}
 
 	// serve.mjs, route_match.mjs, errors.mjs, context.mjs, rsc.mjs must all be there.
-	for _, name := range []string{"serve.mjs", "route_match.mjs", "errors.mjs", "context.mjs", "rsc.mjs", "actions.mjs", "cache.mjs", "image.mjs"} {
+	for _, name := range []string{"serve.mjs", "route_match.mjs", "errors.mjs", "context.mjs", "rsc.mjs", "actions.mjs", "cache.mjs", "image.mjs", "middleware_match.mjs"} {
 		p := filepath.Join(dir, "_nextdeploy", "runtime", name)
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("missing %s: %v", name, err)

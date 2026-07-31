@@ -1,18 +1,21 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/aynaash/nextdeploy/cli/internal/cicd"
 	"github.com/aynaash/nextdeploy/shared"
 	"github.com/aynaash/nextdeploy/shared/config"
 
 	"github.com/spf13/cobra"
 )
 
-var generateCIForce bool
+var (
+	generateCIForce   bool
+	generateCIPreview bool
+)
 
 var generateCICmd = &cobra.Command{
 	Use:     "generate-ci",
@@ -21,10 +24,14 @@ var generateCICmd = &cobra.Command{
 	Long: `Creates a .github/workflows/nextdeploy.yml file that automatically
 builds your Next.js project and ships it using NextDeploy on every push to main.
 
-The workflow is target-aware (reads nextdeploy.yml) and emits the right
-secrets list for AWS / Cloudflare / VPS deployments. The generated job
-relies on ` + "`nextdeploy ship`" + ` owning the Next build, so the workflow
-itself doesn't need to call ` + "`next build`" + ` separately.`,
+The workflow detects the deployment type from nextdeploy.yml AT RUNTIME and
+runs the matching deploy (cloudflare / aws / vps), so retargeting the app does
+not require regenerating CI. The generated job relies on ` + "`nextdeploy ship`" + `
+owning the Next build, so the workflow itself doesn't need to call
+` + "`next build`" + ` separately.
+
+This command still resolves your current target — but only to print the
+GitHub secrets you need to configure for it.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		log := shared.PackageLogger("generate-ci", " CI/CD")
 
@@ -36,16 +43,18 @@ itself doesn't need to call ` + "`next build`" + ` separately.`,
 		}
 
 		target, providerName := resolveCITarget(cfg)
-		log.Info("Generating workflow for target=%s provider=%s", target, providerName)
+		log.Info("Resolved target=%s provider=%s", target, providerName)
 
-		workflow := renderGitHubWorkflow(target, providerName)
+		// The workflow itself is target-agnostic — it detects the type on the
+		// runner. The resolved target is only used to tell the user which
+		// secrets to configure.
+		workflow := cicd.RenderDeployWorkflow()
 
-		workflowDir := filepath.Join(".github", "workflows")
-		if err := os.MkdirAll(workflowDir, 0o750); err != nil {
-			log.Error("Failed to create %s: %v", workflowDir, err)
+		workflowPath := filepath.FromSlash(cicd.WorkflowPath)
+		if err := os.MkdirAll(filepath.Dir(workflowPath), 0o750); err != nil {
+			log.Error("Failed to create %s: %v", filepath.Dir(workflowPath), err)
 			os.Exit(1)
 		}
-		workflowPath := filepath.Join(workflowDir, "nextdeploy.yml")
 
 		if !generateCIForce {
 			if _, err := os.Stat(workflowPath); err == nil {
@@ -60,11 +69,37 @@ itself doesn't need to call ` + "`next build`" + ` separately.`,
 		}
 
 		log.Success("Wrote %s", workflowPath)
+
+		if generateCIPreview {
+			previews := map[string]string{
+				cicd.PreviewWorkflowPath:        cicd.RenderPreviewWorkflow(),
+				cicd.PreviewCleanupWorkflowPath: cicd.RenderPreviewCleanupWorkflow(),
+			}
+			for rel, body := range previews {
+				p := filepath.FromSlash(rel)
+				if !generateCIForce {
+					if _, err := os.Stat(p); err == nil {
+						log.Error("Workflow already exists at %s — pass --force to overwrite", p)
+						os.Exit(1)
+					}
+				}
+				if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+					log.Error("Failed to write %s: %v", p, err)
+					os.Exit(1)
+				}
+				log.Success("Wrote %s", p)
+			}
+		}
+
 		log.Info("")
 		log.Info("Next steps:")
 		log.Info("  1. Add the secrets listed below in GitHub → Settings → Secrets and variables → Actions:")
 		for _, s := range secretsForTarget(target, providerName) {
 			log.Info("       - %s", s)
+		}
+		if generateCIPreview {
+			log.Info("       - CLOUDFLARE_WORKERS_SUBDOMAIN (required for preview URLs — your")
+			log.Info("         account's workers.dev subdomain, from the Cloudflare dashboard)")
 		}
 		log.Info("  2. Commit and push to `main` — the workflow runs automatically.")
 		log.Info("")
@@ -90,6 +125,10 @@ func resolveCITarget(cfg *config.NextDeployConfig) (target, provider string) {
 
 // secretsForTarget lists the GitHub secrets the workflow expects for the
 // chosen deploy target. Order matters — CI logs show this list verbatim.
+//
+// These are DEPLOY credentials only. App secrets (AUTH_SECRET, database URLs,
+// …) belong in nextdeploy.yml so `secenv` folds them into the deploy; putting
+// them in the workflow means they only exist in CI, not in local ships.
 func secretsForTarget(target, provider string) []string {
 	switch target {
 	case "serverless":
@@ -98,145 +137,27 @@ func secretsForTarget(target, provider string) []string {
 			return []string{
 				"CLOUDFLARE_API_TOKEN  (required)",
 				"CLOUDFLARE_ACCOUNT_ID (required)",
-				"DOPPLER_TOKEN         (optional — only if you use Doppler for app secrets)",
+				"R2_ACCESS_KEY_ID      (required if you upload assets to R2)",
+				"R2_SECRET_ACCESS_KEY  (required if you upload assets to R2)",
 			}
 		case "aws":
 			return []string{
 				"AWS_ACCESS_KEY_ID     (required)",
 				"AWS_SECRET_ACCESS_KEY (required)",
 				"AWS_REGION            (optional — defaults to cfg.cloud_provider.region)",
-				"DOPPLER_TOKEN         (optional)",
 			}
 		}
 	case "vps":
 		return []string{
 			"SSH_PRIVATE_KEY (required — same key your local nextdeploy uses)",
-			"DOPPLER_TOKEN   (optional)",
 		}
 	}
-	return []string{"DOPPLER_TOKEN (optional)"}
-}
-
-// renderGitHubWorkflow returns the YAML for the .github/workflows/nextdeploy.yml
-// file, branched on target so the env block carries only what the target
-// actually needs (no AWS keys for a Cloudflare deploy, etc.).
-//
-// Action versions track the current latest stable as of authoring; bump
-// them at your discretion — none of them are version-locked by the
-// nextdeploy code paths.
-func renderGitHubWorkflow(target, provider string) string {
-	envBlock := ciEnvBlockFor(target, provider)
-	deployStep := ciDeployStepFor(target, provider)
-	return fmt.Sprintf(`# Generated by `+"`nextdeploy generate-ci`"+` — re-run to regenerate.
-name: Deploy
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-concurrency:
-  # One deploy per branch — newer pushes cancel in-flight runs so you
-  # never ship a superseded commit.
-  group: nextdeploy-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-        # If your repo doesn't carry go.mod, replace with: go-version: '1.25'
-        continue-on-error: true
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Install nextdeploy CLI
-        run: |
-          go install github.com/aynaash/nextdeploy/cli@latest
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-
-%s
-%s
-`, envBlock, deployStep)
-}
-
-// ciEnvBlockFor returns a YAML snippet that exports the deploy
-// credentials as env vars for the ship step. The snippet is expected to
-// be appended *as a sibling step header*, not as a job-level env block —
-// secrets-of-secrets management is per-step so a leak in one step
-// doesn't bleed into the next.
-func ciEnvBlockFor(target, provider string) string {
-	// (kept as a placeholder — the env vars actually live on the ship
-	//  step itself, see ciDeployStepFor below)
-	_ = target
-	_ = provider
-	return ""
-}
-
-func ciDeployStepFor(target, provider string) string {
-	switch {
-	case target == "serverless" && provider == "cloudflare":
-		return `      - name: Deploy
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
-        run: |
-          if [ -n "$DOPPLER_TOKEN" ]; then
-            curl -sLf https://cli.doppler.com/install.sh | sh -s -- --no-install --no-package-manager
-            doppler run -- nextdeploy ship
-          else
-            nextdeploy ship
-          fi`
-	case target == "serverless" && provider == "aws":
-		return `      - name: Deploy
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
-        run: |
-          if [ -n "$DOPPLER_TOKEN" ]; then
-            curl -sLf https://cli.doppler.com/install.sh | sh -s -- --no-install --no-package-manager
-            doppler run -- nextdeploy ship
-          else
-            nextdeploy ship
-          fi`
-	case target == "vps":
-		return `      - name: Configure SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-
-      - name: Deploy
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
-        run: |
-          if [ -n "$DOPPLER_TOKEN" ]; then
-            curl -sLf https://cli.doppler.com/install.sh | sh -s -- --no-install --no-package-manager
-            doppler run -- nextdeploy ship
-          else
-            nextdeploy ship
-          fi`
-	}
-	// Generic fallback — shouldn't hit, but keeps the workflow valid.
-	return `      - name: Deploy
-        run: nextdeploy ship`
+	return []string{"(no deploy credentials required for this target)"}
 }
 
 func init() {
-	generateCICmd.Flags().BoolVar(&generateCIForce, "force", false, "Overwrite existing .github/workflows/nextdeploy.yml")
+	generateCICmd.Flags().BoolVar(&generateCIForce, "force", false, "Overwrite existing workflow files")
+	generateCICmd.Flags().BoolVar(&generateCIPreview, "preview", false,
+		"Also emit per-PR preview workflows (preview.yml + preview-cleanup.yml, Cloudflare only)")
 	rootCmd.AddCommand(generateCICmd)
 }

@@ -81,14 +81,14 @@ func EnsureSecuritySecret(configPath string, cfg *types.DaemonConfig) (bool, err
 		return true, nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
 		return true, fmt.Errorf("create config dir: %w", err)
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return true, fmt.Errorf("marshal config: %w", err)
 	}
-	if err := os.WriteFile(configPath, data, 0600); err != nil {
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
 		return true, fmt.Errorf("persist config with generated secret: %w", err)
 	}
 	return true, nil
@@ -102,7 +102,7 @@ func ReadConfigInServer(path string) (*config.NextDeployConfig, error) {
 	}
 	var cfg config.NextDeployConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("Invalid config format: %w", err)
+		return nil, fmt.Errorf("invalid config format: %w", err)
 	}
 	return &cfg, nil
 }

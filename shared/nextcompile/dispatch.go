@@ -216,6 +216,14 @@ func renderEntryFields(r ModuleRef, importPrefix string) string {
 	} else {
 		parts = append(parts, "loadLayouts: []")
 	}
+	// Hydration bootstrap chunks (SSR M0). Emitted as plain dist-relative
+	// strings rather than import() thunks: these are CLIENT chunks the browser
+	// fetches from R2 by URL, never modules the Worker imports. Bundling them
+	// would pull the entire client graph into worker.mjs.
+	parts = append(parts, "bootstrap: "+stringArrayLiteral(r.BootstrapChunks))
+	// Stylesheets, in cascade order. Same rationale as bootstrap: URLs the
+	// browser fetches, not modules the Worker imports.
+	parts = append(parts, "css: "+stringArrayLiteral(r.StylesheetChunks))
 	return strings.Join(parts, ", ")
 }
 
@@ -387,12 +395,18 @@ func jsStringLiteral(s string) string {
 }
 
 func paramNamesLiteral(names []string) string {
-	if len(names) == 0 {
+	return stringArrayLiteral(names)
+}
+
+// stringArrayLiteral emits a JS array literal of quoted strings, or "[]" for
+// an empty/nil slice.
+func stringArrayLiteral(ss []string) string {
+	if len(ss) == 0 {
 		return "[]"
 	}
-	parts := make([]string, len(names))
-	for i, n := range names {
-		parts[i] = jsStringLiteral(n)
+	parts := make([]string, len(ss))
+	for i, s := range ss {
+		parts[i] = jsStringLiteral(s)
 	}
 	return "[" + strings.Join(parts, ", ") + "]"
 }

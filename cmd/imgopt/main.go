@@ -49,7 +49,6 @@ var (
 func init() {
 	sourceBucket = os.Getenv("SOURCE_BUCKET")
 
-	// Parse image config from metadata
 	if configJSON := os.Getenv("IMAGE_CONFIG_JSON"); configJSON != "" {
 		if err := json.Unmarshal([]byte(configJSON), &imageConfig); err != nil {
 			fmt.Printf("Warning: failed to parse IMAGE_CONFIG_JSON: %v\n", err)

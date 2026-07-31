@@ -39,12 +39,23 @@ func TestCompile_EndToEnd(t *testing.T) {
 import { fn } from "react-server-dom-webpack/client";
 export default function Dashboard(){ return null }`)
 
-	// Minimal node_modules fixture so the vendoring phase succeeds.
-	// Real builds include react-server-dom-webpack automatically when RSC is on.
+	// Minimal node_modules fixture so the vendoring phase succeeds. Real
+	// builds include react-server-dom-webpack automatically when RSC is on;
+	// the SSR layer additionally needs client.edge + react-dom/server.edge.
 	writeFile(t, filepath.Join(dir, "node_modules", "react-server-dom-webpack", "package.json"),
 		`{"name":"react-server-dom-webpack","version":"18.3.1"}`)
 	writeFile(t, filepath.Join(dir, "node_modules", "react-server-dom-webpack", "esm",
 		"react-server-dom-webpack-server.edge.production.js"),
+		`// vendored stub for test
+export function renderToReadableStream(){ return new ReadableStream() }`)
+	writeFile(t, filepath.Join(dir, "node_modules", "react-server-dom-webpack", "esm",
+		"react-server-dom-webpack-client.edge.production.js"),
+		`// vendored stub for test
+export function createFromReadableStream(){}`)
+	writeFile(t, filepath.Join(dir, "node_modules", "react-dom", "package.json"),
+		`{"name":"react-dom","version":"18.3.1"}`)
+	writeFile(t, filepath.Join(dir, "node_modules", "react-dom", "esm",
+		"react-dom-server.edge.production.js"),
 		`// vendored stub for test
 export function renderToReadableStream(){ return new ReadableStream() }`)
 

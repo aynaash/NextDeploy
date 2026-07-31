@@ -51,15 +51,12 @@ func buildProtectionRuntime(cfg *config.NextDeployConfig) (*protection.Runtime, 
 // Fields populated today:
 //   - AppName, DistDir, OutputMode, HasAppRouter, BuildID, GitCommit
 //   - Routes (1:1 field mapping — nextcore and nextcompile RouteInfo match)
-//   - Middleware (lossy: only Path/Matchers[].{Pathname,Pattern}/Runtime;
-//     Has/Missing/header/cookie conditions dropped because the runtime
-//     can't consume them yet)
-//
-// Fields not populated yet (tracked in nextcompile todos):
-//   - BasePath, I18n, ImageConfig — these live in NextConfig (parsed by
-//     nextcore.ParseNextConfigFile) but aren't embedded in NextCorePayload.
-//     When the adapter starts calling ParseNextConfigFile directly, we'll
-//     extend this converter to forward them.
+//   - Middleware, including each matcher's has/missing conditions
+//   - The next.config projection: BasePath, AssetPrefix, ImageConfig, I18n.
+//     These are parsed once at build time by nextcore.ParseNextConfigFile and
+//     carried on NextCorePayload — we never re-parse next.config here, because
+//     the bridge runs on the deploy side and may be fed a payload serialized
+//     during an earlier build on another machine.
 func toCompilePayload(meta *nextcore.NextCorePayload, _ *config.NextDeployConfig) nextcompile.Payload {
 	if meta == nil {
 		return nextcompile.Payload{}
@@ -73,7 +70,10 @@ func toCompilePayload(meta *nextcore.NextCorePayload, _ *config.NextDeployConfig
 		BuildID:      meta.NextBuildMetadata.BuildID,
 		GitCommit:    meta.GitCommit,
 		Routes:       convertRoutes(meta.RouteInfo),
+		BasePath:     meta.BasePath,
+		AssetPrefix:  meta.AssetPrefix,
 		ImageConfig:  convertImageConfig(meta.ImageConfig),
+		I18n:         convertI18nConfig(meta.I18n),
 		PublicFiles:  publicFileKeys(meta.StaticAssets),
 	}
 
@@ -99,6 +99,21 @@ func convertImageConfig(in *nextcore.ImageConfig) *nextcompile.ImageConfig {
 		Unoptimized:    in.Unoptimized,
 	}
 	return out
+}
+
+// convertI18nConfig projects nextcore's i18n block onto the compiler mirror.
+// nextcore.I18nConfig also carries per-domain locale routing (Domains), which
+// the compiler has no consumer for — the explicit field-by-field copy is the
+// boundary contract, and it stops compiling if either side's shape drifts.
+func convertI18nConfig(in *nextcore.I18nConfig) *nextcompile.I18nConfig {
+	if in == nil {
+		return nil
+	}
+	return &nextcompile.I18nConfig{
+		Locales:         append([]string(nil), in.Locales...),
+		DefaultLocale:   in.DefaultLocale,
+		LocaleDetection: in.LocaleDetection,
+	}
 }
 
 func convertImageRemotePatterns(in []nextcore.ImageRemotePattern) []nextcompile.ImageRemotePattern {
@@ -155,7 +170,20 @@ func convertMiddlewareMatchers(in []nextcore.MiddlewareRoute) []nextcompile.Midd
 		out[i] = nextcompile.MiddlewareMatcher{
 			Pathname: m.Pathname,
 			Pattern:  m.Pattern,
+			Has:      convertMiddlewareConditions(m.Has),
+			Missing:  convertMiddlewareConditions(m.Missing),
 		}
+	}
+	return out
+}
+
+func convertMiddlewareConditions(in []nextcore.MiddlewareCondition) []nextcompile.MiddlewareCondition {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]nextcompile.MiddlewareCondition, len(in))
+	for i, c := range in {
+		out[i] = nextcompile.MiddlewareCondition{Type: c.Type, Key: c.Key, Value: c.Value}
 	}
 	return out
 }

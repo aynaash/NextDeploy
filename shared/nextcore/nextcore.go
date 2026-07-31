@@ -104,6 +104,21 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		return NextCorePayload{}, fmt.Errorf("failed to copy static assets: %w", err)
 	}
 
+	// next.config projection. ParseNextConfigFile is non-fatal and returns nil
+	// when the file is absent or unevaluable, so every read is guarded — the
+	// compiler simply sees zero values and falls back to defaults.
+	var (
+		cfgBasePath, cfgAssetPrefix string
+		cfgI18n                     *I18nConfig
+		cfgImages                   *ImageConfig
+	)
+	if nextConfig != nil {
+		cfgBasePath = nextConfig.BasePath
+		cfgAssetPrefix = nextConfig.AssetPrefix
+		cfgI18n = nextConfig.I18n
+		cfgImages = nextConfig.Images
+	}
+
 	metadata = NextCorePayload{
 		AppName:           cfg.App.Name,
 		NextBuildMetadata: *buildMeta,
@@ -117,7 +132,10 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		CDNEnabled:       cfg.App.CDNEnabled,
 		Domain:           cfg.App.Domain.Name,
 		RouteInfo:        *routeInfo,
-		ImageConfig:      nextConfig.Images,
+		ImageConfig:      cfgImages,
+		BasePath:         cfgBasePath,
+		AssetPrefix:      cfgAssetPrefix,
+		I18n:             cfgI18n,
 		DetectedFeatures: features,
 		DistDir:          features.DistDir,
 		ExportDir:        features.ExportDir,
@@ -514,7 +532,12 @@ func ParseMiddleware(projectDir string) (*MiddlewareConfig, error) {
 		Runtime:  "nodejs", // Default runtime
 	}
 
-	// Check for middleware.ts first, then middleware.js
+	// Check for middleware.ts first, then middleware.js.
+	//
+	// Only the FIRST match is parsed, so an app carrying both middleware.* and
+	// proxy.* yields one matcher block. The runtime gates both refs on that
+	// single list (dispatcher.mjs runMiddlewareStack), so the second file
+	// inherits the first's matcher — see the log warning below.
 	middlewarePaths := []string{
 		filepath.Join(projectDir, "middleware.ts"),
 		filepath.Join(projectDir, "middleware.js"),
@@ -533,6 +556,19 @@ func ParseMiddleware(projectDir string) (*MiddlewareConfig, error) {
 
 	if middlewareFile == "" {
 		return nil, nil // No middleware file found
+	}
+
+	// Warn when a second interceptor file exists but is not parsed — its
+	// matcher is silently replaced by middlewareFile's at request time.
+	for _, path := range middlewarePaths {
+		if path == middlewareFile {
+			continue
+		}
+		if _, err := os.Stat(path); err == nil {
+			NextCoreLogger.Warn(
+				"Multiple middleware/proxy files found; only %s is parsed. %s will run with %s's matcher.",
+				filepath.Base(middlewareFile), filepath.Base(path), filepath.Base(middlewareFile))
+		}
 	}
 
 	// #nosec G304

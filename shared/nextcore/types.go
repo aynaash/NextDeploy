@@ -31,6 +31,15 @@ type NextCorePayload struct {
 	ExportDir         string            `json:"export_dir"`
 	OutputMode        OutputMode        `json:"output_mode"`
 	PackageManager    string            `json:"package_manager"`
+
+	// --- next.config projection -------------------------------------------
+	// Parsed from next.config by ParseNextConfigFile and carried through to
+	// the compiler so routing + asset URLs honor them. Populated in
+	// GenerateMetadata; zero when next.config is absent or unparseable (the
+	// parse is non-fatal). ImageConfig above is part of the same projection.
+	BasePath    string      `json:"base_path,omitempty"`
+	AssetPrefix string      `json:"asset_prefix,omitempty"`
+	I18n        *I18nConfig `json:"i18n,omitempty"`
 	// Resources carries the opt-in cgroup limits from nextdeploy.yml through to
 	// the daemon's systemd unit generator. Nil means "no limits" (the default).
 	Resources *config.ResourceLimits `json:"resources,omitempty"`

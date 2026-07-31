@@ -120,3 +120,83 @@ func TestEmitManifest_WritesValidJSON(t *testing.T) {
 		t.Errorf("missing trailing newline")
 	}
 }
+
+func TestBuildManifest_NextConfigProjection(t *testing.T) {
+	p := Payload{
+		AppName:     "app",
+		BasePath:    "/docs",
+		AssetPrefix: "https://cdn.x",
+		I18n:        &I18nConfig{Locales: []string{"fr", "en"}, DefaultLocale: "en"},
+		ImageConfig: &ImageConfig{Domains: []string{"img.x"}},
+	}
+	m := BuildManifest(p, NextVersion{Raw: "15.0.0"}, ReactVersion{Raw: "19.0.0"}, nil, time.Unix(0, 0))
+
+	if m.BasePath != "/docs" {
+		t.Errorf("basePath = %q, want /docs", m.BasePath)
+	}
+	if m.AssetPrefix != "https://cdn.x" {
+		t.Errorf("assetPrefix = %q, want https://cdn.x", m.AssetPrefix)
+	}
+	if m.I18n == nil || m.I18n.DefaultLocale != "en" {
+		t.Fatalf("i18n not carried: %+v", m.I18n)
+	}
+	// Locales are sorted for byte-identical output.
+	if m.I18n.Locales[0] != "en" {
+		t.Errorf("locales not sorted: %v", m.I18n.Locales)
+	}
+	if m.Images == nil || len(m.Images.Domains) != 1 {
+		t.Fatalf("images not carried: %+v", m.Images)
+	}
+}
+
+func TestBuildManifest_MiddlewareConditions(t *testing.T) {
+	p := Payload{
+		AppName: "app",
+		Middleware: &MiddlewareConfig{
+			Path: "middleware.ts",
+			Matchers: []MiddlewareMatcher{{
+				Pathname: "/app/:path*",
+				Pattern:  "^/app/.*",
+				Has:      []MiddlewareCondition{{Type: "cookie", Key: "session"}},
+				Missing:  []MiddlewareCondition{{Type: "header", Key: "x-skip"}},
+			}},
+		},
+	}
+	m := BuildManifest(p, NextVersion{Raw: "15"}, ReactVersion{Raw: "19"}, nil, time.Unix(0, 0))
+	if m.Middleware == nil || len(m.Middleware.Matchers) != 1 {
+		t.Fatalf("middleware not carried: %+v", m.Middleware)
+	}
+	got := m.Middleware.Matchers[0]
+	if len(got.Has) != 1 || got.Has[0].Key != "session" || got.Has[0].Type != "cookie" {
+		t.Fatalf("has not carried: %+v", got.Has)
+	}
+	if len(got.Missing) != 1 || got.Missing[0].Type != "header" {
+		t.Fatalf("missing not carried: %+v", got.Missing)
+	}
+	// The conditions must survive to the emitted JSON the runtime reads.
+	b, err := json.Marshal(m.Middleware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(b, []byte(`"has":[{"type":"cookie","key":"session"}]`)) {
+		t.Errorf("has conditions missing from manifest JSON: %s", b)
+	}
+}
+
+func TestBuildManifest_MiddlewareWithoutConditionsOmitsKeys(t *testing.T) {
+	p := Payload{
+		AppName: "app",
+		Middleware: &MiddlewareConfig{
+			Path:     "middleware.ts",
+			Matchers: []MiddlewareMatcher{{Pathname: "/app/:path*"}},
+		},
+	}
+	m := BuildManifest(p, NextVersion{Raw: "15"}, ReactVersion{Raw: "19"}, nil, time.Unix(0, 0))
+	b, err := json.Marshal(m.Middleware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(b, []byte(`"has"`)) || bytes.Contains(b, []byte(`"missing"`)) {
+		t.Errorf("empty conditions must be omitted, got: %s", b)
+	}
+}

@@ -266,10 +266,14 @@ var optionalExternalPackages = []string{
 	"@opentelemetry/api", // Next's tracer fallback when tracing isn't enabled
 	"critters",           // CSS inlining; only required when experimental.optimizeCss is on
 	"next/dist/compiled/@ampproject/toolbox-optimizer", // AMP optimizer; only for AMP pages
-	// Required inside Next's *pages* runtime (pages.runtime.prod.js). App-Router
-	// apps never invoke that runtime, and the matching export isn't resolvable
-	// under the workerd/worker conditions anyway. The app-page runtime resolves
-	// react-dom/server.edge on its own, so externalizing here is safe.
+	// Required inside Next's *pages* runtime (pages.runtime.prod.js) and its
+	// externalized app-page runtime, neither of which executes on Workers.
+	//
+	// This governs only the BARE specifier. Our own SSR layer imports the
+	// vendored copy by relative path (vendor/react-dom/server.edge.mjs), which
+	// is a distinct module path, so this external does not shadow it — and
+	// removing the entry would pull Next's never-run runtime into the bundle.
+	// Safe to keep.
 	"react-dom/server.edge",
 }
 

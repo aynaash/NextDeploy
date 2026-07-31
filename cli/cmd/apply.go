@@ -11,7 +11,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var applyYes bool
+var (
+	applyYes         bool
+	applyEnvironment string
+)
 
 var applyCmd = &cobra.Command{
 	Use:   "apply",
@@ -37,6 +40,18 @@ Exit codes:
 			log.Error("Failed to load config: %v", err)
 			os.Exit(1)
 		}
+
+		// Provision into a named environment so preview/staging stacks get
+		// their own resources instead of sharing (or colliding with) the
+		// configured environment's.
+		if err := applyEnvironmentOverride(cfg, applyEnvironment); err != nil {
+			log.Error("%v", err)
+			os.Exit(1)
+		}
+		if applyEnvironment != "" {
+			log.Info("Applying to environment: %s", cfg.App.Environment)
+		}
+
 		if cfg.Serverless == nil || cfg.Serverless.Cloudflare == nil {
 			log.Error("apply only supports Cloudflare deployments — no serverless.cloudflare block found")
 			os.Exit(1)
@@ -101,5 +116,7 @@ func confirm(prompt string) bool {
 
 func init() {
 	applyCmd.Flags().BoolVar(&applyYes, "yes", false, "Skip the confirmation prompt (non-interactive)")
+	applyCmd.Flags().StringVarP(&applyEnvironment, "environment", "e", "",
+		"Reconcile a named environment's resources (e.g. pr-42, staging) instead of the configured one")
 	rootCmd.AddCommand(applyCmd)
 }

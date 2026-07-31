@@ -75,6 +75,7 @@ time and are not part of the plan.`,
 func renderPlan(r *serverless.PlanResult) {
 	if len(r.Items) == 0 {
 		fmt.Println("No declared resources found under cloudflare.resources.*")
+		renderPlanWarnings(r)
 		return
 	}
 
@@ -115,9 +116,25 @@ func renderPlan(r *serverless.PlanResult) {
 	}
 	fmt.Println()
 	fmt.Printf("Summary: %d create, %d update, %d no-op, %d drift\n", creates, updates, noops, drifts)
+	renderPlanWarnings(r)
 	if drifts > 0 {
 		fmt.Println()
 		fmt.Println(errorMsg("✗ Immutable drift detected — manual intervention required."))
+	}
+}
+
+// renderPlanWarnings prints advisory notes that aren't tied to a declared
+// resource — most importantly orphaned resources, which is what a rename in
+// nextdeploy.yml looks like from the account's side. They never change the
+// exit code; they exist so the gap isn't silent.
+func renderPlanWarnings(r *serverless.PlanResult) {
+	if len(r.Warnings) == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Println(warning("Warnings"))
+	for _, w := range r.Warnings {
+		fmt.Printf("  %s %s\n", warning("!"), w)
 	}
 }
 

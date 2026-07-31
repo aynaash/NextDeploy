@@ -125,10 +125,13 @@ type CompileOpts struct {
 // Callers populate this by translating from nextcore.NextCorePayload
 // in the adapter (cli/internal/serverless/cloudflare_adapter.go).
 type Payload struct {
-	AppName      string
-	DistDir      string
-	OutputMode   string
-	BasePath     string
+	AppName    string
+	DistDir    string
+	OutputMode string
+	BasePath   string
+	// AssetPrefix is next.config's assetPrefix. The runtime prefixes client
+	// asset + hydration bootstrap URLs with it when set.
+	AssetPrefix  string
 	HasAppRouter bool
 	Routes       RouteInfo
 	Middleware   *MiddlewareConfig
@@ -172,6 +175,21 @@ type MiddlewareConfig struct {
 type MiddlewareMatcher struct {
 	Pathname string
 	Pattern  string
+	// Has/Missing are Next's matcher guards. A rule matches only when the
+	// path matches AND every Has condition is present AND every Missing
+	// condition is absent.
+	Has     []MiddlewareCondition
+	Missing []MiddlewareCondition
+}
+
+// MiddlewareCondition mirrors Next's matcher has/missing entry.
+// Type ∈ {"header","cookie","query","host"}. Value is optional — empty means
+// "key present with any value"; when set it is matched exactly. (Next also
+// permits regex values; unsupported here.)
+type MiddlewareCondition struct {
+	Type  string
+	Key   string
+	Value string
 }
 
 // ImageConfig mirrors the minimal shape the /_next/image runtime handler
@@ -229,7 +247,29 @@ type ModuleRef struct {
 
 	// LayoutChain is the ordered list of compiled layout.js paths that
 	// wrap this page, from root to nearest. Empty for non-page kinds.
+	//
+	// Note: a production `next build` inlines layouts into the page bundle
+	// and emits no server/app/**/layout.js, so this is routinely empty even
+	// for pages that do have layouts. Don't treat it as the ancestor list.
 	LayoutChain []string
+
+	// BootstrapChunks is the ordered, deduped list of client JS chunks the
+	// browser must load to hydrate this page — its ancestor layouts' chunks
+	// followed by the page's own, read from app-build-manifest.json. Paths
+	// are relative to <distDir> (e.g. "static/chunks/webpack-….js"), so the
+	// runtime prefixes them with "/_next/" (or assetPrefix) to form URLs.
+	// Empty when the manifest is absent or the route has no entry.
+	BootstrapChunks []string
+
+	// StylesheetChunks is the ordered, deduped list of CSS files this route
+	// needs, read from the client-reference-manifest's entryCSSFiles (root →
+	// layout → page, i.e. cascade order). Dist-relative like BootstrapChunks,
+	// so the runtime forms "/_next/<path>" URLs the same way.
+	//
+	// Our renderer composes layouts by hand rather than going through Next's
+	// app-render, so Next's own <link> injection never runs — without this the
+	// page hydrates correctly but renders completely unstyled.
+	StylesheetChunks []string
 
 	// EnvRefs are the unique process.env.X identifiers the compiler
 	// found via lexical scan. Used by DeriveBindings to suggest secrets.

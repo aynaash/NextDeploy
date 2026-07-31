@@ -27,10 +27,17 @@ import { runWithContext, createRequestContext } from "./context.mjs";
 // through a dedicated API route instead. This cap prevents malicious
 // clients from exhausting the Worker's memory budget with a huge form.
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
+// BodyTooLargeError signals an oversized — or unbounded — action body so the
+// caller can map it to HTTP 413 instead of a generic 400. A missing
+// Content-Length is treated the same as "too large": multipart bodies are
+// buffered whole, so an unknown length can't be admitted safely.
 export class BodyTooLargeError extends Error {
   constructor(len) {
-    const got = Number.isFinite(len ) ? len : "unknown";
-    super(`action body ${got} bytes exceeds ${MAX_BODY_BYTES}`);
+    super(
+      Number.isFinite(len)
+        ? `action body ${len} bytes exceeds ${MAX_BODY_BYTES}`
+        : `action body has no Content-Length (required for multipart, cap ${MAX_BODY_BYTES})`,
+    );
     this.name = "BodyTooLargeError";
     this.status = 413;
   }
@@ -192,32 +199,21 @@ export function encodeFlightReply(mod, result) {
 
 // ── Body parsing ─────────────────────────────────────────────────────────────
 
-// BodyTooLargeError signals an oversized/unbounded action body so the caller
-// can map it to HTTP 413 instead of a generic 400.
-class BodyTooLargeError extends Error {
-  constructor(len) {
-    super(
-      Number.isFinite(len)
-        ? `action body ${len} bytes exceeds ${MAX_BODY_BYTES}`
-        : `action body has no Content-Length (required for multipart, cap ${MAX_BODY_BYTES})`,
-    );
-    this.name = "BodyTooLargeError";
-  }
-}
-
-async function parseArgs(request) {
+// Exported so the body-size cap can be tested directly — it is the DoS guard
+// on the action path, and exercising it through handleServerAction would mean
+// standing up a whole manifest + module loader.
+export async function parseArgs(request) {
   const contentType = (request.headers.get("content-type") || "").toLowerCase();
 
   if (contentType.startsWith("multipart/form-data") || contentType.startsWith("application/x-www-form-urlencoded")) {
     // request.formData() buffers the WHOLE body with no cap — a large upload
     // would exhaust the isolate, the exact DoS MAX_BODY_BYTES exists to stop.
-    // Gate on Content-Length before parsing (chunked / missing length is
-    // rejected rather than trusted).
-    const len = Number(request.headers.get("content-length"));
-    if (!Number.isFinite(len) || len > MAX_BODY_BYTES) {
-      throw new BodyTooLargeError(len);
-    }
-    const form = await request.formData();
+    // So read the body ourselves through the bounded reader first, then hand
+    // the already-capped bytes to the form parser.
+    const bytes = await readBoundedBody(request);
+    const form = await new Response(bytes, {
+      headers: { "content-type": request.headers.get("content-type") },
+    }).formData();
     return [formDataToArgs(form)];
   }
 
@@ -242,15 +238,58 @@ async function parseArgs(request) {
   throw new Error(`unsupported content-type for Server Action: ${contentType}`);
 }
 
-async function readBoundedText(request) {
-  // Cheap size gate: Next's body streams through the Worker ingress. We
-  // read into a single string with a byte cap so a malicious client can't
-  // pin CPU parsing an unbounded body.
-  const buffer = await request.arrayBuffer();
-  if (buffer.byteLength > MAX_BODY_BYTES) {
-    throw new Error(`action body exceeds ${MAX_BODY_BYTES} bytes`);
+// readBoundedBody streams the request body and aborts as soon as it exceeds
+// MAX_BODY_BYTES.
+//
+// The cap has to be enforced DURING the read, not after. Awaiting
+// request.arrayBuffer() and then checking .byteLength has already allocated
+// whatever the client sent — the isolate is out of memory before the check
+// runs, which is precisely the DoS the cap exists to prevent.
+//
+// Content-Length, when present, is a free fast-path rejection: refuse an
+// oversized upload before reading a single byte. When it is absent (a chunked
+// upload, or a FormData body the runtime chose to stream) we do NOT reject —
+// that would break legitimate traffic — we just rely on the streaming cap.
+async function readBoundedBody(request) {
+  const declared = request.headers.get("content-length");
+  if (declared !== null && declared !== "") {
+    const len = Number(declared);
+    if (Number.isFinite(len) && len > MAX_BODY_BYTES) {
+      throw new BodyTooLargeError(len);
+    }
   }
-  return new TextDecoder().decode(buffer);
+
+  if (!request.body) return new Uint8Array(0);
+
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => {});
+        throw new BodyTooLargeError(total);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
+
+async function readBoundedText(request) {
+  return new TextDecoder().decode(await readBoundedBody(request));
 }
 
 function formDataToArgs(form) {

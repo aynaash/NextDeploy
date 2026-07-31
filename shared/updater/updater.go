@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,12 +42,19 @@ const (
 // copyBounded copies from src to dst, refusing more than maxBinarySize bytes.
 // Used when extracting a binary from an untrusted/remote archive (gosec G110).
 func copyBounded(dst io.Writer, src io.Reader) error {
-	n, err := io.Copy(dst, io.LimitReader(src, maxBinarySize+1))
+	return copyBoundedLimit(dst, src, maxBinarySize)
+}
+
+// copyBoundedLimit is copyBounded with the ceiling injected, so the bomb guard
+// can be exercised against a small limit instead of pushing 512MiB through the
+// copy on every unit-test run.
+func copyBoundedLimit(dst io.Writer, src io.Reader, limit int64) error {
+	n, err := io.Copy(dst, io.LimitReader(src, limit+1))
 	if err != nil {
 		return err
 	}
-	if n > maxBinarySize {
-		return fmt.Errorf("extracted binary exceeds %d bytes; refusing (possible decompression bomb)", maxBinarySize)
+	if n > limit {
+		return fmt.Errorf("extracted binary exceeds %d bytes; refusing (possible decompression bomb)", limit)
 	}
 	return nil
 }
@@ -94,8 +102,29 @@ func (e *UpdateError) Unwrap() error {
 	return e.Err
 }
 
-func LatestRelease() (Release, error) {
+// parseReleaseBody turns a GitHub releases API response body into a Release.
+// Split out of LatestRelease so the parse and the "no release tag" branch are
+// testable without standing up the surrounding retry/HTTP loop.
+//
+// A malformed body returns a plain wrapped error (the caller retries); a
+// well-formed body with no tag returns a non-recoverable *UpdateError, because
+// retrying cannot conjure a tag that the API did not send.
+func parseReleaseBody(body []byte) (Release, error) {
 	var release Release
+	if err := json.Unmarshal(body, &release); err != nil {
+		return Release{}, fmt.Errorf("failed to parse GitHub response: %w", err)
+	}
+	if release.TagName == "" {
+		return Release{}, &UpdateError{
+			Stage:       "api",
+			Message:     "no release tag found in GitHub response",
+			Recoverable: false,
+		}
+	}
+	return release, nil
+}
+
+func LatestRelease() (Release, error) {
 	var lastErr error
 
 	client := &http.Client{
@@ -162,20 +191,17 @@ func LatestRelease() (Release, error) {
 			continue
 		}
 
-		if err := json.Unmarshal(body, &release); err != nil {
-			lastErr = fmt.Errorf("failed to parse GitHub response: %w", err)
-			continue
+		release, err := parseReleaseBody(body)
+		if err == nil {
+			return release, nil
 		}
 
-		if release.TagName == "" {
-			return Release{}, &UpdateError{
-				Stage:       "api",
-				Message:     "no release tag found in GitHub response",
-				Recoverable: false,
-			}
+		// A missing tag is terminal — surface it instead of burning retries.
+		var updErr *UpdateError
+		if errors.As(err, &updErr) {
+			return Release{}, err
 		}
-
-		return release, nil
+		lastErr = err
 	}
 
 	return Release{}, &UpdateError{

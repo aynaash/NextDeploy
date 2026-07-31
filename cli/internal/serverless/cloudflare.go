@@ -186,20 +186,35 @@ func sanitizeCFName(s string) string {
 	return out
 }
 
-func (p *CloudflareProvider) workerName(appName string) string {
-	env := p.environment
-	if env == "" {
-		env = "production"
+// CloudflareWorkerName returns the Worker script name for an app+environment.
+// Exported so the CLI can print it (preview-URL composition) and tests can
+// assert it without constructing a provider.
+//
+// The environment IS the namespace: "" (→ production) yields <app>-production,
+// "pr-42" yields <app>-pr-42 — a completely separate Worker script. That's what
+// makes per-PR preview stacks, and their teardown, safe by construction.
+func CloudflareWorkerName(appName, environment string) string {
+	if environment == "" {
+		environment = "production"
 	}
-	return sanitizeCFName(fmt.Sprintf("%s-%s", appName, env))
+	return sanitizeCFName(fmt.Sprintf("%s-%s", appName, environment))
+}
+
+// CloudflareAssetBucketName is the env-scoped R2 asset bucket for an app.
+// Same namespacing rule as CloudflareWorkerName.
+func CloudflareAssetBucketName(appName, environment string) string {
+	if environment == "" {
+		environment = "production"
+	}
+	return sanitizeCFName(fmt.Sprintf("nextdeploy-%s-%s-assets", appName, environment))
+}
+
+func (p *CloudflareProvider) workerName(appName string) string {
+	return CloudflareWorkerName(appName, p.environment)
 }
 
 func (p *CloudflareProvider) bucketNameFromApp(appName string) string {
-	env := p.environment
-	if env == "" {
-		env = "production"
-	}
-	return sanitizeCFName(fmt.Sprintf("nextdeploy-%s-%s-assets", appName, env))
+	return CloudflareAssetBucketName(appName, p.environment)
 }
 
 // Initialize wires up the Cloudflare SDK client and verifies the API token.

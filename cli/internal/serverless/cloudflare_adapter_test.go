@@ -38,12 +38,22 @@ func TestAdapterPreEsbuildStateIsValid(t *testing.T) {
 	// Server Action manifest
 	writeTestFile(t, filepath.Join(dir, ".next", "server", "server-reference-manifest.json"),
 		`{"node":{"actHash":{"workers":{"app/actions/page":"doThing"}}},"edge":{}}`)
-	// Minimal react-server-dom-webpack vendor fixture — the real build
-	// Next 15 with React 19 would include this automatically.
+	// Minimal React vendor fixture — the real Next 15 / React 19 build would
+	// include these automatically. The SSR layer needs three edge builds:
+	// server.edge (Flight encode), client.edge (Flight decode) and
+	// react-dom/server.edge (element tree → HTML).
 	writeTestFile(t, filepath.Join(dir, "node_modules", "react-server-dom-webpack", "package.json"),
 		`{"name":"react-server-dom-webpack","version":"19.0.0"}`)
 	writeTestFile(t, filepath.Join(dir, "node_modules", "react-server-dom-webpack",
 		"esm", "react-server-dom-webpack-server.edge.production.js"),
+		`export function renderToReadableStream(){}`)
+	writeTestFile(t, filepath.Join(dir, "node_modules", "react-server-dom-webpack",
+		"esm", "react-server-dom-webpack-client.edge.production.js"),
+		`export function createFromReadableStream(){}`)
+	writeTestFile(t, filepath.Join(dir, "node_modules", "react-dom", "package.json"),
+		`{"name":"react-dom","version":"19.0.0"}`)
+	writeTestFile(t, filepath.Join(dir, "node_modules", "react-dom",
+		"esm", "react-dom-server.edge.production.js"),
 		`export function renderToReadableStream(){}`)
 
 	meta := &nextcore.NextCorePayload{
@@ -148,6 +158,19 @@ func TestAdapterPreEsbuildStateIsValid(t *testing.T) {
 	}
 	if bundle.VendoredRSC == nil || bundle.VendoredRSC.Version != "19.0.0" {
 		t.Errorf("VendoredRSC metadata wrong: %+v", bundle.VendoredRSC)
+	}
+	// The SSR companions must land too — without them the worker can decode a
+	// Flight stream but has nothing to render it to HTML with.
+	for _, rel := range []string{
+		"vendor/react-server-dom-webpack/client.edge.mjs",
+		"vendor/react-dom/server.edge.mjs",
+	} {
+		if _, err := os.Stat(filepath.Join(runtimeDir, filepath.FromSlash(rel))); err != nil {
+			t.Errorf("SSR companion missing: %s (%v)", rel, err)
+		}
+	}
+	if n := len(bundle.VendoredRSC.Extra); n != 2 {
+		t.Errorf("want 2 vendored companions, got %d", n)
 	}
 
 	// Stats must be populated — content hash non-empty, bytes > 0.

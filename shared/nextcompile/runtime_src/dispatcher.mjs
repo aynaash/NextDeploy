@@ -32,6 +32,7 @@ import { renderRSC } from "./rsc.mjs";
 import { isServerAction, handleServerAction } from "./actions.mjs";
 import { initCacheIndex, isStale } from "./cache.mjs";
 import { handleImageRequest } from "./image.mjs";
+import { middlewareMatches } from "./middleware_match.mjs";
 
 // Manifest-driven cache index init. Runs at module eval; dispatcher
 // invocations that follow see the populated tag→paths map. The manifest
@@ -118,8 +119,19 @@ async function tryShortCircuits(request, env, ctx, pathname, tables) {
  * Response or mutate the request. Returns { response?, request }.
  */
 async function runMiddlewareStack(request, env, ctx, tables) {
+  // The matcher is a guard, not just a path filter: without this gate the
+  // middleware ran on every request, including ones its has/missing
+  // conditions were written to exclude.
+  //
+  // Known limitation: nextcore.ParseMiddleware stores ONE matcher block (the
+  // first of middleware.{ts,js} / proxy.{ts,js} it finds), so an app carrying
+  // both files gates both refs on that single list. In practice proxy.ts
+  // declares no matcher (runs broadly) and middleware.ts carries the
+  // conditions, so the common shapes are correct.
+  const matchers = tables.manifest?.middleware?.matchers;
   for (const ref of [tables.proxyRef, tables.middlewareRef]) {
     if (!ref) continue;
+    if (!middlewareMatches(request, matchers)) continue;
     const result = await runMiddlewareLike(ref, request, env, ctx);
     if (result instanceof Response) return { response: result, request };
     if (result?.request) request = result.request;
@@ -156,13 +168,13 @@ async function tryRouteDispatch(request, env, ctx, url, pathname, tables) {
 
   const staticEntry = tables.staticTable[pathname];
   if (staticEntry) {
-    return invokeCompiled(staticEntry, request, env, ctx, { params: {} }, url);
+    return invokeCompiled(staticEntry, request, env, ctx, { params: {} }, url, tables.manifest);
   }
 
   const dyn = matchDynamic(pathname, tables.dynamicTable);
   if (dyn) {
     const routeCtx = buildRouteContext(url, dyn.params);
-    return invokeCompiled(dyn.entry, request, env, ctx, routeCtx, url);
+    return invokeCompiled(dyn.entry, request, env, ctx, routeCtx, url, tables.manifest);
   }
   return null;
 }
@@ -188,7 +200,7 @@ async function tryCachedRender(env, manifest, pathname) {
  * Import the compiled module and invoke it. Entry.kind + entry.usesRSC
  * drive which handler we use; context.mjs wraps everything.
  */
-async function invokeCompiled(entry, request, env, ctx, routeCtx, url) {
+async function invokeCompiled(entry, request, env, ctx, routeCtx, url, manifest) {
   switch (entry.kind) {
     case "api": {
       const mod = await entry.load();
@@ -198,8 +210,10 @@ async function invokeCompiled(entry, request, env, ctx, routeCtx, url) {
       // RSC-tagged pages go through the Server Components renderer.
       // renderRSC now takes the whole entry so it can access layouts,
       // client manifest, and PPR flag without re-loading the module.
+      // The manifest rides along for assetPrefix/basePath, which decide the
+      // hydration bootstrap script URLs.
       if (entry.usesRSC) {
-        return await renderRSC(entry, request, env, ctx, routeCtx);
+        return await renderRSC(entry, request, env, ctx, routeCtx, manifest);
       }
       // Legacy default-export path for Pages Router apps.
       {

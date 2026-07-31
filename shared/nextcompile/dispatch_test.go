@@ -205,6 +205,119 @@ func TestEmitDispatchTable_WritesFile(t *testing.T) {
 	}
 }
 
+// --- SSR M0: bootstrap chunks reach the dispatch table --------------------
+//
+// The scanner computes ModuleRef.BootstrapChunks, but the browser only ever
+// sees them if renderEntryFields emits them. These pin that last hop: without
+// it the chunk list is computed, discarded, and every page renders dead.
+
+func TestRenderEntryFields_EmitsBootstrapChunks(t *testing.T) {
+	r := ModuleRef{
+		RoutePath:    "/",
+		Kind:         RouteKindPage,
+		CompiledPath: "server/app/page.js",
+		UsesRSC:      true,
+		BootstrapChunks: []string{
+			"static/chunks/webpack-5adebf9f62dc3001.js",
+			"static/chunks/main-app-da1490cb1b408188.js",
+			"static/chunks/app/page-e1e2856be569970d.js",
+		},
+	}
+	got := renderEntryFields(r, "../")
+	want := `bootstrap: ["static/chunks/webpack-5adebf9f62dc3001.js", ` +
+		`"static/chunks/main-app-da1490cb1b408188.js", ` +
+		`"static/chunks/app/page-e1e2856be569970d.js"]`
+	if !strings.Contains(got, want) {
+		t.Errorf("entry fields missing bootstrap list.\ngot:  %s\nwant substring: %s", got, want)
+	}
+	// Chunks are client assets fetched by URL — emitting them as import()
+	// thunks would drag the whole client graph into the Worker bundle.
+	if strings.Contains(got, "import(\"../static/chunks") {
+		t.Errorf("bootstrap chunks must not be emitted as imports:\n%s", got)
+	}
+}
+
+func TestRenderEntryFields_BootstrapAbsentIsEmptyArray(t *testing.T) {
+	// API routes and pages from a build with no app-build-manifest carry no
+	// chunks. The field must still exist so the runtime can read entry.bootstrap
+	// without an undefined guard at every call site.
+	r := ModuleRef{
+		RoutePath:    "/api/users",
+		Kind:         RouteKindAPI,
+		CompiledPath: "server/app/api/users/route.js",
+	}
+	if got := renderEntryFields(r, "../"); !strings.Contains(got, "bootstrap: []") {
+		t.Errorf("want `bootstrap: []` for a chunkless entry, got:\n%s", got)
+	}
+}
+
+func TestRenderDispatchTable_BootstrapInBothTables(t *testing.T) {
+	refs := []ModuleRef{
+		{
+			RoutePath: "/", Kind: RouteKindPage, CompiledPath: "server/app/page.js",
+			UsesRSC: true, BootstrapChunks: []string{"static/chunks/app/page-abc.js"},
+		},
+		{
+			RoutePath: "/blog/[id]", Kind: RouteKindPage, CompiledPath: "server/app/blog/[id]/page.js",
+			UsesRSC: true, BootstrapChunks: []string{"static/chunks/app/blog/[id]/page-def.js"},
+		},
+	}
+	src := renderDispatchTable(refs, nil, "../", ".next")
+
+	// Static table entry.
+	if !strings.Contains(src, `bootstrap: ["static/chunks/app/page-abc.js"]`) {
+		t.Errorf("static table lost its bootstrap chunks:\n%s", src)
+	}
+	// Dynamic table entry — a separate render path (renderEntryFields is
+	// shared, but the dynamic branch builds its literal by hand).
+	if !strings.Contains(src, `bootstrap: ["static/chunks/app/blog/[id]/page-def.js"]`) {
+		t.Errorf("dynamic table lost its bootstrap chunks:\n%s", src)
+	}
+}
+
+func TestRenderEntryFields_EmitsStylesheetsInCascadeOrder(t *testing.T) {
+	r := ModuleRef{
+		RoutePath:        "/",
+		Kind:             RouteKindPage,
+		CompiledPath:     "server/app/page.js",
+		UsesRSC:          true,
+		StylesheetChunks: []string{"static/css/root.css", "static/css/page.css"},
+	}
+	got := renderEntryFields(r, "../")
+	if want := `css: ["static/css/root.css", "static/css/page.css"]`; !strings.Contains(got, want) {
+		t.Errorf("entry fields missing css list.\ngot:  %s\nwant substring: %s", got, want)
+	}
+}
+
+func TestRenderEntryFields_CSSAbsentIsEmptyArray(t *testing.T) {
+	r := ModuleRef{RoutePath: "/", Kind: RouteKindPage, CompiledPath: "server/app/page.js"}
+	if got := renderEntryFields(r, "../"); !strings.Contains(got, "css: []") {
+		t.Errorf("want `css: []` for a page with no stylesheets, got:\n%s", got)
+	}
+}
+
+func TestStringArrayLiteral(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want string
+	}{
+		{"nil", nil, "[]"},
+		{"empty", []string{}, "[]"},
+		{"one", []string{"a"}, `["a"]`},
+		{"many", []string{"a", "b"}, `["a", "b"]`},
+		{"escapes quotes", []string{`a"b`}, `["a\"b"]`},
+		{"escapes backslash", []string{`a\b`}, `["a\\b"]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := stringArrayLiteral(tc.in); got != tc.want {
+				t.Errorf("got %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

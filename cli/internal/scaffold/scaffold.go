@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/aynaash/nextdeploy/cli/internal/cicd"
 )
 
 //go:embed all:templates
@@ -68,6 +70,25 @@ func Scaffold(opts Options) (written, skipped []string, err error) {
 		written = append(written, w...)
 		skipped = append(skipped, s...)
 	}
+
+	// The deploy workflow is rendered, not templated. It used to be a static
+	// file here that had drifted from `generate-ci`'s output — different
+	// package manager, different secrets, unpinned CLI — so scaffolding and
+	// then running generate-ci produced two workflows and two deploys per
+	// push. Both now come from cicd.RenderDeployWorkflow.
+	wfPath := filepath.Join(opts.Dir, filepath.FromSlash(cicd.WorkflowPath))
+	if _, statErr := os.Stat(wfPath); statErr == nil {
+		skipped = append(skipped, wfPath)
+	} else {
+		if err := os.MkdirAll(filepath.Dir(wfPath), 0o750); err != nil {
+			return nil, nil, err
+		}
+		if err := os.WriteFile(wfPath, []byte(cicd.RenderDeployWorkflow()), 0o640); err != nil {
+			return nil, nil, fmt.Errorf("write %s: %w", wfPath, err)
+		}
+		written = append(written, wfPath)
+	}
+
 	sort.Strings(written)
 	sort.Strings(skipped)
 	return written, skipped, nil
@@ -133,6 +154,10 @@ func TemplateFiles(variant DBVariant) ([]string, error) {
 			return nil, err
 		}
 	}
+	// Rendered, not embedded — but Scaffold does write it, so the init
+	// summary must list it.
+	seen[filepath.FromSlash(cicd.WorkflowPath)] = true
+
 	out := make([]string, 0, len(seen))
 	for k := range seen {
 		out = append(out, k)

@@ -55,10 +55,18 @@ test("a malformed percent-escape falls back to the raw key, never throws", async
 });
 
 
-test("serveRootPublicFromR2 also tolerates a malformed percent-escape", async () => {
-  const { env } = mockEnv({"robots.txt": "User-agent:*"});
-  const manifest = {publicFiles: ["robots.txt","favicon.ico"]};
+test("serveRootPublicFromR2 looks up the manifest-declared key", async () => {
+  const { env, calls } = mockEnv({ "robots.txt": "User-agent:*" });
+  const manifest = { publicFiles: ["robots.txt", "favicon.ico"] };
   const res = await serveRootPublicFromR2(env, "/robots.txt", manifest);
   assert.ok(res);
-  assert.strictEqual(calls[0], "my file.txt")
-})
+  assert.strictEqual(calls[0], "robots.txt");
+});
+
+test("serveRootPublicFromR2 tolerates a malformed percent-escape", async () => {
+  const { env } = mockEnv({ "robots.txt": "User-agent:*" });
+  const manifest = { publicFiles: ["robots.txt"] };
+  // A lone "%E0%A4%A" cannot be decoded; the lookup must miss, not throw.
+  const res = await serveRootPublicFromR2(env, "/bad%E0%A4%A.txt", manifest);
+  assert.strictEqual(res, null);
+});

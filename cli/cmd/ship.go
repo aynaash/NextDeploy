@@ -29,6 +29,7 @@ var (
 	shipNoProvision bool
 	shipVerify      bool
 	shipForce       bool
+	shipEnvironment string
 )
 
 var shipCmd = &cobra.Command{
@@ -53,6 +54,16 @@ var shipCmd = &cobra.Command{
 		if err != nil {
 			log.Error("Failed to load config: %v", err)
 			os.Exit(1)
+		}
+
+		// Environment override (preview / staging stacks). Applied before any
+		// provider is initialized so every derived resource name is namespaced.
+		if err := applyEnvironmentOverride(cfg, shipEnvironment); err != nil {
+			log.Error("%v", err)
+			os.Exit(1)
+		}
+		if shipEnvironment != "" {
+			log.Info("Deploying to environment: %s", cfg.App.Environment)
 		}
 
 		if git.IsDirty() {
@@ -95,6 +106,17 @@ func shipServerless(ctx context.Context, log *shared.Logger, cfg *config.NextDep
 		}
 		log.Error("Serverless deployment failed: %v", err)
 		os.Exit(1)
+	}
+
+	// Emit the Worker script name on stdout in a stable, greppable form so CI
+	// can compose the deployment URL (https://<worker>.<subdomain>.workers.dev)
+	// without the CLI having to call the Workers Subdomains API — that would
+	// add SDK surface and another token scope to print something the account
+	// already knows. Cloudflare-only; other providers name resources
+	// differently.
+	if strings.EqualFold(cfg.Serverless.Provider, "cloudflare") {
+		fmt.Printf("NEXTDEPLOY_WORKER_NAME=%s\n",
+			serverless.CloudflareWorkerName(cfg.App.Name, cfg.App.Environment))
 	}
 }
 
@@ -264,5 +286,8 @@ func init() {
 	// to a sibling command or deleting lock files by hand.
 	shipCmd.Flags().BoolVarP(&shipForce, "force", "f", false,
 		"Force a full rebuild even if the incremental state matches")
+	shipCmd.Flags().StringVarP(&shipEnvironment, "environment", "e", "",
+		"Deploy to a named environment (e.g. pr-42, staging). Overrides app.environment and "+
+			"isolates the Worker, R2 bucket and resources under <app>-<environment>")
 	rootCmd.AddCommand(shipCmd)
 }

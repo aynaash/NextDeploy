@@ -40,6 +40,12 @@ type PlanItem struct {
 // ImmutableDrift so the cmd can exit non-zero (CI-friendly).
 type PlanResult struct {
 	Items []PlanItem
+
+	// Warnings are advisory lines that aren't tied to a single declared
+	// resource: declared-but-unwired features, and account resources that look
+	// like they belong to this app but are no longer declared. They never
+	// block an apply — they exist so the gap isn't silent.
+	Warnings []string
 }
 
 func (r *PlanResult) HasDrift() bool {
@@ -60,11 +66,21 @@ func (r *PlanResult) HasDrift() bool {
 // routes are tied to worker upload (not standalone resources) and so are not
 // planned here — they're computed during DeployCompute.
 func (p *CloudflareProvider) Plan(ctx context.Context, cfg *config.NextDeployConfig) (*PlanResult, error) {
-	if cfg.Serverless == nil || cfg.Serverless.Cloudflare == nil || cfg.Serverless.Cloudflare.Resources == nil {
+	if cfg.Serverless == nil || cfg.Serverless.Cloudflare == nil {
 		return &PlanResult{}, nil
 	}
-	res := cfg.Serverless.Cloudflare.Resources
 	out := &PlanResult{}
+
+	// Declaring nothing is not the same as having nothing. An account that
+	// was provisioned by hand (or by a previous config) still has resources
+	// this app's name points at, and that is exactly the case where the user
+	// most needs to be told what exists — so the unmanaged scan runs even
+	// with an empty resources block.
+	if cfg.Serverless.Cloudflare.Resources == nil {
+		p.appendAdvisories(ctx, cfg, out)
+		return out, nil
+	}
+	res := cfg.Serverless.Cloudflare.Resources
 
 	for _, d := range res.D1 {
 		item, err := p.planD1(ctx, d)
@@ -122,7 +138,24 @@ func (p *CloudflareProvider) Plan(ctx context.Context, cfg *config.NextDeployCon
 		out.Items = append(out.Items, item)
 	}
 
+	p.appendAdvisories(ctx, cfg, out)
 	return out, nil
+}
+
+// appendAdvisories attaches the non-resource-scoped warnings: undeclared queue
+// consumers, and account resources that match this app but aren't declared.
+//
+// Advisory only. A token that can't list one product shouldn't sink a plan
+// that otherwise succeeded, so a scan failure degrades to a note.
+func (p *CloudflareProvider) appendAdvisories(ctx context.Context, cfg *config.NextDeployConfig, out *PlanResult) {
+	out.Warnings = append(out.Warnings, queueConsumerWarnings(cfg.Serverless.Cloudflare)...)
+
+	unmanaged, err := p.scanUnmanaged(ctx, cfg)
+	if err != nil {
+		out.Warnings = append(out.Warnings,
+			fmt.Sprintf("could not check for orphaned resources: %v", err))
+	}
+	out.Warnings = append(out.Warnings, unmanagedWarnings(unmanaged)...)
 }
 
 // planD1 reports create vs no-op for a D1 database. Migration drift can't be

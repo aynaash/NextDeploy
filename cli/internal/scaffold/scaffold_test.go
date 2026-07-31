@@ -30,7 +30,7 @@ func TestScaffold_WritesDeploymentInfra(t *testing.T) {
 	// Deployment infra files (not app business logic).
 	for _, rel := range []string{
 		"nextdeploy.yml", "proxy.ts", "lib/env.ts",
-		".github/workflows/deploy.yml", "package.json", "README.md",
+		".github/workflows/nextdeploy.yml", "package.json", "README.md",
 		"next.config.mjs", "tsconfig.json",
 		"migrations/0001_example.sql",
 	} {

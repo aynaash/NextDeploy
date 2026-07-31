@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -31,6 +32,11 @@ func TestCompareVersions(t *testing.T) {
 		{"prerelease stripped", "1.2.3-rc1", "1.2.3", 0},
 		{"different lengths equal", "1.2", "1.2.0", 0},
 		{"longer is newer", "1.2.1", "1.2", 1},
+		// stripV trims a single "v", so "vv1.0.0" still starts with a letter and
+		// splitVer breaks on it immediately -> no parts -> reads as 0.0.0, i.e.
+		// OLDER than 1.0.0. Pinned deliberately: a double-v tag would silently
+		// look like a downgrade rather than an error.
+		{"double v parses as empty and sorts older", "vv1.0.0", "1.0.0", -1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -85,6 +91,78 @@ func TestSplitVer(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestParseReleaseBody(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
+		body := []byte(`{"tag_name":"v0.14.2","html_url":"https://example.test/r/v0.14.2"}`)
+		got, err := parseReleaseBody(body)
+		if err != nil {
+			t.Fatalf("parseReleaseBody: %v", err)
+		}
+		if got.TagName != "v0.14.2" {
+			t.Errorf("TagName = %q, want %q", got.TagName, "v0.14.2")
+		}
+		if got.HTMLURL != "https://example.test/r/v0.14.2" {
+			t.Errorf("HTMLURL = %q", got.HTMLURL)
+		}
+	})
+
+	t.Run("empty tag is a non-recoverable UpdateError", func(t *testing.T) {
+		got, err := parseReleaseBody([]byte(`{"tag_name":""}`))
+		if err == nil {
+			t.Fatal("want error for empty tag_name")
+		}
+		var updErr *UpdateError
+		if !errors.As(err, &updErr) {
+			t.Fatalf("want *UpdateError, got %T: %v", err, err)
+		}
+		if updErr.Stage != "api" {
+			t.Errorf("Stage = %q, want %q", updErr.Stage, "api")
+		}
+		if updErr.Recoverable {
+			t.Error("empty tag must not be marked recoverable")
+		}
+		if got != (Release{}) {
+			t.Errorf("want zero Release on error, got %+v", got)
+		}
+	})
+
+	t.Run("malformed json is a plain retryable error", func(t *testing.T) {
+		_, err := parseReleaseBody([]byte(`{bad`))
+		if err == nil {
+			t.Fatal("want error for malformed json")
+		}
+		// Must NOT be an *UpdateError: LatestRelease keys off that type to decide
+		// whether to abort or retry, and a truncated body is worth retrying.
+		var updErr *UpdateError
+		if errors.As(err, &updErr) {
+			t.Fatal("malformed json must stay retryable, not an *UpdateError")
+		}
+	})
+}
+
+func TestUpdateError(t *testing.T) {
+	t.Run("with wrapped cause", func(t *testing.T) {
+		cause := errors.New("boom")
+		err := &UpdateError{Stage: "download", Message: "failed", Err: cause}
+		if got, want := err.Error(), "[download] failed: boom"; got != want {
+			t.Errorf("Error() = %q, want %q", got, want)
+		}
+		if !errors.Is(err, cause) {
+			t.Error("Unwrap must expose the wrapped cause to errors.Is")
+		}
+	})
+
+	t.Run("without cause", func(t *testing.T) {
+		err := &UpdateError{Stage: "api", Message: "no release tag"}
+		if got, want := err.Error(), "[api] no release tag"; got != want {
+			t.Errorf("Error() = %q, want %q", got, want)
+		}
+		if err.Unwrap() != nil {
+			t.Error("Unwrap of a causeless UpdateError must be nil")
+		}
+	})
 }
 
 func TestFormatBytes(t *testing.T) {
@@ -303,7 +381,15 @@ func (zeroReader) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// errReader fails on first read, standing in for a truncated or corrupt archive.
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) {
+	return 0, io.ErrUnexpectedEOF
+}
+
 func TestCopyBounded(t *testing.T) {
+	// Exercises the real production ceiling.
 	t.Run("under limit", func(t *testing.T) {
 		var dst bytes.Buffer
 		if err := copyBounded(&dst, bytes.NewReader([]byte("small"))); err != nil {
@@ -314,13 +400,47 @@ func TestCopyBounded(t *testing.T) {
 		}
 	})
 
-	t.Run("over limit trips guard", func(t *testing.T) {
-		if testing.Short() {
-			t.Skip("copies >512MiB; skipped in -short")
+	// The guard itself is limit-agnostic, so test the boundary against a small
+	// injected ceiling rather than moving half a gigabyte on every test run.
+	const limit = 1024
+
+	t.Run("at limit edge is allowed", func(t *testing.T) {
+		var dst bytes.Buffer
+		src := bytes.NewReader(make([]byte, limit))
+		if err := copyBoundedLimit(&dst, src, limit); err != nil {
+			t.Fatalf("exactly %d bytes must be allowed, got %v", limit, err)
 		}
-		err := copyBounded(io.Discard, zeroReader{})
-		if err == nil {
-			t.Fatal("want decompression-bomb error")
+		if dst.Len() != limit {
+			t.Fatalf("copied %d bytes, want %d", dst.Len(), limit)
+		}
+	})
+
+	t.Run("one byte over trips guard", func(t *testing.T) {
+		src := bytes.NewReader(make([]byte, limit+1))
+		if err := copyBoundedLimit(io.Discard, src, limit); err == nil {
+			t.Fatal("want decompression-bomb error at limit+1")
+		}
+	})
+
+	t.Run("endless reader trips guard without exhausting memory", func(t *testing.T) {
+		if err := copyBoundedLimit(io.Discard, zeroReader{}, limit); err == nil {
+			t.Fatal("want decompression-bomb error for an endless source")
+		}
+	})
+
+	// A read failure must surface as-is, not be misreported as a bomb.
+	t.Run("read error propagates", func(t *testing.T) {
+		err := copyBoundedLimit(io.Discard, errReader{}, limit)
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("want io.ErrUnexpectedEOF, got %v", err)
+		}
+	})
+
+	// The delegation in copyBounded is a single line, so pin the constant it
+	// passes instead of paying 512MiB to observe it.
+	t.Run("production ceiling is 512MiB", func(t *testing.T) {
+		if maxBinarySize != 512<<20 {
+			t.Fatalf("maxBinarySize = %d, want %d", maxBinarySize, 512<<20)
 		}
 	})
 }

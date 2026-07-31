@@ -1,6 +1,7 @@
 package nextcompile
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -83,6 +84,8 @@ func ScanCompiledServer(ctx context.Context, standaloneDir string, payload Paylo
 	// only walk up the tree for confirmed page kinds.
 	refs = attachClientManifests(refs, standaloneDir, classifyRoot)
 	refs = attachLayoutChains(refs, standaloneDir, classifyRoot)
+	refs = attachBootstrapChunks(refs, classifyRoot)
+	refs = attachStylesheets(refs, standaloneDir)
 
 	sort.Slice(refs, func(i, j int) bool {
 		return refs[i].RoutePath < refs[j].RoutePath
@@ -139,6 +142,124 @@ func attachClientManifests(refs []ModuleRef, standaloneDir, classifyRoot string)
 		r.ClientManifestPath = filepath.ToSlash(rel)
 	}
 	return refs
+}
+
+// attachStylesheets fills ModuleRef.StylesheetChunks from the per-route
+// client-reference-manifest's entryCSSFiles map.
+//
+// Runs after attachClientManifests, which is what guarantees
+// ClientManifestPath points at a readable .json (it materializes one from
+// Next 15's .js form when needed).
+//
+// Non-fatal throughout, like its sibling passes: a page with no resolvable
+// stylesheet list renders unstyled, which beats failing the compile.
+func attachStylesheets(refs []ModuleRef, standaloneDir string) []ModuleRef {
+	for i := range refs {
+		r := &refs[i]
+		if r.Kind != RouteKindPage || r.ClientManifestPath == "" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(standaloneDir, r.ClientManifestPath)) // #nosec G304 — our own build output
+		if err != nil {
+			continue
+		}
+		css, err := parseEntryCSSFiles(data)
+		if err != nil {
+			continue
+		}
+		r.StylesheetChunks = css
+	}
+	return refs
+}
+
+// entryCSSManifest is the sliver of the client-reference-manifest we read for
+// stylesheets. RawMessage because entryCSSFiles' key ORDER is load-bearing
+// (CSS cascade) and unmarshaling into a map would discard it.
+type entryCSSManifest struct {
+	EntryCSSFiles json.RawMessage `json:"entryCSSFiles"`
+}
+
+// parseEntryCSSFiles flattens entryCSSFiles into one ordered, deduped list of
+// dist-relative CSS paths.
+//
+// Shape (Next 15):
+//
+//	"entryCSSFiles": {
+//	  "<appRoot>/":            [],
+//	  "<appRoot>/app/layout":  ["static/css/root.css"],
+//	  "<appRoot>/app/page":    [{"inlined":false,"path":"static/css/page.css"}]
+//	}
+//
+// Two things make this fiddly and are handled deliberately:
+//
+//   - Keys are ABSOLUTE source paths on the build machine, so they can't be
+//     matched against our compiled paths. We don't try: the manifest is
+//     emitted per route and already contains exactly that route's chain
+//     (root → layout → page), so flattening every value in key order is both
+//     simpler and more robust than path matching.
+//   - Values are strings on some Next 15 minors and {inlined, path} objects on
+//     others (the latter arrived with inline-CSS support). cssEntry accepts
+//     both rather than betting on one.
+func parseEntryCSSFiles(manifestJSON []byte) ([]string, error) {
+	var m entryCSSManifest
+	if err := json.Unmarshal(manifestJSON, &m); err != nil {
+		return nil, err
+	}
+	if len(m.EntryCSSFiles) == 0 {
+		return nil, nil
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(m.EntryCSSFiles))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		return nil, fmt.Errorf("entryCSSFiles: want object, got %v", tok)
+	}
+
+	seen := map[string]struct{}{}
+	var out []string
+	for dec.More() {
+		if _, err := dec.Token(); err != nil { // the key; position matters, value doesn't
+			return nil, err
+		}
+		var entries []cssEntry
+		if err := dec.Decode(&entries); err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			if e.Path == "" {
+				continue
+			}
+			if _, dup := seen[e.Path]; dup {
+				continue
+			}
+			seen[e.Path] = struct{}{}
+			out = append(out, e.Path)
+		}
+	}
+	return out, nil
+}
+
+// cssEntry decodes either "static/css/a.css" or {"inlined":false,"path":"…"}.
+type cssEntry struct {
+	Path string
+}
+
+func (c *cssEntry) UnmarshalJSON(b []byte) error {
+	trimmed := bytes.TrimSpace(b)
+	if len(trimmed) > 0 && trimmed[0] == '"' {
+		return json.Unmarshal(trimmed, &c.Path)
+	}
+	var obj struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(trimmed, &obj); err != nil {
+		return err
+	}
+	c.Path = obj.Path
+	return nil
 }
 
 // extractRSCManifestJSON pulls the JSON manifest object out of a Next.js 15
@@ -522,4 +643,120 @@ func sliceToSet(ss []string) map[string]struct{} {
 		out[s] = struct{}{}
 	}
 	return out
+}
+
+// appBuildManifest is the subset of .next/app-build-manifest.json we consume:
+// app-path entry → ordered client chunk list. Keys look like "/page",
+// "/layout", "/blog/[id]/page", "/staff/(authed)/dashboard/page".
+type appBuildManifest struct {
+	Pages map[string][]string `json:"pages"`
+}
+
+// attachBootstrapChunks fills ModuleRef.BootstrapChunks for every page ref from
+// app-build-manifest.json. classifyRoot is the .next dir (parent of server/).
+//
+// An absent or unreadable manifest is non-fatal, matching its sibling passes: a
+// production build always emits one, but a partial or exotic build should
+// degrade to the current no-bootstrap shell rather than fail the compile.
+func attachBootstrapChunks(refs []ModuleRef, classifyRoot string) []ModuleRef {
+	manifestPath := filepath.Join(classifyRoot, "app-build-manifest.json")
+	data, err := os.ReadFile(manifestPath) // #nosec G304 — reading our own build output
+	if err != nil {
+		return refs
+	}
+	var m appBuildManifest
+	if err := json.Unmarshal(data, &m); err != nil || m.Pages == nil {
+		return refs
+	}
+
+	for i := range refs {
+		r := &refs[i]
+		if r.Kind != RouteKindPage {
+			continue
+		}
+		r.BootstrapChunks = bootstrapChunksForRoute(r.CompiledPath, m.Pages)
+	}
+	return refs
+}
+
+// bootstrapChunksForRoute concatenates, in load order, the chunk lists for the
+// route's ancestor layouts (root → leaf) then its own page entry, deduping
+// while preserving first-seen order. Absent keys are skipped.
+//
+// compiledPath is the page's path relative to standaloneDir, e.g.
+// "server/app/staff/(authed)/dashboard/page.js". We key off it rather than off
+// ModuleRef.RoutePath deliberately: Next's manifest keys preserve route-group
+// segments ("(authed)"), parallel-route slots ("@modal") and intercepting
+// markers, while the user-facing URL has already dropped them. Deriving the key
+// from the URL yields an empty chunk list for every route-grouped page — a page
+// that renders but never hydrates. See testdata/fixtures/next15-appdir.
+func bootstrapChunksForRoute(compiledPath string, pages map[string][]string) []string {
+	pageKey, ok := appManifestKey(compiledPath)
+	if !ok {
+		return nil // Pages Router or a non-app module: different manifest
+	}
+
+	// Ancestor layouts, root first. Layout chunk entries are keyed by the same
+	// app-path prefixes as the page, so walk the page key's own directory
+	// prefixes rather than consulting LayoutChain — a production build inlines
+	// layouts and emits no server/app/**/layout.js for it to find.
+	var keys []string
+	for _, prefix := range ancestorPrefixes(pageKey) {
+		keys = append(keys, prefix+"/layout")
+	}
+	keys = append(keys, pageKey)
+
+	seen := map[string]struct{}{}
+	var out []string
+	for _, k := range keys {
+		for _, chunk := range pages[k] { // nil for an absent key → no-op
+			if _, dup := seen[chunk]; dup {
+				continue
+			}
+			seen[chunk] = struct{}{}
+			out = append(out, chunk)
+		}
+	}
+	return out
+}
+
+// appManifestKey maps a compiled App Router module path to its
+// app-build-manifest key: "server/app/page.js" → "/page",
+// "server/app/blog/[id]/page.js" → "/blog/[id]/page". Returns ok=false for
+// anything outside server/app (Pages Router, middleware, instrumentation).
+func appManifestKey(compiledPath string) (string, bool) {
+	p := filepath.ToSlash(compiledPath)
+	const appDir = "server/" + appRouterPrefix // "server/app/"
+	idx := strings.Index(p, appDir)
+	if idx == -1 {
+		return "", false
+	}
+	rel := p[idx+len(appDir):]
+	rel = strings.TrimSuffix(rel, filepath.Ext(rel))
+	if rel == "" {
+		return "", false
+	}
+	return "/" + rel, true
+}
+
+// ancestorPrefixes returns the cumulative app-path prefixes whose layouts wrap
+// the given page key, root first. "/page" → [""]; "/blog/[id]/page" → ["",
+// "/blog", "/blog/[id]"]. Suffixed with "/layout" these become the manifest
+// keys "/layout", "/blog/layout", "/blog/[id]/layout".
+func ancestorPrefixes(pageKey string) []string {
+	prefixes := []string{""} // root layout, key "/layout"
+	cut := strings.LastIndex(pageKey, "/")
+	if cut < 0 {
+		return prefixes
+	}
+	dir := strings.Trim(pageKey[:cut], "/")
+	if dir == "" {
+		return prefixes
+	}
+	cur := ""
+	for _, seg := range strings.Split(dir, "/") {
+		cur += "/" + seg
+		prefixes = append(prefixes, cur)
+	}
+	return prefixes
 }

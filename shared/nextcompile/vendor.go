@@ -1,12 +1,14 @@
 package nextcompile
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ErrRSCPackageNotFound signals that react-server-dom-webpack is not
@@ -17,6 +19,19 @@ import (
 //     anyway if ever reached
 var ErrRSCPackageNotFound = errors.New("react-server-dom-webpack not found in node_modules")
 
+// SSR companion sentinels. Distinct from ErrRSCPackageNotFound so
+// maybeVendorRSC can name the exact missing build, and so a companion gap is
+// only fatal when the app actually uses RSC.
+var (
+	// ErrRSCServerEdgeNotFound is distinct from ErrRSCPackageNotFound: the
+	// package IS installed, but publishes no server.edge build we recognize.
+	// That's a corrupt or unexpected publish, not a missing dependency.
+	ErrRSCServerEdgeNotFound   = errors.New("react-server-dom-webpack server.edge build not found")
+	ErrRSCClientEdgeNotFound   = errors.New("react-server-dom-webpack client.edge build not found")
+	ErrReactDOMPackageNotFound = errors.New("react-dom not found in node_modules")
+	ErrReactDOMServerNotFound  = errors.New("react-dom server.edge build not found")
+)
+
 // VendoredPackage records what VendorRSC copied into the bundle. The
 // adapter logs this and includes it in CompileStats.
 type VendoredPackage struct {
@@ -26,6 +41,22 @@ type VendoredPackage struct {
 	TargetPath string
 	Bytes      int64
 	BuildKind  string // "production" | "development" | "legacy"
+
+	// Format is the module system of the vendored file: "esm" or "cjs".
+	// React 19 publishes react-dom and react-server-dom-webpack as CJS only,
+	// so this is routinely "cjs" — see vendorEdgeBuild.
+	Format string
+
+	// ShimPath is the generated ESM re-export written next to a CJS payload
+	// so importers can always use a stable `.mjs` specifier. Empty when the
+	// payload is already ESM.
+	ShimPath string
+
+	// Extra holds the SSR companion files vendored alongside the primary
+	// server.edge bundle: react-server-dom-webpack/client.edge (deserializes
+	// a Flight stream on the worker) and react-dom/server.edge (renders the
+	// resulting element tree to an HTML stream).
+	Extra []VendoredPackage
 }
 
 // VendorRSC resolves react-server-dom-webpack from the standalone tree's
@@ -50,30 +81,47 @@ func VendorRSC(standaloneDir, bundleDir string) (*VendoredPackage, error) {
 		return nil, fmt.Errorf("read react-server-dom-webpack metadata: %w", err)
 	}
 
-	sourcePath, buildKind, err := findRSCServerEdge(pkgDir)
+	rscTargetDir := filepath.Join(bundleDir, "_nextdeploy", "runtime", "vendor", "react-server-dom-webpack")
+
+	// Primary: server.edge — encodes the React tree into a Flight stream.
+	primary, err := vendorEdgeBuild(pkgDir, rscTargetDir, "react-server-dom-webpack", "server.edge",
+		"react-server-dom-webpack/server.edge", ErrRSCServerEdgeNotFound)
 	if err != nil {
 		return nil, err
 	}
+	primary.Name = meta.Name
+	primary.Version = meta.Version
 
-	targetDir := filepath.Join(bundleDir, "_nextdeploy", "runtime", "vendor", "react-server-dom-webpack")
-	if err := os.MkdirAll(targetDir, 0o750); err != nil {
-		return nil, fmt.Errorf("mkdir vendor: %w", err)
-	}
-	targetPath := filepath.Join(targetDir, "server.edge.mjs")
-
-	n, err := copyFile(sourcePath, targetPath)
+	// SSR companion 1 — client.edge deserializes that Flight stream back into
+	// a React element on the worker. Same package, same target dir.
+	clientPkg, err := vendorEdgeBuild(pkgDir, rscTargetDir, "react-server-dom-webpack", "client.edge",
+		"react-server-dom-webpack/client.edge", ErrRSCClientEdgeNotFound)
 	if err != nil {
-		return nil, fmt.Errorf("copy %s → %s: %w", sourcePath, targetPath, err)
+		return nil, err
 	}
+	clientPkg.Version = meta.Version
+	primary.Extra = append(primary.Extra, *clientPkg)
 
-	return &VendoredPackage{
-		Name:       meta.Name,
-		Version:    meta.Version,
-		SourcePath: sourcePath,
-		TargetPath: targetPath,
-		Bytes:      n,
-		BuildKind:  buildKind,
-	}, nil
+	// SSR companion 2 — react-dom/server.edge streams that element tree to
+	// HTML. Different package, resolved from the same node_modules root.
+	domDir, err := locateReactDOMPackage(standaloneDir)
+	if err != nil {
+		return nil, err
+	}
+	domMeta, err := readRSCPackageMeta(domDir)
+	if err != nil {
+		return nil, fmt.Errorf("read react-dom metadata: %w", err)
+	}
+	domTargetDir := filepath.Join(bundleDir, "_nextdeploy", "runtime", "vendor", "react-dom")
+	domPkg, err := vendorEdgeBuild(domDir, domTargetDir, "react-dom", "server.edge",
+		"react-dom/server.edge", ErrReactDOMServerNotFound)
+	if err != nil {
+		return nil, err
+	}
+	domPkg.Version = domMeta.Version
+	primary.Extra = append(primary.Extra, *domPkg)
+
+	return primary, nil
 }
 
 // locateRSCPackage walks upward from standaloneDir looking for a
@@ -117,23 +165,32 @@ func readRSCPackageMeta(pkgDir string) (rscPackageMeta, error) {
 	return m, nil
 }
 
-// findRSCServerEdge tries the known on-disk layouts for the package and
-// returns the first existing file along with its build flavor.
+// findEdgeBuild locates a React edge build inside an installed package and
+// returns its path plus build flavor.
 //
-// Ordering rationale: prefer ESM production (smallest, no dev warnings),
-// fall back to ESM development, then the legacy flat CJS layout as a
-// last resort. React 18 published both ESM and CJS; React 19 is ESM-only
-// but the file names are stable.
-func findRSCServerEdge(pkgDir string) (string, string, error) {
+// pkgName is the npm package name used in React's file-naming convention
+// ("react-server-dom-webpack", "react-dom"); entry is the export stem
+// ("server.edge", "client.edge").
+//
+// Ordering rationale: prefer a CONCRETE production implementation (smallest,
+// no dev warnings), ESM before CJS since ESM needs no interop shim. The flat
+// `<entry>.js` is deliberately LAST: in React 19 that file is a conditional
+// shim whose body is `require("./cjs/<pkg>-<entry>.production.js")`. Vendoring
+// the shim alone copies a module whose relative require points at a file that
+// was never copied — it resolves to nothing at bundle time. Ranking the cjs/
+// implementation above it is what makes React 19 work at all.
+func findEdgeBuild(pkgDir, pkgName, entry string) (string, string, error) {
 	candidates := []struct {
 		rel       string
 		buildKind string
 	}{
-		{"esm/react-server-dom-webpack-server.edge.production.js", "production"},
-		{"server.edge.production.js", "production"},
-		{"esm/react-server-dom-webpack-server.edge.development.js", "development"},
-		{"server.edge.development.js", "development"},
-		{"server.edge.js", "legacy"},
+		{fmt.Sprintf("esm/%s-%s.production.js", pkgName, entry), "production"},
+		{fmt.Sprintf("%s.production.js", entry), "production"},
+		{fmt.Sprintf("cjs/%s-%s.production.js", pkgName, entry), "production"},
+		{fmt.Sprintf("esm/%s-%s.development.js", pkgName, entry), "development"},
+		{fmt.Sprintf("%s.development.js", entry), "development"},
+		{fmt.Sprintf("cjs/%s-%s.development.js", pkgName, entry), "development"},
+		{fmt.Sprintf("%s.js", entry), "legacy"},
 	}
 	for _, c := range candidates {
 		p := filepath.Join(pkgDir, c.rel)
@@ -141,7 +198,111 @@ func findRSCServerEdge(pkgDir string) (string, string, error) {
 			return p, c.buildKind, nil
 		}
 	}
-	return "", "", fmt.Errorf("no server.edge build found in %s (tried esm/ and legacy layouts)", pkgDir)
+	return "", "", fmt.Errorf("no %s build found in %s (tried esm/, cjs/, and flat layouts)", entry, pkgDir)
+}
+
+// vendorEdgeBuild copies one React edge build into targetDir, naming it by the
+// module system it actually uses: <entry>.mjs for ESM, <entry>.cjs for CJS.
+// When the payload is CJS it also writes an <entry>.mjs re-export shim, so
+// every importer can use the same stable `.mjs` specifier regardless of how
+// the installed React happens to be published.
+func vendorEdgeBuild(pkgDir, targetDir, pkgName, entry, displayName string, notFound error) (*VendoredPackage, error) {
+	src, buildKind, err := findEdgeBuild(pkgDir, pkgName, entry)
+	if err != nil {
+		return nil, notFound
+	}
+	format, err := detectModuleFormat(src)
+	if err != nil {
+		return nil, fmt.Errorf("classify %s: %w", src, err)
+	}
+	if err := os.MkdirAll(targetDir, 0o750); err != nil {
+		return nil, fmt.Errorf("mkdir vendor %s: %w", displayName, err)
+	}
+
+	ext := ".mjs"
+	if format == "cjs" {
+		ext = ".cjs"
+	}
+	dst := filepath.Join(targetDir, entry+ext)
+	n, err := copyFile(src, dst)
+	if err != nil {
+		return nil, fmt.Errorf("copy %s → %s: %w", src, dst, err)
+	}
+
+	out := &VendoredPackage{
+		Name:       displayName,
+		SourcePath: src,
+		TargetPath: dst,
+		Bytes:      n,
+		BuildKind:  buildKind,
+		Format:     format,
+	}
+
+	if format == "cjs" {
+		shim := filepath.Join(targetDir, entry+".mjs")
+		if err := writeInteropShim(shim, entry+ext); err != nil {
+			return nil, err
+		}
+		out.ShimPath = shim
+	}
+	return out, nil
+}
+
+// writeInteropShim emits the ESM facade over a vendored CJS payload. Keeping
+// the `.mjs` specifier stable means runtime modules never have to branch on
+// how React was published. esbuild statically analyzes React's
+// `exports.foo = …` assignments, and Node's cjs-module-lexer does the same for
+// the `node --test` path, so the star re-export resolves named bindings in
+// both contexts.
+func writeInteropShim(shimPath, payloadFile string) error {
+	body := fmt.Sprintf(`// Generated by nextcompile — do not edit.
+// CJS→ESM interop facade: the installed React ships this build as CommonJS,
+// so the implementation lives in %s and this file re-exports it.
+export * from %q;
+export { default } from %q;
+`, payloadFile, "./"+payloadFile, "./"+payloadFile)
+	if err := os.WriteFile(shimPath, []byte(body), 0o640); err != nil {
+		return fmt.Errorf("write interop shim %s: %w", shimPath, err)
+	}
+	return nil
+}
+
+// detectModuleFormat classifies a vendored file as "esm" or "cjs". Directory
+// convention decides when React published both flavors; otherwise the file's
+// own contents do, which correctly catches the flat `<entry>.js` shims.
+func detectModuleFormat(path string) (string, error) {
+	slash := filepath.ToSlash(path)
+	switch {
+	case strings.Contains(slash, "/esm/"):
+		return "esm", nil
+	case strings.Contains(slash, "/cjs/"):
+		return "cjs", nil
+	}
+	data, err := os.ReadFile(path) // #nosec G304 — reading a package we resolved ourselves
+	if err != nil {
+		return "", err
+	}
+	if bytes.Contains(data, []byte("module.exports")) || bytes.Contains(data, []byte("exports.")) {
+		return "cjs", nil
+	}
+	return "esm", nil
+}
+
+// locateReactDOMPackage mirrors locateRSCPackage for the react-dom package.
+func locateReactDOMPackage(standaloneDir string) (string, error) {
+	current := standaloneDir
+	for range 5 {
+		candidate := filepath.Join(current, "node_modules", "react-dom")
+		if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
+			return candidate, nil
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
+	return "", ErrReactDOMPackageNotFound
 }
 
 // copyFile byte-copies src to dst and returns the number of bytes written.
