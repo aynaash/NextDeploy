@@ -1,10 +1,7 @@
 package packaging
 
 import (
-	"archive/zip"
-	_ "embed"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,43 +10,26 @@ import (
 	"github.com/aynaash/nextdeploy/shared/nextcore"
 )
 
-// bridgeJS is the Node.js shim that the Lambda runtime executes. It:
-//   - Fetches secrets from the AWS Parameters & Secrets Lambda Extension
-//     (localhost:2773) and merges them into process.env before spawning
-//     `node server.js`.
-//   - Forwards the Lambda proxy event to the Next.js server over HTTP.
-//
-// Source of truth is `runtime/bridge.js` — edit there, not here.
-//
-//go:embed runtime/bridge.js
-var bridgeJS string
-
 type PackageResult struct {
-	LambdaZipPath string
-	LambdaZipSize int64
-	// StandaloneTarPath is the provider-agnostic artifact: a gzipped tar of
-	// the raw Next.js standalone directory, with no target-specific shims
-	// baked in. AWS ignores this (it deploys LambdaZipPath directly);
-	// Cloudflare extracts it before running its adapter. Empty if tar
-	// creation failed (a warning is logged but packaging does not fail —
-	// providers that need it will surface a clear error themselves).
+	// StandaloneTarPath is the deployable artifact: a gzipped tar of the raw
+	// Next.js standalone directory, with no target-specific shims baked in.
+	// Cloudflare extracts it before running its adapter. Empty if tar creation
+	// failed (a warning is logged but packaging does not fail — providers that
+	// need it will surface a clear error themselves).
 	StandaloneTarPath string
 	StandaloneTarSize int64
-	S3Assets          []S3Asset
+	StaticAssets      []StaticAsset
 	SizeWarning       string
 }
 
-type S3Asset struct {
+// StaticAsset is one file destined for the CDN bucket (R2), keyed by the path
+// it is served under.
+type StaticAsset struct {
 	LocalPath    string
-	S3Key        string
+	Key          string
 	CacheControl string
 	ContentType  string
 }
-
-const (
-	lambdaZipWarnThresholdBytes = 200 * 1024 * 1024
-	lambdaZipHardLimitBytes     = 250 * 1024 * 1024
-)
 
 type Packager struct {
 	projectRoot   string
@@ -88,33 +68,17 @@ func (p *Packager) Cleanup() { os.RemoveAll(p.tmpDir) }
 func (p *Packager) Package() (*PackageResult, error) {
 	result := &PackageResult{}
 
-	s3Assets, err := p.collectS3Assets()
+	assets, err := p.collectStaticAssets()
 	if err != nil {
 		return nil, err
 	}
-	result.S3Assets = s3Assets
-
-	zipPath := filepath.Join(p.tmpDir, "lambda.zip")
-	size, err := p.buildLambdaZip(zipPath)
-	if err != nil {
-		return nil, err
-	}
-
-	result.LambdaZipPath = zipPath
-	result.LambdaZipSize = size
-
-	if size > lambdaZipHardLimitBytes {
-		return nil, fmt.Errorf("lambda zip is %.1fMB — exceeds Lambda's 250MB unzipped limit", float64(size)/(1024*1024))
-	}
-	if size > lambdaZipWarnThresholdBytes {
-		result.SizeWarning = fmt.Sprintf("lambda zip is %.1fMB — approaching Lambda's 250MB limit", float64(size)/(1024*1024))
-	}
+	result.StaticAssets = assets
 
 	tarPath := filepath.Join(p.tmpDir, "app.tar.gz")
 	if err := shared.CreateTarGz(p.standaloneDir, tarPath); err != nil {
-		// Non-fatal: AWS doesn't need it. Leave the fields zero-valued so
-		// Cloudflare's DeployCompute falls back to reading standalone
-		// from disk and can decide how loudly to complain.
+		// Non-fatal: leave the fields zero-valued so Cloudflare's DeployCompute
+		// falls back to reading standalone from disk and can decide how loudly
+		// to complain.
 		fmt.Fprintf(os.Stderr, "warning: could not tar standalone dir for portable artifact: %v\n", err)
 	} else if info, err := os.Stat(tarPath); err == nil {
 		result.StandaloneTarPath = tarPath
@@ -124,8 +88,8 @@ func (p *Packager) Package() (*PackageResult, error) {
 	return result, nil
 }
 
-func (p *Packager) collectS3Assets() ([]S3Asset, error) {
-	var assets []S3Asset
+func (p *Packager) collectStaticAssets() ([]StaticAsset, error) {
+	var assets []StaticAsset
 
 	// 1. public/
 	if _, err := os.Stat(p.publicDir); err == nil {
@@ -134,9 +98,9 @@ func (p *Packager) collectS3Assets() ([]S3Asset, error) {
 				return err
 			}
 			rel, _ := filepath.Rel(p.publicDir, path)
-			assets = append(assets, S3Asset{
+			assets = append(assets, StaticAsset{
 				LocalPath:    path,
-				S3Key:        rel,
+				Key:          rel,
 				CacheControl: cacheControlForPublicFile(rel),
 				ContentType:  mimeForExt(filepath.Ext(path)),
 			})
@@ -152,9 +116,9 @@ func (p *Packager) collectS3Assets() ([]S3Asset, error) {
 				return err
 			}
 			rel, _ := filepath.Rel(p.buildDir, path)
-			assets = append(assets, S3Asset{
+			assets = append(assets, StaticAsset{
 				LocalPath:    path,
-				S3Key:        filepath.Join("_next", rel),
+				Key:          filepath.Join("_next", rel),
 				CacheControl: "public, max-age=31536000, immutable",
 				ContentType:  mimeForExt(filepath.Ext(path)),
 			})
@@ -198,9 +162,9 @@ func (p *Packager) collectS3Assets() ([]S3Asset, error) {
 	// 4. ISR Tag Map (if enabled/built)
 	tagMapPath := filepath.Join(p.projectRoot, ".nextdeploy", "assets", "isr-tag-map.json")
 	if _, err := os.Stat(tagMapPath); err == nil {
-		assets = append(assets, S3Asset{
+		assets = append(assets, StaticAsset{
 			LocalPath:    tagMapPath,
-			S3Key:        "isr-tag-map.json",
+			Key:          "isr-tag-map.json",
 			CacheControl: "public, max-age=0, must-revalidate",
 			ContentType:  "application/json",
 		})
@@ -209,16 +173,16 @@ func (p *Packager) collectS3Assets() ([]S3Asset, error) {
 	return assets, nil
 }
 
-func (p *Packager) addPrerenderedAsset(assets *[]S3Asset, routePath string) {
+func (p *Packager) addPrerenderedAsset(assets *[]StaticAsset, routePath string) {
 	// Root route "/" maps to index.html — both for the R2 key and for
 	// locating the on-disk file. filepath.Join(prefix, "/") collapses to
 	// just `prefix`, which would make us look for `.next/server/app.html`
 	// (doesn't exist) instead of `.next/server/app/index.html`. We
 	// normalize routePath to "/index" for the FS probe but keep the R2
 	// key at "index.html" — the runtime's lookup pulls it by R2 key.
-	s3KeyBase := strings.TrimPrefix(routePath, "/")
-	if s3KeyBase == "" {
-		s3KeyBase = "index"
+	keyBase := strings.TrimPrefix(routePath, "/")
+	if keyBase == "" {
+		keyBase = "index"
 	}
 	fsRoutePath := routePath
 	if fsRoutePath == "/" || fsRoutePath == "" {
@@ -240,21 +204,21 @@ func (p *Packager) addPrerenderedAsset(assets *[]S3Asset, routePath string) {
 
 		htmlPath := serverPath + ".html"
 		if _, err := os.Stat(htmlPath); err == nil {
-			*assets = append(*assets, S3Asset{
+			*assets = append(*assets, StaticAsset{
 				LocalPath:    htmlPath,
-				S3Key:        s3KeyBase + ".html",
+				Key:          keyBase + ".html",
 				CacheControl: "public, max-age=0, must-revalidate",
 				ContentType:  "text/html; charset=utf-8",
 			})
 			htmlAdded = true
-			pkgLog.Debug("Prerendered HTML queued: %s → %s", routePath, s3KeyBase+".html")
+			pkgLog.Debug("Prerendered HTML queued: %s → %s", routePath, keyBase+".html")
 		}
 
 		rscPath := serverPath + ".rsc"
 		if _, err := os.Stat(rscPath); err == nil {
-			*assets = append(*assets, S3Asset{
+			*assets = append(*assets, StaticAsset{
 				LocalPath:    rscPath,
-				S3Key:        s3KeyBase + ".rsc",
+				Key:          keyBase + ".rsc",
 				CacheControl: "public, max-age=0, must-revalidate",
 				ContentType:  "text/x-component",
 			})
@@ -264,87 +228,4 @@ func (p *Packager) addPrerenderedAsset(assets *[]S3Asset, routePath string) {
 		pkgLog.Warn("Prerendered HTML missing for route %s — looked under %s and %s. The runtime will fall through to the live dispatcher.",
 			routePath, prefixes[0], prefixes[1])
 	}
-}
-
-func (p *Packager) buildLambdaZip(zipPath string) (int64, error) {
-	f, err := os.Create(zipPath)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-
-	w := zip.NewWriter(f)
-	defer w.Close()
-
-	_ = filepath.Walk(p.standaloneDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return err
-		}
-
-		rel, _ := filepath.Rel(p.standaloneDir, path)
-		if shouldExcludeFromLambda(rel) {
-			return nil
-		}
-
-		return addToZip(w, path, rel)
-	})
-
-	_ = addBytesToZip(w, "bridge.js", []byte(bridgeJS))
-	_ = w.Close()
-
-	info, _ := f.Stat()
-	return info.Size(), nil
-}
-
-func shouldExcludeFromLambda(relPath string) bool {
-	if strings.HasPrefix(relPath, ".next/static/") {
-		return true
-	}
-	if strings.HasSuffix(relPath, ".html") && strings.HasPrefix(relPath, ".next/server/") {
-		return true
-	}
-	if strings.HasSuffix(relPath, ".rsc") && strings.HasPrefix(relPath, ".next/server/") {
-		return true
-	}
-	if strings.HasSuffix(relPath, ".js.map") {
-		return true
-	}
-	if strings.Contains(relPath, "/.next/cache/") {
-		return true
-	}
-	return false
-}
-
-func addToZip(w *zip.Writer, path, relPath string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	header, err := zip.FileInfoHeader(info)
-	if err != nil {
-		return err
-	}
-	header.Name = relPath
-	header.Method = zip.Deflate
-	writer, err := w.CreateHeader(header)
-	if err != nil {
-		return err
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	_, err = io.Copy(writer, file)
-	return err
-}
-
-func addBytesToZip(w *zip.Writer, name string, data []byte) error {
-	header := &zip.FileHeader{Name: name, Method: zip.Deflate}
-	writer, err := w.CreateHeader(header)
-	if err != nil {
-		return err
-	}
-	_, err = writer.Write(data)
-	return err
 }

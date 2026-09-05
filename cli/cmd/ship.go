@@ -38,7 +38,7 @@ var shipCmd = &cobra.Command{
 	Short:   "Build and deploy: validates, runs `next build`, and ships to the configured target",
 	Long: "Ships the deployment artifact to the target configured in nextdeploy.yml. " +
 		"Replaces the prior `nextdeploy build && nextdeploy ship` two-step — ship now " +
-		"runs the build flow itself (target-aware: Cloudflare forces --webpack, AWS / VPS " +
+		"runs the build flow itself (target-aware: Cloudflare forces --webpack, VPS " +
 		"use vanilla `next build`).",
 	Run: func(cmd *cobra.Command, args []string) {
 		log := shared.PackageLogger("ship", "🚀 SHIP")
@@ -277,7 +277,7 @@ func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow
 }
 
 func init() {
-	shipCmd.Flags().BoolVarP(&shipVerbose, "verbose", "v", false, "Print detailed deployment logs (S3 uploads, Lambda steps, CloudFront status)")
+	shipCmd.Flags().BoolVarP(&shipVerbose, "verbose", "v", false, "Print detailed deployment logs (R2 uploads, Worker upload, cache purge)")
 	shipCmd.Flags().BoolVar(&shipNoProvision, "no-provision", false, "Skip reconciling declared Cloudflare resources (KV/Hyperdrive/D1) before deploying")
 	shipCmd.Flags().BoolVar(&shipVerify, "verify", false, "Fail the deploy if the post-deploy smoke check does not pass (for CI)")
 	// Every cache needs a manual invalidation escape hatch for the moment the

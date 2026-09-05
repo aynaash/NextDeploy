@@ -1,6 +1,8 @@
 package nextcore
 
 import (
+	"fmt"
+
 	"github.com/aynaash/nextdeploy/shared/config"
 )
 
@@ -12,7 +14,30 @@ const (
 	OutputModeExport     OutputMode = "export"
 )
 
+// PayloadSchemaVersion is the wire version of NextCorePayload.
+//
+// This struct crosses a release boundary: the CLI writes it, it travels inside
+// the artifact tarball, and a SEPARATELY VERSIONED daemon unmarshals it. Go's
+// json decoder is forgiving — an unknown field is dropped and a missing one
+// becomes a zero value — so without an explicit version, CLI/daemon skew fails
+// as garbage (an empty HealthPath, nil Resources) instead of as an error.
+//
+// Bump this whenever a field's MEANING changes or a field the daemon relies on
+// is removed or renamed. Adding an optional field the daemon can ignore does
+// not need a bump.
+//
+// Compatibility is enforced in ValidateSchema, which the daemon calls before
+// trusting anything else in the payload.
+const PayloadSchemaVersion = 1
+
+// MinSupportedSchemaVersion is the oldest payload this build will accept.
+const MinSupportedSchemaVersion = 1
+
 type NextCorePayload struct {
+	// SchemaVersion is PayloadSchemaVersion at the time the CLI wrote this
+	// payload. Zero means it was written before versioning existed.
+	SchemaVersion int `json:"schema_version"`
+
 	AppName           string            `json:"app_name"`
 	NextBuildMetadata NextBuildMetadata `json:"nextbuildmetadata"`
 	CDNEnabled        bool              `json:"cdn_enabled"`
@@ -47,6 +72,32 @@ type NextCorePayload struct {
 	// release. Empty means "/". A release that binds its port but returns >=500
 	// on this path fails activation, so the old release stays live.
 	HealthPath string `json:"health_path,omitempty"`
+}
+
+// ValidateSchema reports whether this payload is one the running binary can
+// safely interpret. It is deliberately loud: a skewed CLI/daemon pair must fail
+// at the point of unmarshal, with the fix named, rather than deploy a release
+// built from zero values.
+func (p *NextCorePayload) ValidateSchema() error {
+	switch {
+	case p.SchemaVersion == 0:
+		return fmt.Errorf(
+			"artifact metadata carries no schema_version — it was built by a nextdeploy CLI "+
+				"older than this daemon (daemon understands v%d-v%d). Rebuild with a current "+
+				"CLI, or downgrade the daemon to match",
+			MinSupportedSchemaVersion, PayloadSchemaVersion)
+	case p.SchemaVersion > PayloadSchemaVersion:
+		return fmt.Errorf(
+			"artifact metadata is schema v%d but this build understands up to v%d — "+
+				"the CLI is newer than the daemon. Run `nextdeploy upgrade-daemon`",
+			p.SchemaVersion, PayloadSchemaVersion)
+	case p.SchemaVersion < MinSupportedSchemaVersion:
+		return fmt.Errorf(
+			"artifact metadata is schema v%d but this build requires at least v%d — "+
+				"rebuild the app with a current CLI",
+			p.SchemaVersion, MinSupportedSchemaVersion)
+	}
+	return nil
 }
 
 type BuildLock struct {

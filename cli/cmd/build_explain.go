@@ -53,7 +53,7 @@ var buildExplanation = explanation{
 		{
 			Num:       6,
 			Title:     "Post-build audit",
-			Narrative: "Serverless only: measures final bundle size and node_modules overhead. Warns at 200MB; hard warning at 250MB (Lambda's unzipped limit).",
+			Narrative: "Serverless only: measures final bundle size and node_modules overhead, and names the largest packages.",
 			Ref:       "cli/cmd/build.go:106",
 			Function:  "packaging.AuditStandaloneSize",
 			Output:    "log summary + size warnings",

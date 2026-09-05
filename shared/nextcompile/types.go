@@ -1,5 +1,5 @@
 // Package nextcompile transforms a Next.js standalone build into a
-// runtime-native Worker/Lambda bundle by analyzing the compiled output
+// runtime-native Worker bundle by analyzing the compiled output
 // and emitting a dispatch table + manifest that a minimal JS runtime
 // consumes at request time.
 //
@@ -45,7 +45,6 @@ type Target string
 
 const (
 	TargetCloudflareWorker Target = "cloudflare-worker"
-	TargetAWSLambda        Target = "aws-lambda"
 	TargetVPS              Target = "vps"
 )
 

@@ -1,0 +1,136 @@
+name: VPS Smoke
+
+# The VPS target is frozen (see docs/vps.md): bugs only, no new features. That
+# makes it useful exactly as long as it still works — an unmaintained fallback
+# that has quietly rotted is worse than no fallback, because you find out on the
+# day you need it.
+#
+# This job builds a real Next.js fixture through the VPS path and asserts the
+# artifact the daemon will be handed. No server, no SSH: the aim is to catch
+# upstream drift and our own accidental breakage, not to test a live deploy.
+
+on:
+  schedule:
+    - cron: "0 3 * * 1" # Mondays 03:00 UTC, after the Cloudflare canary
+  workflow_dispatch:
+  push:
+    paths:
+      - "daemon/**"
+      - "shared/nextcore/**"
+      - "cli/internal/buildflow/**"
+      - "cli/cmd/prepare*.go"
+      - "cli/cmd/ship.go"
+      - ".github/workflows/vps-smoke.yml"
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.25.x"
+  GOTOOLCHAIN: local
+
+jobs:
+  smoke:
+    name: VPS artifact build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The daemon is half the target and ships as its own binary. If it stops
+      # compiling for the platform it actually runs on, the fallback is gone.
+      - name: Build daemon for linux/amd64
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -o "$GITHUB_WORKSPACE/bin/nextdeployd" ./daemon/cmd/nextdeployd
+
+      - name: Build NextDeploy CLI
+        run: go build -o "$GITHUB_WORKSPACE/bin/nextdeploy" ./cli
+
+      - name: Daemon + payload tests
+        run: go test ./daemon/... ./shared/nextcore/...
+
+      - name: Scaffold Next.js fixture
+        run: |
+          npx --yes create-next-app@latest fixture \
+            --ts --app --eslint --src-dir --no-tailwind --no-turbopack \
+            --import-alias "@/*" --use-npm
+
+      - name: Configure fixture for the VPS target
+        working-directory: fixture
+        run: |
+          cat > next.config.mjs <<'EOF'
+          const nextConfig = { output: "standalone" };
+          export default nextConfig;
+          EOF
+          rm -f next.config.ts
+          cat > nextdeploy.yml <<'EOF'
+          target_type: vps
+          app:
+            name: vps-smoke
+            environment: production
+            domain: smoke.example.com
+            port: 3000
+          servers:
+            - name: web-1
+              host: 192.0.2.10
+              username: deploy
+              key_path: ~/.ssh/id_ed25519
+          EOF
+
+      # Metadata generation reads git state and refuses a repo it can't read.
+      - name: Seed git
+        working-directory: fixture
+        run: |
+          git init -q
+          git config user.email vps-smoke@nextdeploy.local
+          git config user.name "NextDeploy VPS Smoke"
+          git add -A
+          git commit -qm "vps smoke fixture"
+
+      - name: NextDeploy build (VPS path)
+        working-directory: fixture
+        run: "$GITHUB_WORKSPACE/bin/nextdeploy build"
+
+      # The daemon trusts the artifact's own metadata over the sender's claim,
+      # so metadata.json is the contract between the two binaries. Assert the
+      # fields the daemon reads before it activates a release.
+      - name: Assert the artifact the daemon will receive
+        working-directory: fixture
+        run: |
+          set -euo pipefail
+          meta=.nextdeploy/metadata.json
+          test -f "$meta" || { echo "::error::$meta not produced"; exit 1; }
+
+          version=$(node -p "require('./$meta').schema_version ?? 0")
+          if [ "$version" -lt 1 ]; then
+            echo "::error::metadata.json carries no schema_version — the daemon will reject this artifact"
+            exit 1
+          fi
+          echo "schema_version: $version"
+
+          node -e '
+            const m = require("./.nextdeploy/metadata.json");
+            const missing = ["app_name", "output_mode", "dist_dir"].filter((k) => !m[k]);
+            if (missing.length) {
+              console.error("::error::metadata.json missing: " + missing.join(", "));
+              process.exit(1);
+            }
+            if (m.output_mode !== "standalone") {
+              console.error("::error::output_mode is " + m.output_mode + ", want standalone");
+              process.exit(1);
+            }
+          '
+          test -d .next/standalone || { echo "::error::no standalone tree"; exit 1; }
+          echo "VPS artifact looks deployable."

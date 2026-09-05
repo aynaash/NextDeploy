@@ -30,7 +30,7 @@ type explanation struct {
 
 type subPipeline struct {
 	Title  string
-	Entry  string 
+	Entry  string
 	Phases []phase
 }
 
@@ -58,7 +58,6 @@ func registerExplain(parent *cobra.Command, e *explanation) {
 		"Show file:line references + data flow + inner sub-pipeline")
 	parent.AddCommand(explainCmd)
 }
-
 
 func renderExplainNarrativeMode(b *strings.Builder, e *explanation) {
 	fmt.Fprintf(b, "nextdeploy %s — end-to-end pipeline\n", e.Name)

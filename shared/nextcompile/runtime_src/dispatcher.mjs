@@ -10,7 +10,8 @@
 //   3. Static assets (/_next/static/*, /public/*) — served from R2
 //   4. Static route table — exact path match
 //   5. SSG routes — pre-rendered HTML from R2
-//   6. ISR routes — HTML from R2 (revalidation arrives with cache.mjs)
+//   6. ISR routes — HTML from R2, skipped when cache.mjs marks the path
+//      stale (revalidatePath/revalidateTag; no time-based expiry)
 //   7. Dynamic table — regex-matched routes, ordered by specificity
 //   8. Root-served public files (/install.sh, /robots.txt, …) from R2
 //   9. 404

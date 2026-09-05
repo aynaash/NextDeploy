@@ -1,17 +1,16 @@
 package cmd
 
 // shipExplanation covers the end-to-end flow when `nextdeploy ship` lands
-// on a Cloudflare serverless target. The AWS path shares steps 1–4 and
+// on a Cloudflare serverless target. The VPS path shares steps 1–4 and
 // diverges at DeployCompute — the explanation calls that out inline
 // rather than branching the phase list.
 var shipExplanation = explanation{
 	Name:     "ship",
 	Synopsis: "Deploy the build to the configured serverless or VPS target.",
 	Summary: "`ship` deploys your Next.js build to the target declared in " +
-		"nextdeploy.yml (serverless=AWS or Cloudflare, or VPS). The " +
+		"nextdeploy.yml (serverless=Cloudflare, or VPS). The " +
 		"Cloudflare path invokes the nextcompile pipeline to produce a " +
-		"single Worker bundle; the AWS path produces a Lambda zip + " +
-		"CloudFront distribution. `ship` is aliased to `deploy`.",
+		"single Worker bundle. `ship` is aliased to `deploy`.",
 	Phases: []phase{
 		{
 			Num:       1,
@@ -42,7 +41,7 @@ var shipExplanation = explanation{
 		{
 			Num:       4,
 			Title:     "Resolve effective target",
-			Narrative: "Picks between 'serverless' (AWS or Cloudflare) and 'vps' (Caddy + SSH). Routing is driven by cfg + metadata's detected target type.",
+			Narrative: "Picks between 'serverless' (Cloudflare) and 'vps' (Caddy + SSH). Routing is driven by cfg + metadata's detected target type.",
 			Ref:       "cli/cmd/ship.go:52",
 			Function:  "cfg.ResolveTargetType",
 			Output:    `"serverless" | "vps"`,
@@ -55,21 +54,20 @@ var shipExplanation = explanation{
 			Function:  "CloudflareProvider.Initialize",
 			Input:     "*config.NextDeployConfig",
 			Output:    "p.cf wired, p.r2s3 wired, token verified",
-			Notes:     []string{"AWS path: AWSProvider.Initialize (resolves AWS creds + STS caller)"},
 		},
 		{
 			Num:       6,
 			Title:     "Package build artifact",
-			Narrative: "Splits the Next.js standalone build into two pieces: a compute payload (Lambda zip or Worker input tree) and a static-asset list bound for the CDN/R2.",
+			Narrative: "Splits the Next.js standalone build into two pieces: the Worker input tree and a static-asset list bound for R2.",
 			Ref:       "cli/internal/serverless/deploy.go:55",
 			Function:  "packaging.NewPackager().Package",
 			Input:     "project dir + nextcore payload",
-			Output:    "*packaging.PackageResult (LambdaZipSize, S3Assets, StandaloneTarPath)",
+			Output:    "*packaging.PackageResult (StaticAssets, StandaloneTarPath)",
 		},
 		{
 			Num:       7,
 			Title:     "Push secrets (order depends on provider)",
-			Narrative: "AWS: secrets land in Secrets Manager BEFORE DeployCompute so Lambda can bake them into env. Cloudflare: secrets land AFTER the Worker exists because they attach to the Worker itself.",
+			Narrative: "Cloudflare: secrets land AFTER the Worker exists, because they attach to the Worker itself.",
 			Ref:       "cli/internal/serverless/deploy.go:80",
 			Function:  "loadLocalSecrets → UpdateSecrets",
 			Input:     ".env + secrets.files[] + .nextdeploy/.env",
@@ -83,7 +81,6 @@ var shipExplanation = explanation{
 			Function:  "CloudflareProvider.DeployStatic",
 			Input:     "*packaging.PackageResult",
 			Output:    "R2 bucket populated",
-			Notes:     []string{"AWS path: DeployStatic → S3 sync under app prefix"},
 		},
 		{
 			Num:       9,
@@ -95,13 +92,12 @@ var shipExplanation = explanation{
 			Output:    "worker.mjs (single ESM bundle)",
 			Notes: []string{
 				"See --code for the 14 nextcompile sub-phases.",
-				"AWS path: Lambda zip upload + layer attach, no esbuild.",
 			},
 		},
 		{
 			Num:       10,
-			Title:     "Upload compute (Cloudflare Worker or Lambda)",
-			Narrative: "Cloudflare: posts worker.mjs via Workers.Scripts.Update with bindings metadata (R2, KV, D1, Hyperdrive, Queues, Vectorize, AI Gateway). AWS: updates Lambda function code + attaches the Secrets Manager layer.",
+			Title:     "Upload compute (Cloudflare Worker)",
+			Narrative: "Posts worker.mjs via Workers.Scripts.Update with bindings metadata (R2, KV, D1, Hyperdrive, Queues, Vectorize, AI Gateway).",
 			Ref:       "cli/internal/serverless/cloudflare.go:318",
 			Function:  "CloudflareProvider.DeployCompute",
 			Input:     "worker.mjs + bindings config",
@@ -118,7 +114,7 @@ var shipExplanation = explanation{
 		{
 			Num:       12,
 			Title:     "Invalidate CDN cache",
-			Narrative: "Cloudflare: purges the zone cache so the new deploy is served immediately. AWS: DeployCompute already triggered a CloudFront invalidation so this hop is skipped.",
+			Narrative: "Purges the zone cache so the new deploy is served immediately.",
 			Ref:       "cli/internal/serverless/cloudflare.go:538",
 			Function:  "CloudflareProvider.InvalidateCache",
 			Output:    "zone purged",

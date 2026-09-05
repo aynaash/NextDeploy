@@ -15,7 +15,7 @@ var planExplanation = explanation{
 		{
 			Num:       1,
 			Title:     "Validate config target",
-			Narrative: "Plan is Cloudflare-only today. Missing cloudflare block → fatal. AWS deploys use the cloud-native plan tooling (terraform/cdk) instead.",
+			Narrative: "Plan is Cloudflare-only. A missing cloudflare block is fatal.",
 			Ref:       planGoFile + ":44",
 			Output:    "fatal if provider != cloudflare",
 		},

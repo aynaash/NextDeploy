@@ -5,7 +5,7 @@ var inspectExplanation = explanation{
 	Synopsis: "Inspect the deployment bundle size and dependency offenders.",
 	Summary: "`inspect` runs the same size-audit the build step uses as a " +
 		"post-build warning, but reports it in full detail. Useful when " +
-		"you hit the 250 MB Lambda unzipped limit and need to know which " +
+		"the Worker bundle grows unexpectedly and you need to know which " +
 		"node_modules packages are the culprits.",
 	Phases: []phase{
 		{

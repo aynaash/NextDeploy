@@ -698,7 +698,7 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 }
 
 // shortSha returns a 7-char prefix of a git commit hash, or "nogit" when the
-// commit is unavailable. Kept identical in spirit to the AWS-side helper so
+// commit is unavailable. Kept identical in spirit to the serverless-side helper so
 // release identifiers are consistent across deploy targets.
 func shortSha(full string) string {
 	if len(full) >= 7 {
@@ -771,6 +771,12 @@ func readMetadata(unpackDir string) (*nextcore.NextCorePayload, error) {
 		var meta nextcore.NextCorePayload
 		if err := json.Unmarshal(data, &meta); err != nil {
 			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+		// Version-check before anything reads a field. A skewed CLI/daemon pair
+		// otherwise deploys a release built from zero values — no health path,
+		// no cgroup limits — and reports success.
+		if err := meta.ValidateSchema(); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 		return &meta, nil
 	}

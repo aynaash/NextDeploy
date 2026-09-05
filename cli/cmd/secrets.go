@@ -119,7 +119,7 @@ func runSecretsPrune(apply bool) {
 		os.Exit(1)
 	}
 
-	providerName := "aws"
+	providerName := "cloudflare"
 	if cfg.Serverless != nil && cfg.Serverless.Provider != "" {
 		providerName = strings.ToLower(cfg.Serverless.Provider)
 	}
@@ -230,16 +230,12 @@ func runSecretAction(action string, args []string) {
 }
 
 func runServerlessSecretAction(action string, args []string, appName string, cfg *config.NextDeployConfig, log *shared.Logger) {
-	providerName := "aws"
+	providerName := "cloudflare"
 	if cfg.Serverless != nil && cfg.Serverless.Provider != "" {
 		providerName = strings.ToLower(cfg.Serverless.Provider)
 	}
 
-	storeName := "AWS Secrets Manager"
-	switch providerName {
-	case "cloudflare":
-		storeName = "Cloudflare Worker secrets"
-	}
+	const storeName = "Cloudflare Worker secrets"
 	log.Info("Using Cloud Secrets (%s)", storeName)
 
 	p, err := serverless.New(providerName, false)

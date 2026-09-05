@@ -93,8 +93,6 @@ var destroyCmd = &cobra.Command{
 
 			var p serverless.Provider
 			switch cfg.Serverless.Provider {
-			case "aws":
-				p = serverless.NewAWSProvider(false)
 			case "cloudflare":
 				p = serverless.NewCloudflareProvider()
 			default:

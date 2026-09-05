@@ -18,7 +18,6 @@ func TestFlagsForTarget(t *testing.T) {
 		want []string
 	}{
 		{"cloudflare → webpack", TargetCloudflareWorker, []string{"--webpack"}},
-		{"aws → none", TargetAWSLambda, nil},
 		{"vps → none", TargetVPS, nil},
 		{"generic → none", TargetGeneric, nil},
 		{"unknown → none", Target("bogus"), nil},

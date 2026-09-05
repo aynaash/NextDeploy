@@ -73,8 +73,6 @@ func TestNormalizeTarget(t *testing.T) {
 	cases := map[string]string{
 		"cloudflare": "cloudflare",
 		"CF":         "cloudflare",
-		"aws":        "aws",
-		"lambda":     "aws",
 		"vps":        "vps",
 		"weird":      "other",
 		"":           "other",
@@ -179,7 +177,7 @@ func TestSign_VerifiableWithPublicKey(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("NEXTDEPLOY_TELEMETRY_URL", srv.URL)
 
-	RecordShipSuccess("aws", "v0.12.2")
+	RecordShipSuccess("cloudflare", "v0.12.2")
 
 	const prefix = "ed25519="
 	if !strings.HasPrefix(sigHeader, prefix) {

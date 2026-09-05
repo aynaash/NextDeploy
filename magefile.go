@@ -389,9 +389,20 @@ func SecurityScan() error {
 // Test is an alias for TestUnit.
 func Test() error { return TestUnit() }
 
+// TestRuntime runs the Worker runtime's JS tests (shared/nextcompile/runtime_src).
+// These cover the code that actually executes on workerd — the dispatcher, RSC
+// and SSR layers, Server Actions, metadata and middleware matching — so they are
+// part of the unit suite, not an optional extra. They replaced the Lambda
+// bridge.js tests when the AWS target was removed.
+func TestRuntime() error {
+	fmt.Println("Running Worker runtime tests...")
+	return sh.RunWithV(nil, "bash", "-c",
+		"cd shared/nextcompile/runtime_src && node --test *.test.mjs")
+}
+
 // TestUnit runs unit tests (skips integration build tag).
 func TestUnit() error {
-	mg.Deps(TestBridge)
+	mg.Deps(TestRuntime)
 	pkgs, err := testPkgs()
 	if err != nil {
 		return err
@@ -399,12 +410,6 @@ func TestUnit() error {
 	fmt.Println("Running unit tests...")
 	args := append([]string{"test", "-race"}, pkgs...)
 	return sh.RunV("go", args...)
-}
-
-// TestBridge runs the Node.js bridge.js runtime tests.
-func TestBridge() error {
-	fmt.Println("Running bridge.js tests...")
-	return sh.RunWithV(nil, "bash", "-c", "cd internal/packaging/runtime && node --test bridge.test.js")
 }
 
 // TestCover runs tests per-package to produce coverage.out (works around the
@@ -462,7 +467,7 @@ func ScaffoldTests() error {
 	return sh.RunV("bash", "scripts/scaffold-tests.sh")
 }
 
-// TestIntegration runs tests with the integration build tag (needs AWS creds).
+// TestIntegration runs tests with the integration build tag (needs live cloud creds).
 func TestIntegration() error {
 	pkgs, err := testPkgs()
 	if err != nil {
