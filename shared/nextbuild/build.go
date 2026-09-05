@@ -48,6 +48,12 @@ func Run(ctx context.Context, opts Opts) error {
 
 	log.Info("Running %s %v (cwd=%s)", filepath.Base(binPath), args, opts.ProjectDir)
 
+	// #nosec G204 -- binPath is not user input: resolveNextBinary only ever
+	// returns <projectDir>/node_modules/.bin/next after stat'ing it, and errors
+	// otherwise. args are built here from a fixed verb plus flagsForTarget's
+	// closed set; ExtraArgs comes from the caller's own flags, which is the
+	// same trust level as the command line that invoked us. No shell is
+	// involved — exec takes argv directly.
 	cmd := exec.CommandContext(ctx, binPath, args...)
 	cmd.Dir = opts.ProjectDir
 	cmd.Stdout = os.Stderr

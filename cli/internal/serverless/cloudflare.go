@@ -1433,6 +1433,9 @@ func (p *CloudflareProvider) Destroy(ctx context.Context, cfg *config.NextDeploy
 	return nil
 }
 
+// GetResourceMap summarizes what this deploy provisioned, for the post-deploy
+// summary and `nextdeploy status`. Cloudflare is region-less, so Region is
+// reported as "global".
 func (p *CloudflareProvider) GetResourceMap(ctx context.Context, cfg *config.NextDeployConfig) (ResourceMap, error) {
 	return ResourceMap{
 		AppName:        cfg.App.Name,
