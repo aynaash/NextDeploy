@@ -1305,6 +1305,7 @@ func (p *CloudflareProvider) InvalidateCache(ctx context.Context, cfg *config.Ne
 	p.log.Info("Cloudflare cache purged for zone %s", zoneID)
 	return nil
 }
+
 // Rollback reverts the Worker to a previous deployment version.
 // Cloudflare's deployment API does not surface git commit metadata, so
 // --to <commit> is unsupported and falls back to step-based rollback.
@@ -1432,8 +1433,8 @@ func (p *CloudflareProvider) Destroy(ctx context.Context, cfg *config.NextDeploy
 	return nil
 }
 
-func (p *CloudflareProvider) GetResourceMap(ctx context.Context, cfg *config.NextDeployConfig) (ServerlessResourceMap, error) {
-	return ServerlessResourceMap{
+func (p *CloudflareProvider) GetResourceMap(ctx context.Context, cfg *config.NextDeployConfig) (ResourceMap, error) {
+	return ResourceMap{
 		AppName:        cfg.App.Name,
 		Environment:    cfg.App.Environment,
 		Region:         "global",

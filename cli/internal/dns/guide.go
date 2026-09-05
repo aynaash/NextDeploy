@@ -40,7 +40,7 @@ func GenerateVPSGuide(domain string, serverIP string) error {
 
 	writeProviderGuidance(f, domain)
 	writePitfallsSection(f, domain)
-	writeVerificationSection(f)
+	writeVerificationSection(f, domain)
 
 	// VPS-specific final steps
 	fmt.Fprintf(f, "## 🚀 Final Steps\n\n")
@@ -158,24 +158,23 @@ func writePitfallsSection(f *os.File, domain string) {
 	fmt.Fprintf(f, "\n")
 }
 
-func writeVerificationSection(f *os.File) {
-	fmt.Fprintf(f, "## 🔍 How to Verify Records\n\n")
+func writeVerificationSection(f *os.File, domain string) {
+	w := func(format string, a ...any) { _, _ = fmt.Fprintf(f, format, a...) }
 
-	fmt.Fprintf(f, "After adding records, verify they're working:\n\n")
-
-	fmt.Fprintf(f, "```bash\n")
-	fmt.Fprintf(f, "# Check root domain\n")
-	fmt.Fprintf(f, "dig nextdeploy.org CNAME +short\n\n")
-	fmt.Fprintf(f, "# Check SSL validation records\n")
-	fmt.Fprintf(f, "dig _5f2eb7...nextdeploy.org CNAME +short\n")
-	fmt.Fprintf(f, "dig @8.8.8.8 _hash.www.nextdeploy.org CNAME +short  # Use Google DNS\n\n")
-	fmt.Fprintf(f, "# Watch for propagation\n")
-	fmt.Fprintf(f, "watch -n 60 'dig @8.8.8.8 _hash.www.nextdeploy.org CNAME +short'\n")
-	fmt.Fprintf(f, "```\n\n")
-
-	fmt.Fprintf(f, "**Expected output**: You should see your server's IP or hostname\n\n")
+	w("## 🔍 How to Verify Records\n\n")
+	w("After adding the records, check that DNS actually resolves to your server:\n\n")
+	w("```bash\n")
+	w("# Root domain should return your server's IP\n")
+	w("dig %s A +short\n\n", domain)
+	w("# www should follow the CNAME back to the root\n")
+	w("dig www.%s CNAME +short\n\n", domain)
+	w("# Query a public resolver to check propagation beyond your ISP\n")
+	w("dig @8.8.8.8 %s A +short\n\n", domain)
+	w("# Watch until it changes\n")
+	w("watch -n 60 'dig @8.8.8.8 %s A +short'\n", domain)
+	w("```\n\n")
+	w("**Expected output**: your server's IP address. HTTPS is issued by Caddy on\n")
+	w("the first request once the records resolve — there is nothing to add by hand.\n\n")
 }
-
-// Helper function to determine record purpose.
 
 // GenerateQuickReference generates a quick reference table for all records.

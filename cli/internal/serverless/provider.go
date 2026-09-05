@@ -9,9 +9,9 @@ import (
 	"github.com/aynaash/nextdeploy/shared/nextcore"
 )
 
-// ServerlessResourceMap summarizes what a deploy provisioned, for the
+// ResourceMap summarizes what a deploy provisioned, for the
 // post-deploy summary and `nextdeploy status`.
-type ServerlessResourceMap struct {
+type ResourceMap struct {
 	AppName        string
 	Environment    string
 	Region         string
@@ -70,5 +70,5 @@ type Provider interface {
 	Destroy(ctx context.Context, cfg *config.NextDeployConfig) error
 
 	// GetResourceMap returns a summary of all provisioned cloud resources.
-	GetResourceMap(ctx context.Context, cfg *config.NextDeployConfig) (ServerlessResourceMap, error)
+	GetResourceMap(ctx context.Context, cfg *config.NextDeployConfig) (ResourceMap, error)
 }
