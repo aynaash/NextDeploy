@@ -51,9 +51,9 @@ backup:
   frequency: daily # Options: hourly | daily | weekly
   retention_days: 7 # Keep backups for 7 days
   storage:
-    provider: s3 # Use S3-compatible storage (AWS S3, MinIO, Wasabi, etc.)
+    provider: s3 # Use S3-compatible storage (R2, MinIO, Wasabi, etc.)
     bucket: nextdeploy-backups # S3 bucket name
-    region: us-east-1 # AWS region
+    region: auto # Storage region
 
 # -----
 # WEBHOOKS AFTER DEPLOYMENT
@@ -67,7 +67,7 @@ webhook:
 
 const vpsTemplate = `
 # -----
-# TARGET TYPE — choose between "vps" (traditional server) or "serverless" (AWS Lambda + S3 + CloudFront)
+# TARGET TYPE — choose between "vps" (traditional server) or "serverless" (Cloudflare Workers + R2)
 # -----
 target_type: vps
 
@@ -103,64 +103,9 @@ servers:
     # password: "" # Optional: SSH password (key_path takes precedence)
 `
 
-const serverlessTemplate = `
-# -----
-# TARGET TYPE — choose between "vps" (traditional server) or "serverless" (AWS Lambda + S3 + CloudFront)
-# -----
-target_type: serverless
-
-# -----
-# APP METADATA
-# -----
-app:
-  # name: the app IDENTIFIER — a slug, NOT a domain.
-  #   allowed  : lowercase letters, digits, hyphens  (^[a-z0-9-]+$), 3-63 chars
-  #   forbidden: dots, uppercase, spaces, underscores
-  #   Your DOMAIN goes in app.domain below — do not put it here.
-  #   e.g. name: ressencesystems  (domain: ressencesystems.com)
-  name: example-app # [REQUIRED] Unique app name used for identification
-  environment: production # [REQUIRED] production | staging | development
-  # domain can be a bare hostname, or a block recording the registrar and how
-  # DNS is managed (drives 'nextdeploy ship' DNS guidance):
-  #   domain:
-  #     name: app.example.com
-  #     provider: namecheap   # namecheap | cloudflare | other
-  #     dns: manual           # auto (provider API) | manual (print records)
-  #     zone: example.com
-  domain: app.example.com # Public domain for your app
-  port: 3000 # [REQUIRED] Internal port your app listens on
-
-# -----
-# CLOUD PROVIDER — RECOMMENDED: USE LOCAL AWS PROFILE
-# -----
-CloudProvider:
-  name: aws
-  region: us-east-1
-  # access_key: "YOUR_ACCESS_KEY" # Optional: overridden by profile if set
-  # secret_key: "YOUR_SECRET_KEY" # Optional: overridden by profile if set
-  profile: "default"            # Recommended: uses credentials from aws configure
-
-# -----
-# SERVERLESS CONFIGURATION
-# -----
-serverless:
-  provider: aws
-  region: us-east-1
-  profile: "default"           # AWS CLI profile name
-  isrRevalidation: true        # Enable ISR cache listener Lambda via SQS
-  imageOptimization: true      # Enable on-the-fly Image Resization Lambda via CloudFront
-  warmer: true                 # Keep the Lambda warm
-  cloudfront_id: "" # [OPTIONAL] If provided, NextDeploy will trigger an invalidation after deploy
-  # iam_role: "arn:aws:iam::ACCOUNT_ID:role/nextdeploy-serverless-role" # [OPTIONAL] Created automatically if not provided
-  # handler: "server.handler" # [OPTIONAL] Lambda handler (defaults to server.handler)
-  # runtime: "nodejs20.x"    # [OPTIONAL] Lambda runtime (defaults to nodejs20.x)
-  # memory_size: 1024        # [OPTIONAL] Memory in MB (defaults to 1024)
-  # timeout: 30              # [OPTIONAL] Timeout in seconds (defaults to 30)
-`
-
 const cloudflareTemplate = `
 # -----
-# TARGET TYPE — "serverless" covers both AWS (Lambda + CloudFront) and Cloudflare (Workers + R2)
+# TARGET TYPE — "serverless" deploys to Cloudflare (Workers + R2)
 # -----
 target_type: serverless
 
@@ -221,9 +166,7 @@ serverless:
 
 func GetSampleConfigTemplate(targetType string) string {
 	switch targetType {
-	case "serverless":
-		return commonHeader + serverlessTemplate + commonFooter
-	case "cloudflare":
+	case "serverless", "cloudflare":
 		return commonHeader + cloudflareTemplate + commonFooter
 	default:
 		return commonHeader + vpsTemplate + commonFooter

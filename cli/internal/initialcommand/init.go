@@ -50,7 +50,7 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 		Message: "Where would you like to deploy your Next.js application?",
 		Options: []string{
 			"VPS (Virtual Private Server - SSH)",
-			"Serverless (AWS CloudFront & Lambda)",
+			"Serverless (Cloudflare Workers & R2)",
 			"Serverless (Cloudflare Workers + R2)",
 		},
 	}

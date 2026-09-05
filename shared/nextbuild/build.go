@@ -14,9 +14,8 @@ type Target string
 
 const (
 	TargetCloudflareWorker Target = "cloudflare-worker"
-	TargetAWSLambda Target = "aws-lambda"
-	TargetVPS Target = "vps"
-	TargetGeneric Target = "generic"
+	TargetVPS              Target = "vps"
+	TargetGeneric          Target = "generic"
 )
 
 type Opts struct {
@@ -49,7 +48,7 @@ func Run(ctx context.Context, opts Opts) error {
 
 	log.Info("Running %s %v (cwd=%s)", filepath.Base(binPath), args, opts.ProjectDir)
 
-	cmd := exec.CommandContext(ctx, binPath, args...) 
+	cmd := exec.CommandContext(ctx, binPath, args...)
 	cmd.Dir = opts.ProjectDir
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr

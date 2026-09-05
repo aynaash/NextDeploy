@@ -7,7 +7,7 @@ type ISRRoute struct {
 }
 
 type TagPathMap struct {
-	// tag -> list of cloudfront paths to invalidate
+	// tag -> list of cache paths to invalidate
 	Tags      map[string][]string `json:"tags"`
 	Intervals map[string]int      `json:"intervals"`
 }

@@ -6,7 +6,7 @@ var initExplanation = explanation{
 	Summary: "`init` creates the nextdeploy.yml config file at the repo root " +
 		"with sensible defaults. It inspects package.json to seed app " +
 		"name + version and asks the operator a few questions about " +
-		"target type (serverless vs vps) and provider (AWS / Cloudflare). " +
+		"target type (serverless vs vps). " +
 		"Re-running init on an existing config is a no-op — edit " +
 		"nextdeploy.yml directly after first creation.",
 	Phases: []phase{
@@ -20,7 +20,7 @@ var initExplanation = explanation{
 		{
 			Num:       2,
 			Title:     "Interactive prompts",
-			Narrative: "Asks: target type (serverless|vps), provider (aws|cloudflare) if serverless, app domain (optional). Pre-fills answers from package.json name/version when available.",
+			Narrative: "Asks: target type (serverless|vps), app domain (optional). Pre-fills answers from package.json name/version when available.",
 			Ref:       "cli/cmd/init.go",
 			Output:    "answers accumulated in memory",
 		},

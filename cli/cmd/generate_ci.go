@@ -25,7 +25,7 @@ var generateCICmd = &cobra.Command{
 builds your Next.js project and ships it using NextDeploy on every push to main.
 
 The workflow detects the deployment type from nextdeploy.yml AT RUNTIME and
-runs the matching deploy (cloudflare / aws / vps), so retargeting the app does
+runs the matching deploy (cloudflare / vps), so retargeting the app does
 not require regenerating CI. The generated job relies on ` + "`nextdeploy ship`" + `
 owning the Next build, so the workflow itself doesn't need to call
 ` + "`next build`" + ` separately.
@@ -104,14 +104,14 @@ GitHub secrets you need to configure for it.`,
 		log.Info("  2. Commit and push to `main` — the workflow runs automatically.")
 		log.Info("")
 		log.Info("Tip: re-deploys are cheap. NextDeploy short-circuits when nothing changed:")
-		log.Info("  - R2/S3 assets are content-hash deduped (only changed files upload).")
+		log.Info("  - R2 assets are content-hash deduped (only changed files upload).")
 		log.Info("  - Worker bundle has a deploy-hash tag — identical bundles skip re-upload.")
 	},
 }
 
 // resolveCITarget collapses cfg into the (target, provider) pair the
 // generated workflow needs. Returns ("vps", "") for VPS, or
-// ("serverless", "<provider>") for AWS/Cloudflare.
+// ("serverless", "<provider>") for Cloudflare.
 func resolveCITarget(cfg *config.NextDeployConfig) (target, provider string) {
 	target = strings.ToLower(cfg.TargetType)
 	if target == "" {
@@ -139,12 +139,6 @@ func secretsForTarget(target, provider string) []string {
 				"CLOUDFLARE_ACCOUNT_ID (required)",
 				"R2_ACCESS_KEY_ID      (required if you upload assets to R2)",
 				"R2_SECRET_ACCESS_KEY  (required if you upload assets to R2)",
-			}
-		case "aws":
-			return []string{
-				"AWS_ACCESS_KEY_ID     (required)",
-				"AWS_SECRET_ACCESS_KEY (required)",
-				"AWS_REGION            (optional — defaults to cfg.cloud_provider.region)",
 			}
 		}
 	case "vps":

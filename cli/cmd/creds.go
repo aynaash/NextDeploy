@@ -22,11 +22,6 @@ var providerSchemas = map[string][]credField{
 		{Key: "r2_access_key_id", Label: "R2 access key ID (optional, for R2 uploads)", Required: false, Hidden: false},
 		{Key: "r2_secret_key", Label: "R2 secret access key (optional, for R2 uploads)", Required: false, Hidden: true},
 	},
-	"aws": {
-		{Key: "access_key_id", Label: "AWS access key ID", Required: true, Hidden: false},
-		{Key: "secret_access_key", Label: "AWS secret access key", Required: true, Hidden: true},
-		{Key: "session_token", Label: "AWS session token (optional)", Required: false, Hidden: true},
-	},
 }
 
 type credField struct {
@@ -55,7 +50,7 @@ var credsSetCmd = &cobra.Command{
 		log := shared.PackageLogger("creds", "🔒 CREDS")
 		provider := strings.ToLower(strings.TrimSpace(credsProviderFlag))
 		if provider == "" {
-			log.Error("--provider is required (cloudflare, aws)")
+			log.Error("--provider is required (cloudflare)")
 			os.Exit(2)
 		}
 		schema, ok := providerSchemas[provider]

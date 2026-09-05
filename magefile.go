@@ -462,7 +462,7 @@ func ScaffoldTests() error {
 	return sh.RunV("bash", "scripts/scaffold-tests.sh")
 }
 
-// TestIntegration runs tests with the integration build tag (needs AWS creds).
+// TestIntegration runs tests with the integration build tag (needs live cloud creds).
 func TestIntegration() error {
 	pkgs, err := testPkgs()
 	if err != nil {

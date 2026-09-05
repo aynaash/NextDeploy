@@ -5,7 +5,7 @@ var rollbackExplanation = explanation{
 	Synopsis: "Revert to a previous deployment — instantly, no rebuild.",
 	Summary: "`rollback` re-points the live workload at an older version of " +
 		"the compute layer. Serverless routes through the provider's own " +
-		"versioning (Lambda aliases / Worker deployments); VPS uses the " +
+		"versioning (Worker deployments); VPS uses the " +
 		"daemon's `releases/` directory and just flips the `current` " +
 		"symlink. Two mutually exclusive modes: --steps N walks back N " +
 		"deployments, --to <commit> pins to a specific git commit (when " +
@@ -28,7 +28,7 @@ var rollbackExplanation = explanation{
 		{
 			Num:       3,
 			Title:     "Serverless rollback",
-			Narrative: "AWS: selects the prior Lambda alias target. Cloudflare: activates a previous Worker deployment version via Workers.Scripts.Deployments. CF doesn't track git commits so --to degrades to --steps with a warning.",
+			Narrative: "Cloudflare: activates a previous Worker deployment version via Workers.Scripts.Deployments. CF doesn't track git commits so --to degrades to --steps with a warning.",
 			Ref:       "cli/internal/serverless/cloudflare.go:566",
 			Function:  "serverless.Rollback → Provider.Rollback",
 			Input:     "RollbackOptions{Steps, ToCommit}",

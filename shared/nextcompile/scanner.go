@@ -31,7 +31,7 @@ const (
 // ScanCompiledServer walks the server subtree of a Next standalone build
 // in parallel and returns a ModuleRef per compiled route/handler/middleware.
 // Non-server assets (client chunks, static files) are skipped — those flow
-// to the CDN via packaging.S3Assets, not into the Worker bundle.
+// to the CDN via packaging.StaticAssets, not into the Worker bundle.
 //
 // The caller's Payload supplies route classification; the scanner's job is
 // to attach compiled file paths to each classified route and extract the

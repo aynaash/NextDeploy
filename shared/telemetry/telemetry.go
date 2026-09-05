@@ -43,7 +43,7 @@ const (
 type Event struct {
 	ID      string `json:"id"`      // random per-install UUID — not identifying
 	Event   string `json:"event"`   // e.g. "ship.success"
-	Target  string `json:"target"`  // vps | aws | cloudflare | other
+	Target  string `json:"target"`  // vps | cloudflare | other
 	Version string `json:"version"` // nextdeploy version
 	OS      string `json:"os"`      // runtime.GOOS
 	Arch    string `json:"arch"`    // runtime.GOARCH
@@ -166,8 +166,6 @@ func normalizeTarget(target string) string {
 	switch strings.ToLower(strings.TrimSpace(target)) {
 	case "cloudflare", "cf":
 		return "cloudflare"
-	case "aws", "aws_lambda", "lambda":
-		return "aws"
 	case "vps":
 		return "vps"
 	default:

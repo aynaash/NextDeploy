@@ -11,7 +11,7 @@
 //     (forcing --webpack), and skipped the build-side validations entirely.
 //
 // The result was inconsistent pre-conditions across the three deployment
-// targets (VPS, AWS Lambda, Cloudflare Worker) and two places where
+// targets (VPS, Cloudflare Worker) and two places where
 // "should we rebuild?" / "is this output valid?" logic lived. Run owns
 // both questions for every target.
 package buildflow
@@ -81,7 +81,7 @@ type Result struct {
 //     and the routes/prerender manifests.
 //  3. Validate output mode + features against the resolved target.
 //  4. Decide whether `next build` needs to run, and with which flags
-//     (Cloudflare requires --webpack; AWS / VPS take the user's default).
+//     (Cloudflare requires --webpack; VPS takes the user's default).
 //  5. For VPS: copy public/ + static/ + metadata.json into the release
 //     directory and create app.tar.gz.
 //  6. Audit the standalone tree — informational warnings for size.
@@ -180,15 +180,6 @@ func Run(ctx context.Context, opts Opts) (*Result, error) {
 				top := report.TopOffenders[0]
 				opts.Log.Info("  Top offender: %s (%.2fMB)", top.Package, top.SizeMB)
 			}
-			// AWS Lambda's 250MB limit is the strictest of the three
-			// targets; flag at 200MB / fail at 250MB regardless of
-			// target so a CF-bound build can still flag a future AWS
-			// switch as risky.
-			if report.TotalMB > 250 {
-				opts.Log.Warn("Bundle %.2fMB exceeds AWS Lambda's 250MB limit.", report.TotalMB)
-			} else if report.TotalMB > 200 {
-				opts.Log.Warn("Bundle %.2fMB approaching AWS Lambda's 250MB limit.", report.TotalMB)
-			}
 		}
 	}
 
@@ -231,14 +222,14 @@ func validateForTarget(target string, payload *nextcore.NextCorePayload, cfg *co
 //	    no standalone           → run with --webpack
 //	    standalone is Turbopack → re-run with --webpack (overwrite)
 //	    standalone is Webpack   → no-op
-//	target=serverless (AWS) / target=vps:
+//	target=serverless (Cloudflare) / target=vps:
 //	    no standalone → run vanilla `next build`
 //	    standalone exists → no-op (trust the user)
 //
 // The Cloudflare branch runs the explicit Webpack path because the
 // adapter scans .next/server/app/*.js and dynamic-imports each compiled
 // page from a dispatch table — Turbopack's runtime-resolved chunks crash
-// once esbuild bundles them. AWS and VPS ship the full standalone
+// once esbuild bundles them. VPS ships the full standalone
 // server.js so either bundler works there.
 func ensureNextBuild(ctx context.Context, target string, cfg *config.NextDeployConfig, log *shared.Logger) (bool, error) {
 	standalone := ".next/standalone"
@@ -286,7 +277,7 @@ func nextbuildTargetFor(target string) nextbuild.Target {
 	case "vps":
 		return nextbuild.TargetVPS
 	case "serverless":
-		return nextbuild.TargetAWSLambda
+		return nextbuild.TargetCloudflareWorker
 	default:
 		return nextbuild.TargetGeneric
 	}

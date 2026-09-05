@@ -9,12 +9,12 @@ import (
 
 
 func TestPartitionSecrets(t *testing.T) {
-	assets := []packaging.S3Asset{
-		{S3Key:"index.html", CacheControl:"public, max-age=0, must-revalidate"},
-		{S3Key:"_next/static/chunks/main-abcd12.js", CacheControl: "public, max-age=3153600, immutable"},
-		{S3Key: "about.rsc", CacheControl:"public, max-age=0, must-revalidate"},
-		{S3Key:"_next/static/css/app-def456.css", CacheControl: "public, max-age=3153600, immutable"},
-		{S3Key: "favicon.ico", CacheControl: "public, max-age=3600"},
+	assets := []packaging.StaticAsset{
+		{Key:"index.html", CacheControl:"public, max-age=0, must-revalidate"},
+		{Key:"_next/static/chunks/main-abcd12.js", CacheControl: "public, max-age=3153600, immutable"},
+		{Key: "about.rsc", CacheControl:"public, max-age=0, must-revalidate"},
+		{Key:"_next/static/css/app-def456.css", CacheControl: "public, max-age=3153600, immutable"},
+		{Key: "favicon.ico", CacheControl: "public, max-age=3600"},
 	}
 	immutable, mutable := partitionAssets(assets)
 
@@ -23,8 +23,8 @@ func TestPartitionSecrets(t *testing.T) {
 	}
 
 	for _, a := range immutable {
-		if !strings.HasPrefix(a.S3Key, "_next/static/"){
-			t.Errorf("Immutable partition contains non-hashed key %q", a.S3Key)
+		if !strings.HasPrefix(a.Key, "_next/static/"){
+			t.Errorf("Immutable partition contains non-hashed key %q", a.Key)
 		}
 	}
 
@@ -32,19 +32,19 @@ func TestPartitionSecrets(t *testing.T) {
 		t.Fatalf("expected 3 mutable assets got %d:%v", len(mutable), mutable)
 		}
 		for _, a := range mutable {
-		if strings.HasPrefix(a.S3Key, "_next/static/"){
-			t.Errorf("Mutable partition contains hashed key %q", a.S3Key)
+		if strings.HasPrefix(a.Key, "_next/static/"){
+			t.Errorf("Mutable partition contains hashed key %q", a.Key)
 		}
 	}
 }
 
 func TestPartitionAssets_ImmutableSeperatedFromMutable(t *testing.T){
-	assets := []packaging.S3Asset{
-		{S3Key: "index.html", CacheControl: "public, max-age=0, must-revalidate"},
-		{S3Key: "_next/static/chunks/main-abc123.js", CacheControl: "public, max-age=31536000, immutable"},
-		{S3Key: "about.rsc", CacheControl: "public, max-age=0, must-revalidate"},
-		{S3Key: "_next/static/css/app-def456.css", CacheControl: "public, max-age=31536000, immutable"},
-		{S3Key: "favicon.ico", CacheControl: "public, max-age=3600"},
+	assets := []packaging.StaticAsset{
+		{Key: "index.html", CacheControl: "public, max-age=0, must-revalidate"},
+		{Key: "_next/static/chunks/main-abc123.js", CacheControl: "public, max-age=31536000, immutable"},
+		{Key: "about.rsc", CacheControl: "public, max-age=0, must-revalidate"},
+		{Key: "_next/static/css/app-def456.css", CacheControl: "public, max-age=31536000, immutable"},
+		{Key: "favicon.ico", CacheControl: "public, max-age=3600"},
 	}
 
 	immutable, mutable := partitionAssets(assets)
@@ -55,8 +55,8 @@ func TestPartitionAssets_ImmutableSeperatedFromMutable(t *testing.T){
 	}
 
 	for _, a := range immutable {
-		if !strings.HasPrefix(a.S3Key, "_next/static/"){
-			t.Errorf("immutable partitions contains non-hashed key %q", a.S3Key)
+		if !strings.HasPrefix(a.Key, "_next/static/"){
+			t.Errorf("immutable partitions contains non-hashed key %q", a.Key)
 		}
 	}
 
@@ -64,8 +64,8 @@ func TestPartitionAssets_ImmutableSeperatedFromMutable(t *testing.T){
 		t.Fatalf("expected 3 mutable assets, got %d: %+v", len(mutable), mutable)
 	}
 	for _, a := range mutable {
-		if strings.HasPrefix(a.S3Key, "_next/static/"){
-			t.Errorf("mutable partition contains hashed key %q (reintroduces the race)", a.S3Key)
+		if strings.HasPrefix(a.Key, "_next/static/"){
+			t.Errorf("mutable partition contains hashed key %q (reintroduces the race)", a.Key)
 		}
 	}
 }

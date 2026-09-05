@@ -698,7 +698,7 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 }
 
 // shortSha returns a 7-char prefix of a git commit hash, or "nogit" when the
-// commit is unavailable. Kept identical in spirit to the AWS-side helper so
+// commit is unavailable. Kept identical in spirit to the serverless-side helper so
 // release identifiers are consistent across deploy targets.
 func shortSha(full string) string {
 	if len(full) >= 7 {

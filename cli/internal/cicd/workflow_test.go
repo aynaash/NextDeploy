@@ -13,11 +13,10 @@ func TestRenderDeployWorkflow_TargetAware(t *testing.T) {
 	for _, want := range []string{
 		"id: detect",
 		"steps.detect.outputs.type == 'cloudflare'",
-		"steps.detect.outputs.type == 'aws'",
 		"steps.detect.outputs.type == 'vps'",
 		"go install github.com/aynaash/nextdeploy/cli@" + CLIVersion,
 		"nextdeploy ship --no-provision --verify", // cloudflare
-		"nextdeploy ship --verify",                // aws / vps
+		"nextdeploy ship --verify",                // vps
 		"ln -sf",                                  // `cli` binary → `nextdeploy` on PATH
 		"cancel-in-progress: false",
 	} {
@@ -30,7 +29,7 @@ func TestRenderDeployWorkflow_TargetAware(t *testing.T) {
 		t.Error("CLI must be pinned, not @latest — @latest recompiles every run and picks up breaking releases")
 	}
 	// Each target's creds must be present so the matching branch can run.
-	for _, cred := range []string{"CLOUDFLARE_API_TOKEN", "AWS_ACCESS_KEY_ID", "SSH_PRIVATE_KEY"} {
+	for _, cred := range []string{"CLOUDFLARE_API_TOKEN", "SSH_PRIVATE_KEY"} {
 		if !strings.Contains(yml, cred) {
 			t.Errorf("workflow missing %s branch creds", cred)
 		}
@@ -59,9 +58,9 @@ func TestRenderDeployWorkflow_IsValidYAML(t *testing.T) {
 	if !ok {
 		t.Fatalf("steps missing: %T", deploy["steps"])
 	}
-	// checkout, setup-go, setup-node, deps, CLI, detect, + 3 deploy branches.
-	if len(steps) != 9 {
-		t.Errorf("want 9 steps, got %d", len(steps))
+	// checkout, setup-go, setup-node, deps, CLI, detect, + 2 deploy branches.
+	if len(steps) != 8 {
+		t.Errorf("want 8 steps, got %d", len(steps))
 	}
 	if deploy["timeout-minutes"] != 30 {
 		t.Errorf("timeout-minutes = %v, want 30", deploy["timeout-minutes"])
@@ -79,14 +78,14 @@ func TestRenderDeployWorkflow_CarriesNoAppSecrets(t *testing.T) {
 	}
 }
 
-// `apply` reconciles D1/KV/R2/Vectorize and is Cloudflare-only; AWS provisions
-// inside ship, VPS ships over SSH.
+// `apply` reconciles D1/KV/R2/Vectorize and is Cloudflare-only; VPS ships
+// over SSH.
 func TestRenderDeployWorkflow_ApplyIsCloudflareOnly(t *testing.T) {
 	yml := RenderDeployWorkflow()
 	if n := strings.Count(yml, "nextdeploy apply"); n != 1 {
 		t.Errorf("want exactly one `nextdeploy apply` (the cloudflare branch), got %d", n)
 	}
-	cf := yml[strings.Index(yml, "Deploy to Cloudflare"):strings.Index(yml, "Deploy to AWS")]
+	cf := yml[strings.Index(yml, "Deploy to Cloudflare"):strings.Index(yml, "Deploy to VPS")]
 	if !strings.Contains(cf, "nextdeploy apply") {
 		t.Error("`nextdeploy apply` is not in the cloudflare branch")
 	}

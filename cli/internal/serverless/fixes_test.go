@@ -90,28 +90,28 @@ func TestPickActiveVersion(t *testing.T) {
 
 // D1 — partitionAssets separates immutable hashed chunks from mutable assets.
 func TestPartitionAssets(t *testing.T) {
-	assets := []packaging.S3Asset{
-		{S3Key: "index.html"},
-		{S3Key: "_next/static/chunks/main-abc123.js"},
-		{S3Key: "about.rsc"},
-		{S3Key: "_next/static/css/app-def456.css"},
-		{S3Key: "favicon.ico"},
+	assets := []packaging.StaticAsset{
+		{Key: "index.html"},
+		{Key: "_next/static/chunks/main-abc123.js"},
+		{Key: "about.rsc"},
+		{Key: "_next/static/css/app-def456.css"},
+		{Key: "favicon.ico"},
 	}
 	immutable, mutable := partitionAssets(assets)
 	if len(immutable) != 2 {
 		t.Fatalf("expected 2 immutable, got %d: %+v", len(immutable), immutable)
 	}
 	for _, a := range immutable {
-		if !strings.HasPrefix(a.S3Key, "_next/static/") {
-			t.Errorf("immutable partition has non-hashed key %q", a.S3Key)
+		if !strings.HasPrefix(a.Key, "_next/static/") {
+			t.Errorf("immutable partition has non-hashed key %q", a.Key)
 		}
 	}
 	if len(mutable) != 3 {
 		t.Fatalf("expected 3 mutable, got %d: %+v", len(mutable), mutable)
 	}
 	for _, a := range mutable {
-		if strings.HasPrefix(a.S3Key, "_next/static/") {
-			t.Errorf("mutable partition leaked a hashed chunk %q (reintroduces the race)", a.S3Key)
+		if strings.HasPrefix(a.Key, "_next/static/") {
+			t.Errorf("mutable partition leaked a hashed chunk %q (reintroduces the race)", a.Key)
 		}
 	}
 }

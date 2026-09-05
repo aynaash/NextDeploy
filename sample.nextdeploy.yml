@@ -8,7 +8,7 @@
 version: "1.0" # Config file versioning for forward compatibility with future NextDeploy updates
 
 # -----
-# TARGET TYPE — choose between "vps" (traditional server) or "serverless" (AWS Lambda + S3 + CloudFront)
+# TARGET TYPE — choose between "vps" (traditional server) or "serverless" (Cloudflare Workers + R2)
 # -----
 target_type: vps  # "vps" | "serverless"
 
@@ -104,9 +104,9 @@ backup:
   frequency: daily # Options: hourly | daily | weekly
   retention_days: 7 # Keep backups for 7 days
   storage:
-    provider: s3 # Use S3-compatible storage (AWS S3, MinIO, Wasabi, etc.)
+    provider: s3 # Use S3-compatible storage (R2, MinIO, Wasabi, etc.)
     bucket: nextdeploy-backups # S3 bucket name
-    region: us-east-1 # AWS region
+    region: auto # Storage region
     access_key: YOUR_ACCESS_KEY
     secret_key: YOUR_SECRET_KEY
 
@@ -143,42 +143,15 @@ webhook:
 ## CLOUD PROVIDER instructions
 
 CloudProvider:
-  name: aws # Supported: aws | gcp | azure | digitalocean
-  region: us-north-1 # AWS region (e.g., us-east-1, eu-west-1)
-  access_key: YOUR_AWS_ACCESS_KEY # IAM user access key
-  secret_key: YOUR_AWS_SECRET_KEY # IAM user secret key
-  vpc_id: vpc-12345678 # VPC ID for networking (if applicable)
-  subnet_id: subnet-12345678 # Subnet ID for deploying resources
+  name: cloudflare # Supported: cloudflare
+  account_id: YOUR_CLOUDFLARE_ACCOUNT_ID # Optional — auto-discovered from the API token
 
 # -----
 # SERVERLESS DEPLOYMENT (set target_type: serverless above to enable)
 # -----
 #
 # ┌─────────────────────────────────────────────────────────────────────┐
-# │ EXAMPLE A — AWS (Lambda + S3 + CloudFront)                          │
-# │ Requires AWS credentials in env or ~/.aws/credentials               │
-# └─────────────────────────────────────────────────────────────────────┘
-# serverless:
-#   provider: aws              # one of: aws | cloudflare
-#   region: us-east-1          # AWS region for all resources
-#   isrRevalidation: true      # Enable ISR cache listener Lambda via SQS
-#   imageOptimization: true    # Enable on-the-fly Image Resization Lambda via CloudFront
-#   warmer: true               # Keep the Lambda warm
-#   s3_bucket: my-app-assets   # S3 bucket where public/ and _next/static/ are uploaded
-#   cloudfront_id: EXXXXX      # CloudFront distribution ID — triggers cache invalidation after deploy
-#   lambda_function_name: my-app-handler  # Lambda function name (defaults to app name if omitted)
-#
-# How it works (AWS):
-#   1. `nextdeploy build` packages .next/standalone + public/ into .nextdeploy/app.tar.gz
-#   2. `nextdeploy ship`:
-#      a. Loads local secrets via SecretManager and pushes them to AWS Secrets Manager
-#      b. Uploads public/ and _next/static/ to S3 with correct Content-Type and Cache-Control
-#      c. Zips .next/standalone/ and deploys it to Lambda via UpdateFunctionCode
-#      d. Injects ND_SECRETS_ARN into Lambda env vars so your app can fetch secrets at runtime
-#      e. Creates a CloudFront invalidation (/*) to clear stale cached assets
-#
-# ┌─────────────────────────────────────────────────────────────────────┐
-# │ EXAMPLE B — Cloudflare (Workers + R2)                               │
+# │ Cloudflare (Workers + R2)                                           │
 # │ Requires only CLOUDFLARE_API_TOKEN.  Account ID auto-discovers.     │
 # │ R2 keys are optional — left unset, the deploy uses the API token.   │
 # └─────────────────────────────────────────────────────────────────────┘
@@ -294,8 +267,8 @@ CloudProvider:
 # injects every secret in your project/config as a process environment
 # variable; nextdeploy auto-detects it (via DOPPLER_PROJECT in env),
 # harvests SCREAMING_SNAKE_CASE keys (excluding tooling/credential
-# prefixes like CLOUDFLARE_, AWS_, DOPPLER_, etc.), and pushes them as
-# Worker secrets / Lambda secrets-manager entries.
+# prefixes like CLOUDFLARE_, DOPPLER_, etc.), and pushes them as Worker
+# secrets.
 #
 # No nextdeploy.yml change is required for `doppler run -- ...`. Block
 # below is only needed when you populate env from a non-`doppler run`

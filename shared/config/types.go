@@ -37,34 +37,8 @@ type SafeConfig struct {
 }
 
 type ServerlessConfig struct {
-	Provider          string `yaml:"provider"` // "aws" or "cloudflare"
-	Region            string `yaml:"region"`
-	CloudFrontId      string `yaml:"cloudfront_id,omitempty"`
-	IAMRole           string `yaml:"iam_role,omitempty"`           // IAM Role ARN for Lambda
-	Handler           string `yaml:"handler,omitempty"`            // Lambda handler (defaults to server.handler)
-	Runtime           string `yaml:"runtime,omitempty"`            // Lambda runtime (defaults to nodejs20.x)
-	MemorySize        int32  `yaml:"memory_size,omitempty"`        // Lambda memory size in MB (defaults to 1024)
-	Timeout           int32  `yaml:"timeout,omitempty"`            // Lambda timeout in seconds (defaults to 30)
-	Profile           string `yaml:"profile,omitempty"`            // AWS CLI profile name
-	IsrRevalidation   bool   `yaml:"isr_revalidation,omitempty"`   // Deploy ISR Revalidation Lambda + SQS
-	ImageOptimization bool   `yaml:"image_optimization,omitempty"` // Deploy Image Optimizer Lambda + CF Behavior
-	Warmer            bool   `yaml:"warmer,omitempty"`             // Deploy EventBridge warmer cron
-
-	// AllowSecretsInEnv opts in to the insecure fallback that injects every
-	// secret directly into the Lambda's environment variables when the IAM
-	// principal lacks lambda:GetLayerVersion (and therefore cannot use the
-	// Secrets Extension layer). Default false; deploys fail loudly with IAM
-	// guidance instead. Only set this to true if you accept that secrets will
-	// be visible in the Lambda console, CloudTrail, and persisted in every
-	// published Lambda version.
-	AllowSecretsInEnv bool `yaml:"allow_secrets_in_env,omitempty"`
-
-	// KmsKeyId selects a customer-managed KMS key for Secrets Manager
-	// encryption. Accepts a key ID, key ARN, or alias (e.g. "alias/prod-secrets").
-	// Empty uses the AWS-managed `aws/secretsmanager` key. Required by many
-	// multi-account and compliance setups where the default key can't be
-	// shared across boundaries.
-	KmsKeyId string `yaml:"kms_key_id,omitempty"`
+	Provider string `yaml:"provider"` // "cloudflare"
+	Region   string `yaml:"region"`
 
 	// Cloudflare-specific config. Ignored when Provider != "cloudflare".
 	// Each field maps directly to a Cloudflare API call (or a chunk of one)
@@ -395,7 +369,6 @@ type CloudProviderStruct struct {
 	// #nosec G117
 	AccessKey string `yaml:"access_key,omitempty"`
 	SecretKey string `yaml:"secret_key,omitempty"`
-	Profile   string `yaml:"profile,omitempty"`    // AWS CLI profile name
 	AccountID string `yaml:"account_id,omitempty"` // Cloudflare Account ID
 }
 type ServerConfig struct {

@@ -2,11 +2,23 @@ package serverless
 
 import (
 	"context"
+	"time"
 
 	"github.com/aynaash/nextdeploy/internal/packaging"
 	"github.com/aynaash/nextdeploy/shared/config"
 	"github.com/aynaash/nextdeploy/shared/nextcore"
 )
+
+// ServerlessResourceMap summarizes what a deploy provisioned, for the
+// post-deploy summary and `nextdeploy status`.
+type ServerlessResourceMap struct {
+	AppName        string
+	Environment    string
+	Region         string
+	BucketName     string
+	CustomDomain   string
+	DeploymentTime time.Time
+}
 
 // RollbackOptions controls how a rollback selects its target deployment.
 // Steps and ToCommit are mutually exclusive; ToCommit wins if both are set.
@@ -21,7 +33,7 @@ type RollbackOptions struct {
 }
 
 // Provider defines the interface for deploying to various serverless platforms
-// (e.g., AWS, Cloudflare, GCP, Azure).
+// (currently Cloudflare).
 type Provider interface {
 	// Initialize validates credentials and prepares the environment.
 	Initialize(ctx context.Context, cfg *config.NextDeployConfig) error
@@ -41,8 +53,8 @@ type Provider interface {
 	// UpdateSecrets securely injects/syncs a batch of secrets.
 	UpdateSecrets(ctx context.Context, appName string, secrets map[string]string) error
 
-	// DeployCompute packages the standalone build and updates the compute layer
-	// (e.g., AWS Lambda + Web Adapter, Cloudflare Workers).
+	// DeployCompute packages the standalone build and updates the compute
+	// layer (Cloudflare Workers).
 	DeployCompute(ctx context.Context, pkg *packaging.PackageResult, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) error
 
 	// InvalidateCache clears the CDN cache to ensure fresh assets are served.

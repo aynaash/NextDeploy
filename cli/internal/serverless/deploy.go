@@ -23,18 +23,15 @@ import (
 // New returns a new serverless provider based on the provider name.
 func New(providerName string, verbose bool) (Provider, error) {
 	switch providerName {
-	case "aws":
-		return NewAWSProvider(verbose), nil
 	case "cloudflare":
 		return NewCloudflareProvider(), nil
 	default:
-		return nil, fmt.Errorf("unsupported serverless provider: %s (supported: aws, cloudflare)", providerName)
+		return nil, fmt.Errorf("unsupported serverless provider: %s (supported: cloudflare)", providerName)
 	}
 }
 
 // resourceProvisioner is implemented by providers that can reconcile declared
-// infra (KV, Hyperdrive, D1, …) before deploying. CloudflareProvider implements
-// it; AWS doesn't (and doesn't need to).
+// infra (KV, Hyperdrive, D1, …) before deploying. CloudflareProvider implements it.
 type resourceProvisioner interface {
 	ProvisionResources(ctx context.Context, cfg *config.NextDeployConfig) error
 }
@@ -122,7 +119,7 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	if pkgResult.SizeWarning != "" {
 		log.Warn("%s", pkgResult.SizeWarning)
 	}
-	log.Info("Package split: %dMB Lambda zip, %d S3 assets", pkgResult.LambdaZipSize/(1024*1024), len(pkgResult.S3Assets))
+	log.Info("Packaged %d static assets, %dMB standalone artifact", len(pkgResult.StaticAssets), pkgResult.StandaloneTarSize/(1024*1024))
 
 	// ── 3. Push secrets (always before compute) ──────────────────────────────
 	// AWS: secrets must land in Secrets Manager BEFORE DeployCompute because
@@ -181,18 +178,13 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	}
 
 	// ── 6. Invalidate CDN cache ──────────────────────────────────────────────
-	// AWS DeployCompute already triggers an invalidation immediately after the
-	// distribution is created/updated. Skip the redundant orchestration-level
-	// call for AWS to avoid double-billing and double latency. Other providers
-	// (Cloudflare) still need this hop because their compute deploy doesn't
-	// touch the CDN cache.
-	if cfg.Serverless.Provider != "aws" {
-		t0 = time.Now()
-		if err := p.InvalidateCache(ctx, cfg); err != nil {
-			log.Error("Cache invalidation failed (non-fatal): %v", err)
-		} else if verbose {
-			log.Info("  CDN invalidation completed in %s", time.Since(t0).Round(time.Millisecond))
-		}
+	// Cloudflare's compute deploy doesn't touch the zone cache, so purging is
+	// a separate orchestration-level hop.
+	t0 = time.Now()
+	if err := p.InvalidateCache(ctx, cfg); err != nil {
+		log.Error("Cache invalidation failed (non-fatal): %v", err)
+	} else if verbose {
+		log.Info("  CDN invalidation completed in %s", time.Since(t0).Round(time.Millisecond))
 	}
 
 	log.Info("Serverless deployment complete — verifying...")
@@ -210,25 +202,17 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 
 	log.Info("Application is live.")
 
-	// ── 7. Generate Visual Report ───────────────────────────────────────────
-	resMap, err := p.GetResourceMap(ctx, cfg)
-	if err == nil {
-		reportPath, err := GenerateResourceView(&cfg.App, resMap)
-		if err == nil {
-			absPath, _ := filepath.Abs(reportPath)
-			log.Info("┌────────────────────────────────────────────────────────────┐")
-			log.Success("│  🚀 DEPLOYMENT REPORT READY                                │")
-			log.Info("├────────────────────────────────────────────────────────────┤")
-			log.Info("│  Report: file://%s", absPath)
-			log.Info("│                                                            │")
-			log.Info("│  ⚠️  DNS GUIDANCE: Open this report immediately to see     │")
-			log.Info("│     the exact DNS records needed for your custom domain.   │")
-			log.Info("└────────────────────────────────────────────────────────────┘")
-		} else {
-			log.Warn("Failed to generate visual report: %v", err)
+	// ── 7. Deployment summary ───────────────────────────────────────────────
+	if resMap, err := p.GetResourceMap(ctx, cfg); err == nil {
+		log.Info("Deployed %s (%s)", resMap.AppName, resMap.Environment)
+		if resMap.CustomDomain != "" {
+			log.Info("  Domain: https://%s", resMap.CustomDomain)
+		}
+		if resMap.BucketName != "" {
+			log.Info("  Assets: %s", resMap.BucketName)
 		}
 	} else {
-		log.Warn("Failed to fetch resource map for report: %v", err)
+		log.Warn("Could not summarize deployed resources: %v", err)
 	}
 
 	return nil
@@ -505,18 +489,13 @@ func validateProviderConsistency(cfg *config.NextDeployConfig, log *shared.Logge
 	}
 	want := cfg.Serverless.Provider
 	if want == "" {
-		return fmt.Errorf("serverless.provider is required for target_type: serverless (one of: aws, cloudflare)")
+		return fmt.Errorf("serverless.provider is required for target_type: serverless (supported: cloudflare)")
 	}
 	if cfg.CloudProvider == nil {
 		return nil
 	}
 	got := cfg.CloudProvider.Name
 	if got == "" || got == want {
-		return nil
-	}
-	// Allow harmless aliases. CloudProvider was originally an AWS-only
-	// concept; treat empty/aws as compatible with serverless.provider:aws.
-	if got == "aws" && want == "aws" {
 		return nil
 	}
 	return fmt.Errorf(

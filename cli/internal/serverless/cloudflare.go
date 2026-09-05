@@ -537,14 +537,14 @@ func (p *CloudflareProvider) DeployStatic(ctx context.Context, pkg *packaging.Pa
 		return err
 	}
 
-	p.log.Info("Uploading %d static assets to R2 bucket %s...", len(pkg.S3Assets), bucketName)
+	p.log.Info("Uploading %d static assets to R2 bucket %s...", len(pkg.StaticAssets), bucketName)
 
 	// Two-phase upload (D1): immutable content-hashed chunks first, so that by
 	// the time any mutable HTML referencing them becomes visible in R2, every
 	// chunk it points at already exists. uploadBatch wg.Wait()s internally, so
 	// its return is a hard barrier between the phases. A failure in the
 	// immutable phase aborts before any mutable key is touched.
-	immutable, mutable := partitionAssets(pkg.S3Assets)
+	immutable, mutable := partitionAssets(pkg.StaticAssets)
 
 	upImm, skImm, err := p.uploadBatch(ctx, bucketName, immutable)
 	if err != nil {
@@ -568,15 +568,15 @@ func (p *CloudflareProvider) DeployStatic(ctx context.Context, pkg *packaging.Pa
 // any mutable HTML/RSC (see the two-phase upload in DeployStatic): new hashes
 // never collide with old ones and old ones are never deleted. The packager
 // emits these under _next/static/ with a "…, immutable" Cache-Control; the key
-// prefix is the authoritative signal — packaging.S3Asset has no Immutable field.
+// prefix is the authoritative signal — packaging.StaticAsset has no Immutable field.
 const immutableKeyPrefix = "_next/static/"
 
 // partitionAssets splits the packaged asset set into immutable content-hashed
 // chunks (uploaded first) and mutable stable-key assets (prerendered HTML/RSC +
 // public/, uploaded second, after the chunks they reference exist in R2).
-func partitionAssets(assets []packaging.S3Asset) (immutable, mutable []packaging.S3Asset) {
+func partitionAssets(assets []packaging.StaticAsset) (immutable, mutable []packaging.StaticAsset) {
 	for _, a := range assets {
-		if strings.HasPrefix(a.S3Key, immutableKeyPrefix) {
+		if strings.HasPrefix(a.Key, immutableKeyPrefix) {
 			immutable = append(immutable, a)
 		} else {
 			mutable = append(mutable, a)
@@ -588,7 +588,7 @@ func partitionAssets(assets []packaging.S3Asset) (immutable, mutable []packaging
 // uploadBatch uploads assets to R2 with bounded concurrency, HEAD-skipping
 // objects whose content is unchanged. Returns per-batch counts so the two-phase
 // caller can log a combined summary. wg.Wait() makes the return a hard barrier.
-func (p *CloudflareProvider) uploadBatch(ctx context.Context, bucket string, assets []packaging.S3Asset) (uploaded, skipped int64, err error) {
+func (p *CloudflareProvider) uploadBatch(ctx context.Context, bucket string, assets []packaging.StaticAsset) (uploaded, skipped int64, err error) {
 	const cfR2UploadConcurrency = 8
 	sem := make(chan struct{}, cfR2UploadConcurrency)
 	errs := make(chan error, len(assets))
@@ -604,7 +604,7 @@ func (p *CloudflareProvider) uploadBatch(ctx context.Context, bucket string, ass
 			defer func() { <-sem }()
 			didUpload, uploadErr := p.uploadToR2IfChanged(ctx, bucket, asset)
 			if uploadErr != nil {
-				errs <- fmt.Errorf("upload %s: %w", asset.S3Key, uploadErr)
+				errs <- fmt.Errorf("upload %s: %w", asset.Key, uploadErr)
 				return
 			}
 			if didUpload {
@@ -673,12 +673,12 @@ func (p *CloudflareProvider) ensureR2Client(ctx context.Context, bucketName stri
 // transfer cost. For large asset sets that change rarely (the common case
 // for /_next/static and /public), this turns N PUTs of N MB into N HEADs
 // of zero bytes — the dominant savings on a redeploy.
-func (p *CloudflareProvider) uploadToR2IfChanged(ctx context.Context, bucket string, asset packaging.S3Asset) (bool, error) {
+func (p *CloudflareProvider) uploadToR2IfChanged(ctx context.Context, bucket string, asset packaging.StaticAsset) (bool, error) {
 	localETag, err := md5OfFile(asset.LocalPath)
 	if err != nil {
 		return false, fmt.Errorf("hash %s: %w", asset.LocalPath, err)
 	}
-	if remoteETag, ok := p.headR2ETag(ctx, bucket, asset.S3Key); ok && remoteETag == localETag {
+	if remoteETag, ok := p.headR2ETag(ctx, bucket, asset.Key); ok && remoteETag == localETag {
 		return false, nil
 	}
 	if err := p.putToR2(ctx, bucket, asset); err != nil {
@@ -739,7 +739,7 @@ func sha256OfFile(path string) ([32]byte, error) {
 	return sum, nil
 }
 
-func (p *CloudflareProvider) putToR2(ctx context.Context, bucket string, asset packaging.S3Asset) error {
+func (p *CloudflareProvider) putToR2(ctx context.Context, bucket string, asset packaging.StaticAsset) error {
 	f, err := os.Open(asset.LocalPath) // #nosec G304
 	if err != nil {
 		return err
@@ -748,7 +748,7 @@ func (p *CloudflareProvider) putToR2(ctx context.Context, bucket string, asset p
 
 	input := &s3.PutObjectInput{
 		Bucket:      awsv2.String(bucket),
-		Key:         awsv2.String(asset.S3Key),
+		Key:         awsv2.String(asset.Key),
 		Body:        f,
 		ContentType: awsv2.String(asset.ContentType),
 	}
@@ -1437,7 +1437,7 @@ func (p *CloudflareProvider) GetResourceMap(ctx context.Context, cfg *config.Nex
 		AppName:        cfg.App.Name,
 		Environment:    cfg.App.Environment,
 		Region:         "global",
-		S3BucketName:   p.getBucketName(cfg),
+		BucketName:     p.getBucketName(cfg),
 		CustomDomain:   cfg.App.Domain.Name,
 		DeploymentTime: time.Now(),
 	}, nil

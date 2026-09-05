@@ -9,7 +9,7 @@ package cicd
 // --environment pr-42` can never reach production because it operates on a
 // different script entirely.
 //
-// Previews are Cloudflare-first. The --environment flag works for AWS/VPS at
+// Previews are Cloudflare-first. The --environment flag works for VPS at
 // the config level, but the URL composition and teardown below are CF-specific.
 
 // PreviewWorkflowPath and PreviewCleanupWorkflowPath are repo-relative.

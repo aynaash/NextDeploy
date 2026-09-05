@@ -8,7 +8,6 @@ var logsExplanation = explanation{
 	Summary: "`logs` tails whatever logging surface the target provider " +
 		"exposes. VPS: connects to the nextdeploy daemon's log aggregator " +
 		"which colorizes and de-noises systemd + container output. " +
-		"Serverless AWS: streams CloudWatch for the Lambda function. " +
 		"Serverless Cloudflare: uses `wrangler tail` under the hood when " +
 		"available.",
 	Phases: []phase{
@@ -22,7 +21,7 @@ var logsExplanation = explanation{
 		{
 			Num:       2,
 			Title:     "Open log stream",
-			Narrative: "VPS: opens an SSH session and subscribes to the daemon's /logs/stream. AWS: starts a CloudWatch Logs tail with the Lambda log group. Cloudflare: spawns wrangler tail.",
+			Narrative: "VPS: opens an SSH session and subscribes to the daemon's /logs/stream. Cloudflare: spawns wrangler tail.",
 			Ref:       logsGoFile,
 			Output:    "io.Reader of log events",
 		},
