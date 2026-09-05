@@ -39,13 +39,13 @@ import (
 
 // CloudflareProvider implements Provider for Cloudflare Workers + R2.
 //
-// IMPORTANT — Next.js compatibility status:
+// Next.js compatibility status:
 //
-// Cloudflare Workers do not run vanilla Node.js, so a Next.js standalone
-// build cannot be uploaded as-is. Production deployments require the
-// build to be adapted into a Worker-compatible bundle (see the cloudflare
-// adapter step in the packager). Until that lands, DeployCompute will log
-// a loud warning when given a non-static-export build.
+// Cloudflare Workers do not run vanilla Node.js, so a Next.js standalone build
+// cannot be uploaded as-is. DeployCompute adapts it into a Worker bundle via
+// nextcompile + esbuild (see cloudflare_adapter.go). What that bundle does and
+// does not support at runtime is tracked in CLOUDFLARE_PARITY.md, which is the
+// contract — read it before promising a user that a given app will work.
 //
 // SDK usage:
 //   - Management plane (workers, secrets, routes, R2 buckets, zone, cache):

@@ -72,7 +72,7 @@ func maybeProvisionResources(ctx context.Context, p Provider, cfg *config.NextDe
 //  1. Discovers the build artifact (app.tar.gz)
 //  2. Fetches local secrets via SecretManager and pushes them to the cloud secret store
 //  3. Uploads static assets to CDN/Storage
-//  4. Deploys the compute layer (Lambda, Workers, etc.)
+//  4. Deploys the compute layer (the Worker)
 //  5. Invalidates the CDN cache
 //
 //nolint:gocognit,gocyclo,cyclop,funlen // top-level orchestrator with pre-existing complexity; this change only delegates provisioning to a helper.
@@ -122,13 +122,9 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	log.Info("Packaged %d static assets, %dMB standalone artifact", len(pkgResult.StaticAssets), pkgResult.StandaloneTarSize/(1024*1024))
 
 	// ── 3. Push secrets (always before compute) ──────────────────────────────
-	// AWS: secrets must land in Secrets Manager BEFORE DeployCompute because
-	//      the allow_secrets_in_env fallback reads them at deploy time to
-	//      bake into Lambda env vars.
-	// Cloudflare: UpdateSecrets stashes the set onto the provider; the
-	//      stash is then folded into the script upload as secret_text
-	//      bindings during DeployCompute. This avoids the per-secret PUT
-	//      rate limit (CF error 10013).
+	// UpdateSecrets stashes the set onto the provider; the stash is then folded
+	// into the script upload as secret_text bindings during DeployCompute. That
+	// avoids the per-secret PUT rate limit (CF error 10013).
 	pushSecrets := func() error {
 		appSecrets, err := loadLocalSecrets(cfg)
 		if err != nil {
@@ -174,7 +170,7 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 		return fmt.Errorf("failed to deploy compute layer: %w", err)
 	}
 	if verbose {
-		log.Info("  Lambda deployment completed in %s", time.Since(t0).Round(time.Millisecond))
+		log.Info("  Worker deployment completed in %s", time.Since(t0).Round(time.Millisecond))
 	}
 
 	// ── 6. Invalidate CDN cache ──────────────────────────────────────────────

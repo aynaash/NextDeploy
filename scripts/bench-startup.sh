@@ -15,7 +15,7 @@
 #   - We don't claim performance on real deploys here, only startup floor
 #
 # What it does NOT measure: actual deploy speed, build time, network latency.
-# Those are dominated by AWS API round-trips and Next.js compilation.
+# Those are dominated by Cloudflare API round-trips and Next.js compilation.
 
 set -euo pipefail
 

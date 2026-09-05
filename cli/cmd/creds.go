@@ -55,7 +55,7 @@ var credsSetCmd = &cobra.Command{
 		}
 		schema, ok := providerSchemas[provider]
 		if !ok {
-			log.Error("unknown provider %q (supported: cloudflare, aws)", provider)
+			log.Error("unknown provider %q (supported: cloudflare)", provider)
 			os.Exit(2)
 		}
 
@@ -161,8 +161,8 @@ func promptCredential(f credField, hasExisting bool) (string, error) {
 }
 
 func init() {
-	credsSetCmd.Flags().StringVar(&credsProviderFlag, "provider", "", "provider name (cloudflare, aws)")
-	credsClearCmd.Flags().StringVar(&credsProviderFlag, "provider", "", "provider name (cloudflare, aws)")
+	credsSetCmd.Flags().StringVar(&credsProviderFlag, "provider", "", "provider name (cloudflare)")
+	credsClearCmd.Flags().StringVar(&credsProviderFlag, "provider", "", "provider name (cloudflare)")
 
 	credsCmd.AddCommand(credsSetCmd)
 	credsCmd.AddCommand(credsClearCmd)

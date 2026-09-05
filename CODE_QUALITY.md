@@ -6,7 +6,7 @@
 
 | Unit | Target | Hard ceiling | Notes |
 |---|---|---|---|
-| File | ≤ 300 LOC | 500 LOC | Split by responsibility, not by line count. AWS SDK call sites can push toward the ceiling — that's OK if the file is one cohesive job. |
+| File | ≤ 300 LOC | 500 LOC | Split by responsibility, not by line count. Cloudflare API call sites can push toward the ceiling — that's OK if the file is one cohesive job. |
 | Function | ≤ 20 LOC | 40 LOC | The 20-line target is aspirational. SDK input-struct literals don't count against the budget but should be extracted to a builder if reused. |
 | Struct | ≤ 20 fields | 30 fields | If you cross 20, ask: is this two structs glued together? |
 | Interface | ≤ 5 methods | 8 methods | Bigger interfaces = weaker abstractions. Prefer many small interfaces (`io.Reader`-style). |
@@ -15,26 +15,26 @@ When you touch a file >300 LOC: extract at least one cohesive unit out. Don't tr
 
 ## Decoupling rules
 
-1. **No SDK clients constructed in business logic.** `lambda.NewFromConfig(...)` belongs in a constructor or a `clients` struct on the provider — never inside a `Deploy*` or `Reconcile*` method. New code that does this gets bounced.
-2. **Define small interfaces at the consumer side.** If `DeployCompute` needs only `GetFunction` and `UpdateFunctionCode`, declare a 2-method interface in the same file. Mock that. Don't depend on the full `*lambda.Client`.
-3. **Orchestration layers don't import provider internals.** `deploy.go` orchestrates via the `Provider` interface only. If it needs an AWS-specific concept, the interface is wrong.
-4. **One package = one responsibility.** When `serverless/` becomes painful (it already is), split into subpackages: `serverless/aws/lambda`, `serverless/aws/cloudfront`, etc. Don't pre-split — split when adding the next feature in that area.
+1. **No SDK clients constructed in business logic.** `cloudflare.NewClient(...)` belongs in a constructor or a `clients` struct on the provider — never inside a `Deploy*` or `Reconcile*` method. New code that does this gets bounced.
+2. **Define small interfaces at the consumer side.** If `DeployStatic` needs only `HeadObject` and `PutObject`, declare a 2-method interface in the same file. Mock that. Don't depend on the full SDK client. (`s3ObjectUploader` in the R2 upload path is the shape to copy.)
+3. **Orchestration layers don't import provider internals.** `deploy.go` orchestrates via the `Provider` interface only. If it needs a Cloudflare-specific concept, the interface is wrong.
+4. **One package = one responsibility.** When `serverless/` becomes painful (it already is — `cloudflare.go` is over 1,600 lines), split into subpackages: `serverless/cloudflare/kv`, `serverless/cloudflare/r2`, etc. Don't pre-split — split when adding the next feature in that area.
 
 ## Error handling
 
 1. **Errors are values — handle them, don't just return them.** Wrap with `fmt.Errorf("doing X for %s: %w", name, err)`. Future-you will thank you.
-2. **Never match errors by `strings.Contains(err.Error(), ...)`** — use `errors.As` against typed SDK errors. The only exceptions: AWS errors that aren't exposed as types (document why with a comment).
+2. **Never match errors by `strings.Contains(err.Error(), ...)`** — use `errors.As` against typed SDK errors. The only exception: Cloudflare API errors that arrive as untyped codes in a JSON body (10000, 10042, the 409 on `override_existing_origin`). Document why with a comment.
 3. **No silent `_ = doThing()`** — if you don't care about the error, write a one-line comment explaining why ("non-fatal: cleanup, see X").
-4. **Distinguish fatal vs degraded.** A failed CloudWatch alarm is degraded (warn + continue). A failed Lambda update is fatal (return). Be explicit, not accidental.
+4. **Distinguish fatal vs degraded.** A failed cache purge is degraded (warn + continue). A failed Worker script upload is fatal (return). Be explicit, not accidental.
 5. **No `panic` outside `main` and tests.** Use `log.Fatal` in `main`, return errors elsewhere.
 
 ## Naming & structure
 
 1. Package names: short, lowercase, no underscores, no `util`/`common`/`helpers`.
-2. File names mirror the dominant type or responsibility (`lambda_url.go`, not `helpers.go`).
+2. File names mirror the dominant type or responsibility (`cloudflare_kv.go`, not `helpers.go`).
 3. Constructors: `NewX` returns `*X` or `(X, error)`. No `MakeX`.
 4. Public API needs a doc comment that starts with the identifier name (`golint` rule).
-5. Acronyms stay uppercase: `URL`, `ID`, `ARN`, `OAC`, `IAM`. Not `Url`, `Id`.
+5. Acronyms stay uppercase: `URL`, `ID`, `KV`, `DNS`, `TTL`, `RSC`. Not `Url`, `Id`.
 
 ## Concurrency
 
@@ -64,7 +64,7 @@ When you touch a file >300 LOC: extract at least one cohesive unit out. Don't tr
 - `panic` for control flow.
 - `reflect` outside encoding/decoding glue.
 - Hand-rolled JSON parsing of secrets / config (use `encoding/json` + tagged structs).
-- Hardcoded ARNs, account IDs, or region-specific resources without a config override.
+- Hardcoded account IDs, zone IDs, or namespace IDs without a config override.
 
 ## What "boy-scout" means in practice
 
