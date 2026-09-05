@@ -63,6 +63,7 @@ test_src_dir/
 !cli/internal/serverless/REVIEW.md
 !**/README.md
 !CLOUDFLARE_PARITY.md
+!docs/vps.md
 
 # ── Misc ─────────────────────────────────────────────────────────
 /daemon.md
@@ -78,7 +79,6 @@ NextDeploy/
 graphify-out/
 
 # ── Personal flow notes (do NOT commit) ──────────────────────────
-/docs/AWS_DEPLOY_FLOW.md
 /docs/VPS_DEPLOY_FLOW.md
 /docs/CLOUDFLARE_DEPLOY_FLOW.md
 

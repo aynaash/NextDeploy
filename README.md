@@ -43,7 +43,7 @@ full-stack App Router app. It is the contract for what the Worker runtime
 does and does not cover, and it is kept honest on purpose.
 
 **VPS** (Caddy + the `nextdeployd` daemon over SSH) still works and is still
-supported for bugs — see [`docs/VPS_DEPLOY_FLOW.md`](./docs/VPS_DEPLOY_FLOW.md).
+supported for bugs — see [`docs/vps.md`](./docs/vps.md).
 It is the escape hatch for the quarter after a Next.js release that Workers
 can't run yet. It is not where new work goes.
 

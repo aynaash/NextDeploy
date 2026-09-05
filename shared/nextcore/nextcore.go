@@ -120,6 +120,7 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 	}
 
 	metadata = NextCorePayload{
+		SchemaVersion:     PayloadSchemaVersion,
 		AppName:           cfg.App.Name,
 		NextBuildMetadata: *buildMeta,
 		Config: config.SafeConfig{

@@ -22,7 +22,7 @@ pessimistic: an over-claim here costs more than a missing feature.
 | 13 | Treated as 14 by `version_detect.go`. Untested. |
 | 14 | Supported — `.json` client-reference manifests. |
 | 15 | Supported — `.js` client-reference manifests, `proxy.ts` dispatch. |
-| 16 | **Untested.** Bucketed as "v15" by version detection, so manifest-shape changes will surface as runtime errors, not as a clear build failure. |
+| 16 / canary | **Compile-tested weekly, not feature-tested.** `.github/workflows/nextjs-canary-matrix.yml` scaffolds `next@latest` and `next@canary` every Monday, runs the real compiler, and asserts the Worker in Miniflare. That catches standalone-output drift early. It does **not** mean 16's features are supported: version detection still buckets anything ≥15 as "v15", so a manifest-shape change surfaces as a runtime error rather than a clear build failure. |
 
 Version detection is a bucketing heuristic (`shared/nextcompile/version_detect.go:194`),
 not a compatibility guarantee. Anything above the newest bucket is assumed to
@@ -68,12 +68,17 @@ same `self.__next_f` bootstrap Next's own hydrator expects. Layer 3 — hydratio
 
 **Two things keep this at beta, and both are in the repo, not in speculation:**
 
-1. **The render path is not tested.** `ssr.test.mjs` and `rsc.test.mjs` both
-   state that the render itself "needs the vendored React builds" and stay out
-   of scope. What is covered is the helpers around it — manifest building,
+1. **The dynamic render path is not tested.** `ssr.test.mjs` and `rsc.test.mjs`
+   both state that the render itself "needs the vendored React builds" and stay
+   out of scope; what they cover is the helpers around it — manifest building,
    bootstrap URL ordering, component resolution, and the degradation path when
-   the vendor bundle is absent. Nothing in CI proves that an App Router page
-   renders HTML on `workerd`.
+   the vendor bundle is absent.
+
+   The canary matrix does more than that — it executes the compiled Worker in
+   Miniflare and asserts the home route returns HTML — but that route is
+   *statically prerendered*, so it exercises the R2 + dispatch path, not the
+   RSC → SSR → hydration path. No test anywhere renders a `ƒ` route through
+   React on `workerd`.
 
 2. **The `react-server` export condition is still open.** React's Flight
    *server* build expects the `react-server` condition; the Worker bundle is

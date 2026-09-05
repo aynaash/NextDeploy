@@ -772,6 +772,12 @@ func readMetadata(unpackDir string) (*nextcore.NextCorePayload, error) {
 		if err := json.Unmarshal(data, &meta); err != nil {
 			return nil, fmt.Errorf("parse %s: %w", path, err)
 		}
+		// Version-check before anything reads a field. A skewed CLI/daemon pair
+		// otherwise deploys a release built from zero values — no health path,
+		// no cgroup limits — and reports success.
+		if err := meta.ValidateSchema(); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
 		return &meta, nil
 	}
 	return nil, fmt.Errorf("metadata.json not found in tarball (checked %v)", candidates)
