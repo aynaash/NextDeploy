@@ -1,3 +1,6 @@
+// Package initialcommand implements `nextdeploy init`: it inspects the
+// current Next.js project, asks for a deploy target, and scaffolds the
+// resulting NextDeploy configuration.
 package initialcommand
 
 import (
@@ -24,7 +27,7 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	log.Info("Analysing your Next.js project...")
 
 	// Basic analysis without requiring nextdeploy.yml
-	appName := "example-app"
+	appName := "nextjs-app"
 	if data, err := os.ReadFile("package.json"); err == nil {
 		var pkg struct {
 			Name string `json:"name"`
@@ -50,7 +53,6 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 		Message: "Where would you like to deploy your Next.js application?",
 		Options: []string{
 			"VPS (Virtual Private Server - SSH)",
-			"Serverless (Cloudflare Workers & R2)",
 			"Serverless (Cloudflare Workers + R2)",
 		},
 	}
@@ -60,11 +62,8 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	targetType := "vps"
-	switch {
-	case strings.Contains(targetChoice, "Cloudflare"):
+	if strings.Contains(targetChoice, "Cloudflare") {
 		targetType = "cloudflare"
-	case strings.Contains(targetChoice, "Serverless"):
-		targetType = "serverless"
 	}
 
 	// Cloudflare has two paths: scaffold a fresh fullstack app, or sniff the
@@ -79,7 +78,7 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	configContent := config.GetSampleConfigTemplate(targetType)
 	configContent = strings.ReplaceAll(configContent, "name: example-app", "name: "+appName)
 
-	if err := os.WriteFile("nextdeploy.yml", []byte(configContent), 0600); err != nil {
+	if err := os.WriteFile("nextdeploy.yml", []byte(configContent), 0o600); err != nil {
 		return fmt.Errorf("failed to save configuration: %w", err)
 	}
 
@@ -171,10 +170,10 @@ func runSniffExisting(log *shared.Logger, appName string) error {
 			log.Info("Added a commented domain block to nextdeploy.yml — set app.domain to attach a custom domain on ship.")
 		}
 		log.Warn("nextdeploy.yml already exists — writing the full suggestion to nextdeploy.suggested.yml.")
-		if err := os.WriteFile("nextdeploy.suggested.yml", []byte(configContent), 0600); err != nil {
+		if err := os.WriteFile("nextdeploy.suggested.yml", []byte(configContent), 0o600); err != nil {
 			return fmt.Errorf("failed to save suggestion: %w", err)
 		}
-	} else if err := os.WriteFile("nextdeploy.yml", []byte(configContent), 0600); err != nil {
+	} else if err := os.WriteFile("nextdeploy.yml", []byte(configContent), 0o600); err != nil {
 		return fmt.Errorf("failed to save configuration: %w", err)
 	}
 
@@ -205,7 +204,7 @@ func addDomainStubToFile(path string) (bool, error) {
 	if !added {
 		return false, nil
 	}
-	if err := os.WriteFile(path, []byte(out), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(out), 0o600); err != nil {
 		return false, err
 	}
 	return true, nil

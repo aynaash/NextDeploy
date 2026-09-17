@@ -109,6 +109,12 @@ jobs:
 
       # Only Cloudflare runs a separate ` + "`apply`" + `: it reconciles D1/KV/R2/
       # Vectorize before the Worker ships. VPS ships a release over SSH.
+      #
+      # ` + "`--yes`" + ` is required, not cosmetic: without it ` + "`apply`" + ` prompts on stdin,
+      # which is /dev/null on a runner, so the read fails, the reconcile is
+      # skipped, and apply STILL EXITS 0. The Worker would then ship with
+      # bindings pointing at resources that were never created — green job,
+      # broken deploy.
       - name: Deploy to Cloudflare
         if: steps.detect.outputs.type == 'cloudflare'
         env:
@@ -117,7 +123,7 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          nextdeploy apply
+          nextdeploy apply --yes
           nextdeploy ship --no-provision --verify
 
       - name: Deploy to VPS

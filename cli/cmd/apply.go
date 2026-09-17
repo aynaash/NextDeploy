@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	"github.com/aynaash/nextdeploy/cli/internal/serverless"
 	"github.com/aynaash/nextdeploy/shared"
@@ -77,9 +81,17 @@ Exit codes:
 			fmt.Println("Nothing to apply — all declared resources already exist.")
 			return
 		}
-		if !applyYes && !confirm("Apply these changes to Cloudflare?") {
-			fmt.Println("Aborted.")
-			return
+		if !applyYes {
+			ok, err := confirm("Apply these changes to Cloudflare?")
+			if err != nil {
+				log.Error("%v", err)
+				log.Info("Pass --yes to reconcile without a prompt (required in CI).")
+				os.Exit(1)
+			}
+			if !ok {
+				fmt.Println("Aborted.")
+				return
+			}
 		}
 
 		result, err := provider.Apply(ctx, cfg)
@@ -105,13 +117,35 @@ func pendingChanges(r *serverless.PlanResult) int {
 	return n
 }
 
-func confirm(prompt string) bool {
+// confirm prompts for a y/N answer on stdin.
+//
+// The error return exists to separate "the operator declined" (false, nil)
+// from "there was no operator to ask" (false, err). On a CI runner stdin is
+// /dev/null, so the read hits EOF with nothing buffered. Collapsing that into
+// a plain decline is what let `nextdeploy apply` skip the entire reconcile and
+// still exit 0 — a green job that shipped a Worker whose bindings pointed at
+// resources that were never created.
+//
+// An empty line is a real answer, not a failed prompt: hitting Enter at the
+// prompt takes the [y/N] default and declines cleanly, so only EOF-with-no-
+// input is treated as unpromptable.
+func confirm(prompt string) (bool, error) {
 	fmt.Printf("%s [y/N]: ", prompt)
-	var answer string
-	if _, err := fmt.Scanln(&answer); err != nil {
-		return false
+
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, fmt.Errorf("could not read a confirmation from stdin: %w", err)
 	}
-	return answer == "y" || answer == "Y" || answer == "yes"
+	if errors.Is(err, io.EOF) && strings.TrimSpace(line) == "" {
+		return false, errors.New("no confirmation possible: stdin is closed or empty (non-interactive session)")
+	}
+
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 func init() {

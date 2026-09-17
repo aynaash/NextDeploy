@@ -93,7 +93,7 @@ jobs:
         run: |
           set -o pipefail
           ENV_NAME="pr-${{ github.event.number }}"
-          nextdeploy apply --environment "$ENV_NAME"
+          nextdeploy apply --yes --environment "$ENV_NAME"
           nextdeploy ship --environment "$ENV_NAME" --no-provision --verify | tee ship.log
           WORKER=$(grep -oE 'NEXTDEPLOY_WORKER_NAME=[^[:space:]]+' ship.log | tail -1 | cut -d= -f2)
           if [ -z "$WORKER" ]; then

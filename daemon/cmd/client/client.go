@@ -15,9 +15,7 @@ import (
 	"github.com/aynaash/nextdeploy/daemon/internal/types"
 )
 
-var (
-	socketPath = "/var/run/nextdeployd.sock"
-)
+var socketPath = "/var/run/nextdeployd.sock"
 
 func init() {
 	if os.Geteuid() != 0 {

@@ -112,11 +112,16 @@ GitHub secrets you need to configure for it.`,
 // resolveCITarget collapses cfg into the (target, provider) pair the
 // generated workflow needs. Returns ("vps", "") for VPS, or
 // ("serverless", "<provider>") for Cloudflare.
+//
+// Target resolution is delegated to cfg.ResolveTargetType rather than read
+// straight off cfg.TargetType. `nextdeploy init` writes a Cloudflare config
+// with a `serverless:` block and no `target_type:` key, so reading the field
+// directly resolved to "vps" and printed the SSH secret checklist to a
+// Cloudflare user — while the workflow's own runtime detect step (which greps
+// for `provider: cloudflare`) correctly ran the Cloudflare deploy and then
+// failed on the missing CLOUDFLARE_API_TOKEN.
 func resolveCITarget(cfg *config.NextDeployConfig) (target, provider string) {
-	target = strings.ToLower(cfg.TargetType)
-	if target == "" {
-		target = "vps"
-	}
+	target = strings.ToLower(cfg.ResolveTargetType(""))
 	if target == "serverless" && cfg.Serverless != nil {
 		provider = strings.ToLower(cfg.Serverless.Provider)
 	}

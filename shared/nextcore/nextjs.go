@@ -1,7 +1,10 @@
+// Package nextcore provides shared helpers for detecting and inspecting
+// Next.js projects on disk.
 package nextcore
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,12 +22,12 @@ type PackageJSON struct {
 	Private         bool              `json:"private"`
 }
 
-func GetNextJsVersion(packageJsonPath string) (string, error) {
+func GetNextJsVersion(packageJSONPath string) (string, error) {
 	// #nosec G304
-	data, err := os.ReadFile(packageJsonPath)
+	data, err := os.ReadFile(packageJSONPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("package.json not found at %s", packageJsonPath)
+			return "", fmt.Errorf("package.json not found at %s", packageJSONPath)
 		}
 		return "", fmt.Errorf("error reading package.json: %w", err)
 	}
@@ -38,7 +41,7 @@ func GetNextJsVersion(packageJsonPath string) (string, error) {
 	if version, exists := pkg.DevDependencies["next"]; exists {
 		return version, nil
 	}
-	return "", fmt.Errorf("Next.js dependency not found in package.json")
+	return "", errors.New("no Next.js dependency found in package.json")
 }
 
 func ValidateNextJSProject(cmd *cobra.Command, args []string) error {
@@ -63,7 +66,7 @@ func ValidateNextJSProject(cmd *cobra.Command, args []string) error {
 		if reason != "" {
 			return fmt.Errorf("directory '%s' is not a Next.js project: %s", absPath, reason)
 		}
-		return fmt.Errorf("directory doesn't appear to be a Next.js project")
+		return errors.New("directory doesn't appear to be a Next.js project")
 	}
 	return nil
 }

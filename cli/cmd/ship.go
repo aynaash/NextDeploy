@@ -94,11 +94,13 @@ var shipCmd = &cobra.Command{
 }
 
 func shipServerless(ctx context.Context, log *shared.Logger, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) {
-	log.Info("Deployment Target: SERVERLESS (provider=%s)", cfg.Serverless.Provider)
+	// Guard before the deref, not after: reading cfg.Serverless.Provider first
+	// panics on exactly the config this check exists to reject.
 	if cfg.Serverless == nil {
 		log.Error("Inferred 'serverless' target but 'serverless' config block is missing.")
 		os.Exit(1)
 	}
+	log.Info("Deployment Target: SERVERLESS (provider=%s)", cfg.Serverless.Provider)
 	if err := serverless.Deploy(ctx, cfg, meta, shipVerbose, !shipNoProvision, shipVerify); err != nil {
 		if ctx.Err() != nil {
 			log.Warn("Deploy interrupted — state may be partial. Re-run `nextdeploy ship` " +
