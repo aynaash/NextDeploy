@@ -2,8 +2,8 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  cmd = "mage buildCLIDev"
-  bin = "/home/hersi/.nextdeploy/bin/nextdeploy"
+  cmd = "go build -o tmp/nextdeploy ./cli"
+  bin = "tmp/nextdeploy"
   full_bin = ""
   include_ext = ["go", "toml"]
   exclude_dir = ["assets", "tmp", "vendor", "daemon", "docs"]

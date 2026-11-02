@@ -2,9 +2,9 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  cmd = "mage buildDaemonDev"
-  bin = "~/.nextdeploy/bin/nextdeployd"
-  full_bin = "~/.nextdeploy/bin/nextdeployd --foreground=true"
+  cmd = "go build -o tmp/nextdeployd ./daemon/cmd/nextdeployd"
+  bin = "tmp/nextdeployd"
+  full_bin = "tmp/nextdeployd --foreground=true"
   include_ext = ["go", "toml", "yml"]
   exclude_dir = ["assets", "tmp", "vendor", "cli", "docs"]
   include_dir = ["daemon", "shared"]

@@ -137,6 +137,7 @@ func TestSecretsEqual(t *testing.T) {
 		})
 	}
 }
+
 // chdir switches CWD for the duration of a test, restoring on cleanup.
 func chdir(t *testing.T, dir string) {
 	t.Helper()

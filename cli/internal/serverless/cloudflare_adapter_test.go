@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aynaash/nextdeploy/shared"
 	"github.com/aynaash/nextdeploy/shared/nextcompile"
 	"github.com/aynaash/nextdeploy/shared/nextcore"
 )
@@ -31,6 +32,8 @@ func TestAdapterPreEsbuildStateIsValid(t *testing.T) {
 		`export default function Home(){ return "<h1>home</h1>" }`)
 	writeTestFile(t, filepath.Join(dir, ".next", "server", "app", "api", "hello", "route.js"),
 		`export async function GET(){ return Response.json({ok:true}) }`)
+	writeTestFile(t, filepath.Join(dir, ".next", "server", "app", "actions", "page.js"),
+		`export function doThing(){ return "done" }`)
 	writeTestFile(t, filepath.Join(dir, ".next", "server", "proxy.js"),
 		`export default function proxy(){}`)
 	writeTestFile(t, filepath.Join(dir, ".next", "server", "middleware.js"),
@@ -182,6 +185,20 @@ func TestAdapterPreEsbuildStateIsValid(t *testing.T) {
 	}
 	if bundle.Stats.ActionCount != 1 {
 		t.Errorf("ActionCount: got %d, want 1", bundle.Stats.ActionCount)
+	}
+
+	// Now execute BuildWorkerBundle end-to-end with the in-process Go esbuild compiler.
+	log := shared.PackageLogger("test", "TEST")
+	workerOut, err := BuildWorkerBundle(context.Background(), dir, meta, nil, log)
+	if err != nil {
+		t.Fatalf("BuildWorkerBundle: %v", err)
+	}
+	info, err := os.Stat(workerOut)
+	if err != nil {
+		t.Fatalf("worker.mjs not found at %s: %v", workerOut, err)
+	}
+	if info.Size() == 0 {
+		t.Fatalf("worker.mjs is empty")
 	}
 }
 

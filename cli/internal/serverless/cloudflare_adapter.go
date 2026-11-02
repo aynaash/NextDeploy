@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/aynaash/nextdeploy/shared/config"
 	"github.com/aynaash/nextdeploy/shared/nextcompile"
 	"github.com/aynaash/nextdeploy/shared/nextcore"
+	"github.com/evanw/esbuild/pkg/api"
 )
 
 // BuildWorkerBundle adapts a Next.js standalone build into a single
@@ -44,9 +44,6 @@ func BuildWorkerBundle(
 ) (string, error) {
 	if _, err := os.Stat(standaloneDir); err != nil {
 		return "", fmt.Errorf("standalone dir not found: %w", err)
-	}
-	if _, err := exec.LookPath("npx"); err != nil {
-		return "", fmt.Errorf("npx not found on PATH (install Node.js): %w", err)
 	}
 
 	outDir := filepath.Join(standaloneDir, ".nextdeploy-cf")
@@ -308,57 +305,60 @@ func runEsbuild(ctx context.Context, entry, out, metaPath, cwd string, log *shar
 	// shims. Path is relative to the standalone dir (esbuild's cwd).
 	runtimeRoot := ".nextdeploy-cf/_nextdeploy/runtime"
 
-	// metaPath is given to us as absolute; esbuild resolves --metafile
-	// relative to its cwd. Make it relative so the path lands where the
-	// caller expects (and stays readable in the esbuild log line).
-	relMeta, err := filepath.Rel(cwd, metaPath)
-	if err != nil {
-		relMeta = metaPath
+	asyncStorageShim := filepath.Join(runtimeRoot, "next_shims", "async_storages.mjs")
+	alias := map[string]string{
+		"next/cache":   filepath.Join(runtimeRoot, "next_shims", "cache.mjs"),
+		"next/headers": filepath.Join(runtimeRoot, "next_shims", "headers.mjs"),
+		"next/server":  filepath.Join(runtimeRoot, "next_shims", "server.mjs"),
+		"next/dist/server/app-render/work-async-storage.external.js":       asyncStorageShim,
+		"next/dist/server/app-render/work-async-storage.external":          asyncStorageShim,
+		"next/dist/server/app-render/action-async-storage.external.js":     asyncStorageShim,
+		"next/dist/server/app-render/action-async-storage.external":        asyncStorageShim,
+		"next/dist/server/app-render/after-task-async-storage.external.js": asyncStorageShim,
+		"next/dist/server/app-render/after-task-async-storage.external":    asyncStorageShim,
 	}
 
-	args := []string{
-		"--yes",
-		"esbuild@latest",
-		entry,
-		"--bundle",
-		"--platform=node",
-		"--format=esm",
-		"--target=esnext",
-		"--main-fields=module,main",
-		"--conditions=workerd,worker,node",
-		"--external:node:*",
-		"--external:cloudflare:*",
-		"--loader:.node=copy",
-		"--loader:.json=json",
-		"--minify-syntax",
-		"--minify-whitespace",
-		"--legal-comments=none",
-		"--metafile=" + relMeta,
-		"--alias:next/cache=" + filepath.Join(runtimeRoot, "next_shims", "cache.mjs"),
-		"--alias:next/headers=" + filepath.Join(runtimeRoot, "next_shims", "headers.mjs"),
-		"--alias:next/server=" + filepath.Join(runtimeRoot, "next_shims", "server.mjs"),
-		"--outfile=" + out,
-	}
-	// Optional Next.js peer dependencies that aren't part of the
-	// standard bundle and are imported via try/catch'd require() calls
-	// in Next's source. Marking them external lets the bundle complete;
-	// at runtime the `require()` throws and Next's catch fallback runs.
-	//
-	// Add new entries here as we encounter them — each is one user-deploy
-	// failure away from being added.
-	for _, pkg := range optionalExternalPackages {
-		args = append(args, "--external:"+pkg)
+	externals := append([]string{"node:*", "cloudflare:*"}, optionalExternalPackages...)
+
+	log.Info("Bundling Worker via in-process esbuild (entry: %s)...", filepath.Base(entry))
+
+	result := api.Build(api.BuildOptions{
+		EntryPoints: []string{entry},
+		Bundle:      true,
+		Platform:    api.PlatformNode,
+		Format:      api.FormatESModule,
+		Target:      api.ESNext,
+		MainFields:  []string{"module", "main"},
+		Conditions:  []string{"workerd", "worker", "node"},
+		External:    externals,
+		Loader: map[string]api.Loader{
+			".node": api.LoaderCopy,
+			".json": api.LoaderJSON,
+		},
+		MinifySyntax:     true,
+		MinifyWhitespace: true,
+		LegalComments:    api.LegalCommentsNone,
+		Metafile:         true,
+		Alias:            alias,
+		AbsWorkingDir:    cwd,
+		Outfile:          out,
+		Write:            true,
+	})
+
+	if len(result.Errors) > 0 {
+		formatted := api.FormatMessages(result.Errors, api.FormatMessagesOptions{
+			Kind:          api.ErrorMessage,
+			Color:         false,
+			TerminalWidth: 80,
+		})
+		return fmt.Errorf("esbuild failed:\n%s", strings.Join(formatted, "\n"))
 	}
 
-	log.Info("Bundling Worker via esbuild (entry: %s)...", filepath.Base(entry))
-	// NOSONAR: spawning `npx` is intentional and every argument here is
-	// either a static flag or a path the compiler just emitted into
-	// OutDir. No user-supplied string reaches argv; there is no shell
-	// interpolation — exec.CommandContext takes argv directly, not a
-	// shell string.
-	cmd := exec.CommandContext(ctx, "npx", args...)
-	cmd.Dir = cwd
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	if result.Metafile != "" {
+		if err := os.MkdirAll(filepath.Dir(metaPath), 0o750); err == nil {
+			_ = os.WriteFile(metaPath, []byte(result.Metafile), 0o640)
+		}
+	}
+
+	return nil
 }

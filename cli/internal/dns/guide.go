@@ -10,7 +10,7 @@ import (
 const (
 	mdTableHeader = "| Type | Host (Name) | Target (Value) |\n"
 	mdTableSep    = "| :--- | :--- | :--- |\n"
-	docsURL       = "https://nextdeploy.org/docs"
+	docsURL       = "https://hersi.dev/nextdeploy"
 )
 
 // ValidationRecord represents an SSL validation CNAME record.
@@ -334,7 +334,7 @@ func writeFinalSteps(f *os.File) {
 	fmt.Fprintf(f, "- [ ] Run `nextdeploy ship` to complete\n\n")
 
 	fmt.Fprintf(f, "---\n")
-	fmt.Fprintf(f, "*Need help? Visit [nextdeploy.org/docs](%s) or run `nextdeploy support`*\n", docsURL)
+	fmt.Fprintf(f, "*Need help? Visit [hersi.dev/nextdeploy](%s) or run `nextdeploy support`*\n", docsURL)
 }
 
 // Helper function to determine record purpose.

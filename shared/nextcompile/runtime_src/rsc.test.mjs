@@ -16,6 +16,24 @@ test("resolveComponent finds the component on default/Page/Component", () => {
   assert.strictEqual(resolveComponent({ default: fn, Page: () => 1 }), fn, "default wins");
 });
 
+test("resolveComponent extracts component from routeModule userland and tree", () => {
+  const fn = () => null;
+  assert.strictEqual(resolveComponent({ routeModule: { userland: { default: fn } } }), fn);
+  assert.strictEqual(resolveComponent({ userland: { Page: fn } }), fn);
+  assert.strictEqual(
+    resolveComponent({
+      tree: ["", {}, { page: [() => ({ default: fn })] }],
+    }),
+    fn,
+  );
+  assert.strictEqual(
+    resolveComponent({
+      tree: ["", { children: ["dashboard", {}, { page: [() => fn] }] }],
+    }),
+    fn,
+  );
+});
+
 test("resolveComponent is undefined for modules with none of them", () => {
   assert.strictEqual(resolveComponent({}), undefined);
   assert.strictEqual(resolveComponent(null), undefined);

@@ -36,11 +36,11 @@ type AWSProvider struct {
 	log                 *shared.Logger
 	cfg                 aws.Config
 	accountID           string
-	callerArn           string 
-	environment         string 
-	lambdaTimeout       int32  
-	secretsLayerVersion string 
-	secretsKmsKeyId     string 
+	callerArn           string
+	environment         string
+	lambdaTimeout       int32
+	secretsLayerVersion string
+	secretsKmsKeyId     string
 	verbose             bool
 }
 
@@ -114,7 +114,7 @@ type awsStaticCreds struct {
 	accessKey    string
 	secretKey    string
 	sessionToken string
-	source       string 
+	source       string
 }
 
 func loadAWSStaticCreds(cfg *cfgTypes.NextDeployConfig, log *shared.Logger) awsStaticCreds {

@@ -182,13 +182,22 @@ export function resolveActionFn(mod, moduleId, actionId) {
   return typeof fn === "function" ? fn : undefined;
 }
 
+let vendoredFlightEncoder = null;
+import("./vendor/react-server-dom-webpack/server.edge.mjs")
+  .then((v) => {
+    if (typeof v?.renderToReadableStream === "function") {
+      vendoredFlightEncoder = v.renderToReadableStream;
+    }
+  })
+  .catch(() => {});
+
 // encodeFlightReply encodes an action's return value as a Flight (RSC) stream
 // via the module's react-server-dom-webpack renderToReadableStream — the
 // `text/x-component` format Next's client decodes. Returns the stream, or null
 // when the encoder is unavailable / throws (caller falls back to JSON). An empty
 // client manifest is sufficient for plain-data results (the common case).
 export function encodeFlightReply(mod, result) {
-  const render = pageExports(mod)?.renderToReadableStream;
+  const render = pageExports(mod)?.renderToReadableStream || vendoredFlightEncoder;
   if (typeof render !== "function") return null;
   try {
     return render(result === undefined ? null : result, {});
@@ -214,7 +223,8 @@ export async function parseArgs(request) {
     const form = await new Response(bytes, {
       headers: { "content-type": request.headers.get("content-type") },
     }).formData();
-    return [formDataToArgs(form)];
+    const args = formDataToArgs(form);
+    return Array.isArray(args) ? args : [args];
   }
 
   if (contentType.startsWith("application/json")) {
@@ -231,6 +241,14 @@ export async function parseArgs(request) {
       const parsed = JSON.parse(text);
       return Array.isArray(parsed) ? parsed : [parsed];
     } catch {
+      // Decode Flight-encoded stream arguments if present (e.g. 0:[arg1, arg2])
+      const flightMatch = /^0:(.*)$/m.exec(text);
+      if (flightMatch) {
+        try {
+          const parsed = JSON.parse(flightMatch[1]);
+          return Array.isArray(parsed) ? parsed : [parsed];
+        } catch {}
+      }
       return [text];
     }
   }
@@ -293,6 +311,21 @@ async function readBoundedText(request) {
 }
 
 function formDataToArgs(form) {
+  // Check for Next.js bound arguments in form data ($ACTION_ARG_0, $ACTION_ARG_1, ...)
+  const boundArgs = [];
+  let hasBoundArgs = false;
+  for (const [k, v] of form.entries()) {
+    const m = /^\$ACTION_ARG_(\d+)$/.exec(k);
+    if (m) {
+      hasBoundArgs = true;
+      try {
+        boundArgs[Number(m[1])] = JSON.parse(String(v));
+      } catch {
+        boundArgs[Number(m[1])] = v;
+      }
+    }
+  }
+
   // Collapse form data into a plain object. Next's form-action wiring
   // posts a FormData instance; handlers almost always receive it as a
   // single FormData argument. But code that imports action helpers
@@ -309,6 +342,10 @@ function formDataToArgs(form) {
     } else {
       out[k] = [out[k], v];
     }
+  }
+
+  if (hasBoundArgs) {
+    return [...boundArgs, out];
   }
   return out;
 }

@@ -577,7 +577,17 @@ func PreCommitInstall() error {
 	return nil
 }
 
-// ── dev / watch ──────────────────────────────────────────────────────────────
+// ── dev / watch / feedback ───────────────────────────────────────────────────
+
+// Check runs the rapid feedback preflight (compile, test, runtime, ratchet).
+func Check() error {
+	return sh.RunV("./scripts/dev-feedback.sh", "--all")
+}
+
+// Loop starts the continuous developer feedback loop watching for changes.
+func Loop() error {
+	return sh.RunV("./scripts/dev-feedback.sh", "--watch")
+}
 
 // Dev is an alias for DevCLI — watch CLI source and rebuild on change.
 func Dev() error { return DevCLI() }

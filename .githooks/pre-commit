@@ -93,8 +93,8 @@ fi
 
 # 6. go vet on changed packages (cheap, catches obvious bugs)
 if [ -n "$go_files" ] && command -v go >/dev/null 2>&1; then
-  pkgs=$(echo "$go_files" | xargs -n1 dirname | sort -u | sed 's|^|./|')
-  if ! go vet $pkgs >/dev/null 2>&1; then
+  pkgs=$(echo "$go_files" | xargs -n1 dirname | sort -u | grep -v '^\.$' | sed 's|^|./|' || true)
+  if [ -n "$pkgs" ] && ! go vet $pkgs >/dev/null 2>&1; then
     err "go vet failed on changed packages:"
     go vet $pkgs 2>&1 | sed 's/^/    /' >&2 || true
   fi

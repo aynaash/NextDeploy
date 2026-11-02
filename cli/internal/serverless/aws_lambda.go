@@ -709,7 +709,6 @@ func (p *AWSProvider) ensureLambdaFunctionExists(ctx context.Context, client *la
 			}
 		}
 
-
 		var invalidParam *lambdaTypes.InvalidParameterValueException
 		if errors.As(createErr, &invalidParam) && strings.Contains(createErr.Error(), "role") && i < maxRetries-1 {
 			p.log.Warn("IAM role not yet propagated, retrying CreateFunction (%d/%d) in %s...", i+1, maxRetries, retryDelay)

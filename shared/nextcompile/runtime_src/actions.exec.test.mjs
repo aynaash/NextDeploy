@@ -75,3 +75,51 @@ test("handleServerAction: resolves, executes, and returns a Flight reply", async
   const text = await res.text();
   assert.equal(text, '0:{"sum":5}\n', "action executed and its result was Flight-encoded");
 });
+
+test("handleServerAction: handles bound arguments in FormData", async () => {
+  const actionId = "act-add";
+  const manifest = { actions: { [actionId]: { module: "app/page", export: "42", runtime: "node" } } };
+  const loaders = { "app/page": async () => fakePageModule({ wrapInDefault: true }) };
+
+  const form = new FormData();
+  form.append("$ACTION_ARG_0", "10");
+  form.append("$ACTION_ARG_1", "25");
+  form.append("extra", "ignore");
+
+  const req = new Request("https://app.example.com/", {
+    method: "POST",
+    headers: {
+      "next-action": actionId,
+      origin: "https://app.example.com",
+      host: "app.example.com",
+    },
+    body: form,
+  });
+
+  const res = await handleServerAction(req, {}, { waitUntil() {} }, manifest, loaders);
+  assert.equal(res.status, 200);
+  const text = await res.text();
+  assert.equal(text, '0:{"sum":35}\n', "bound action executed with bound args");
+});
+
+test("handleServerAction: handles Flight-encoded text body", async () => {
+  const actionId = "act-add";
+  const manifest = { actions: { [actionId]: { module: "app/page", export: "42", runtime: "node" } } };
+  const loaders = { "app/page": async () => fakePageModule({ wrapInDefault: true }) };
+
+  const req = new Request("https://app.example.com/", {
+    method: "POST",
+    headers: {
+      "next-action": actionId,
+      "content-type": "text/plain",
+      origin: "https://app.example.com",
+      host: "app.example.com",
+    },
+    body: "0:[7, 8]\n",
+  });
+
+  const res = await handleServerAction(req, {}, { waitUntil() {} }, manifest, loaders);
+  assert.equal(res.status, 200);
+  const text = await res.text();
+  assert.equal(text, '0:{"sum":15}\n', "Flight text body parsed into args");
+});

@@ -15,8 +15,7 @@ name: Release Please
 # workflows, so release.yml never double-fires for a release-please release.
 
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write

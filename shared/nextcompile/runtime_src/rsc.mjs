@@ -137,7 +137,8 @@ export async function renderRSC(entry, request, env, ctx, routeCtx, manifest) {
     // the page ships with no <title> or Open Graph tags whatsoever.
     let metaMarkup = "";
     try {
-      const chain = [...layoutModules, pageModule];
+      const pageUserland = pageModule?.routeModule?.userland || pageModule?.userland || pageModule;
+      const chain = [...layoutModules, pageUserland];
       metaMarkup = renderMetadataTags(await resolveMetadata(chain, treeProps));
     } catch (err) {
       console.error("[nextcompile metadata]", err?.stack || String(err));
@@ -169,10 +170,59 @@ export async function renderRSC(entry, request, env, ctx, routeCtx, manifest) {
 
 /**
  * Pick the React component out of a compiled Next page module. Next
- * commonly puts it on default; some legacy emits use `Page`.
+ * commonly puts it on default; some legacy emits use `Page`. Production
+ * route modules put it on routeModule.userland.default or inside tree.
  */
 export function resolveComponent(mod) {
-  return mod?.default || mod?.Page || mod?.Component;
+  if (!mod) return undefined;
+  if (typeof mod === "function") return mod;
+  if (typeof mod.default === "function") return mod.default;
+  if (typeof mod.Page === "function") return mod.Page;
+  if (typeof mod.Component === "function") return mod.Component;
+
+  // Next's internal route module userland export.
+  const userland =
+    mod.routeModule?.userland ||
+    mod.routeModule?.definition?.userland ||
+    mod.userland;
+  if (userland) {
+    if (typeof userland === "function") return userland;
+    if (typeof userland.default === "function") return userland.default;
+    if (typeof userland.Page === "function") return userland.Page;
+    if (typeof userland.Component === "function") return userland.Component;
+  }
+
+  // Next's recursive App Router tree layout representation.
+  if (mod.tree) {
+    const fromTree = extractComponentFromTree(mod.tree);
+    if (typeof fromTree === "function") return fromTree;
+  }
+
+  return undefined;
+}
+
+function extractComponentFromTree(tree) {
+  if (!tree || !Array.isArray(tree)) return undefined;
+  const components = tree[2];
+  if (components && components.page) {
+    const pageLoader = Array.isArray(components.page) ? components.page[0] : components.page;
+    if (typeof pageLoader === "function") {
+      try {
+        const res = pageLoader();
+        if (typeof res === "function") return res;
+        if (res && typeof res.default === "function") return res.default;
+        if (res && typeof res.Page === "function") return res.Page;
+      } catch {}
+    }
+  }
+  const parallelRoutes = tree[1];
+  if (parallelRoutes && typeof parallelRoutes === "object") {
+    for (const sub of Object.values(parallelRoutes)) {
+      const found = extractComponentFromTree(sub);
+      if (found) return found;
+    }
+  }
+  return undefined;
 }
 
 /**

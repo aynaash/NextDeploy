@@ -56,6 +56,57 @@ export default {
   async fetch(request, env, ctx) {
     return dispatch(request, env, ctx, tables);
   },
+  async scheduled(event, env, ctx) {
+    const cronUrl = new URL("/api/cron", "http://localhost");
+    const req = new Request(cronUrl, {
+      method: "POST",
+      headers: {
+        "x-cron-trigger": event.cron || "",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        cron: event.cron,
+        scheduledTime: event.scheduledTime,
+      }),
+    });
+    ctx.waitUntil(
+      dispatch(req, env, ctx, tables)
+        .then((res) => {
+          if (!res.ok && res.status !== 404) {
+            console.warn("[scheduled warning] cron handler returned status", res.status);
+          }
+        })
+        .catch((err) => console.error("[scheduled error]", err))
+    );
+  },
+  async queue(batch, env, ctx) {
+    const queueUrl = new URL("/api/queue/" + encodeURIComponent(batch.queue || ""), "http://localhost");
+    const messages = (batch.messages || []).map((m) => ({
+      id: m.id,
+      timestamp: m.timestamp,
+      body: m.body,
+    }));
+    const req = new Request(queueUrl, {
+      method: "POST",
+      headers: {
+        "x-queue-name": batch.queue || "",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        queue: batch.queue,
+        messages,
+      }),
+    });
+    ctx.waitUntil(
+      dispatch(req, env, ctx, tables)
+        .then((res) => {
+          if (!res.ok && res.status !== 404) {
+            console.warn("[queue warning] queue handler returned status", res.status);
+          }
+        })
+        .catch((err) => console.error("[queue error]", err))
+    );
+  },
 };
 `
 

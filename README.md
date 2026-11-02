@@ -60,7 +60,7 @@ sample.nextdeploy.yml      Annotated reference config
 
 ## Documentation
 
-- Full docs: <https://nextdeploy.org/docs>
+- Full docs: <https://hersi.dev/nextdeploy>
 - Sample config: [`sample.nextdeploy.yml`](./sample.nextdeploy.yml)
 - Each command also has `nextdeploy <cmd> explain` for inline help
 
