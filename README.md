@@ -5,9 +5,10 @@ config file and one command. Open source, self-hosted, no vendor lock-in.
 
 ```bash
 curl -fsSL https://hersi.dev/nextdeploy/install.sh | bash
+# Mirror: curl -fsSL https://nextdeploy.org/install.sh | bash
 ```
 
-Windows: download `install.bat` from <https://hersi.dev/nextdeploy/install.bat>.
+Windows: download `install.bat` from <https://hersi.dev/nextdeploy/install.bat> (or <https://nextdeploy.org/install.bat>).
 
 <p align="center">
   <img src="./assets/ship-demo.gif" alt="nextdeploy ship — edit a Next.js component and deploy to Cloudflare in seconds (2× speed, no edits)" width="820" />
@@ -27,6 +28,13 @@ nextdeploy logs -f  # tail production logs
 
 `nextdeploy.yml` holds everything — target type, domain, server, secrets
 provider. See `sample.nextdeploy.yml` in this repo for the full schema.
+
+## Key Architecture & Features
+
+- **True Zero-Downtime Atomic Cutover**: Dual-stage TCP + HTTP health probing with atomic POSIX symlink renames (`current.tmp` ➔ `current`).
+- **Cumulative Static Chunk Pooling (`shared_static`)**: Eliminates the Next.js `ChunkLoadError` 404s for active user sessions across updates.
+- **Bare-Metal Speed (Go + Caddy + Systemd)**: No Docker daemon overhead. Uses Linux kernel `cgroup v2` memory sandboxing and offloads all static bytes directly to NVMe disk via Caddy.
+- **Multi-Target Portability**: Deploy to a $4 VPS, AWS Lambda, or Cloudflare Workers from a single config file.
 
 ## Targets
 
@@ -75,3 +83,4 @@ yes/no on direction before you spend time on a PR.
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
