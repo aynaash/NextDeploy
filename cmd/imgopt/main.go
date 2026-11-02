@@ -10,6 +10,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -199,7 +200,19 @@ func fetchImage(ctx context.Context, rawURL string) (image.Image, string, error)
 			return nil
 		},
 	}
-	resp, err := client.Get(rawURL)
+
+	// Reconstruct a validated target URL to prevent SSRF
+	targetURL := &url.URL{
+		Scheme:   parsed.Scheme,
+		Host:     parsed.Host,
+		Path:     parsed.Path,
+		RawQuery: parsed.RawQuery,
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL.String(), nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, "", err
 	}
@@ -213,10 +226,40 @@ func fetchImage(ctx context.Context, rawURL string) (image.Image, string, error)
 	return img, format, err
 }
 
+func isPrivateOrLocal(host string) bool {
+	h := host
+	if strings.Contains(h, ":") {
+		if parsedHost, _, err := net.SplitHostPort(h); err == nil {
+			h = parsedHost
+		}
+	}
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	if ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return true
+		}
+		if ip.String() == "169.254.169.254" {
+			return true
+		}
+	}
+	return false
+}
+
 func isAllowedDomain(host, scheme string) bool {
+	if scheme != "http" && scheme != "https" {
+		return false
+	}
+	if isPrivateOrLocal(host) {
+		return false
+	}
+
 	// Check allowed domains list
 	for _, d := range imageConfig.AllowedDomains {
-		if host == d || host == strings.TrimSpace(d) {
+		clean := strings.TrimSpace(d)
+		if clean != "" && (host == clean || strings.HasPrefix(host, clean+":")) {
 			return true
 		}
 	}
@@ -232,8 +275,8 @@ func isAllowedDomain(host, scheme string) bool {
 		return true
 	}
 
-	// If no config, deny by default
-	return len(imageConfig.AllowedDomains) == 0 && len(imageConfig.RemotePatterns) == 0
+	// Deny by default if not explicitly allowed
+	return false
 }
 
 func matchHostname(host, pattern string) bool {

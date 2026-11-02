@@ -54,3 +54,45 @@ func TestResizeToWidth_PassThrough(t *testing.T) {
 		t.Error("zero-area source should return unchanged")
 	}
 }
+
+func TestIsAllowedDomain_Security(t *testing.T) {
+	// 1. When empty, must deny by default
+	imageConfig.AllowedDomains = nil
+	imageConfig.RemotePatterns = nil
+	if isAllowedDomain("example.com", "https") {
+		t.Error("expected deny by default when no allowed domains are configured")
+	}
+
+	// 2. Private, loopback, and metadata IPs must always be blocked
+	imageConfig.AllowedDomains = []string{"*"}
+	blockedHosts := []string{
+		"localhost",
+		"localhost:8080",
+		"127.0.0.1",
+		"127.0.0.1:3000",
+		"169.254.169.254", // AWS IMDS
+		"10.0.0.1",
+		"192.168.1.1",
+		"172.16.0.1",
+		"::1",
+	}
+	for _, h := range blockedHosts {
+		if isAllowedDomain(h, "http") || isAllowedDomain(h, "https") {
+			t.Errorf("expected host %q to be blocked as private/local", h)
+		}
+	}
+
+	// 3. Non-http/https protocols must be rejected
+	if isAllowedDomain("images.unsplash.com", "file") {
+		t.Error("expected file:// protocol to be rejected")
+	}
+
+	// 4. Configured domain allows matching host
+	imageConfig.AllowedDomains = []string{"images.unsplash.com"}
+	if !isAllowedDomain("images.unsplash.com", "https") {
+		t.Error("expected images.unsplash.com to be allowed")
+	}
+	if isAllowedDomain("malicious.com", "https") {
+		t.Error("expected malicious.com to be denied")
+	}
+}
