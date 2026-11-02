@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.16.0](https://github.com/aynaash/NextDeploy/compare/v0.15.1...v0.16.0) (2026-11-02)
+
+### ⚠ BREAKING CHANGES
+
+* **prepare:** provision over static Go agent; fix deploy correctness (`prepare` uses Go agent by default; `app.name` restricted to `^[a-z0-9-]+$`).
+
+### Features
+
+* **cloudflare:** SSR runtime, resource adoption, named environments, and shared CI.
+* **prepare:** provision Caddy, the daemon service, and Doppler in agent mode.
+
+### Security & Bug Fixes
+
+* **security:** resolve CodeQL SSRF vulnerability in `cmd/imgopt`.
+* **security:** bump `golang.org/x/crypto` to v0.56.0, `google.golang.org/grpc` to v1.84.0, and `vitest` to v4.1.11.
+* **cloudflare:** rollback now picks active version and purges cache.
+* **prepare:** add caddy to nextdeploy group for static asset access.
+* **ship:** point DNS guide at server IP address rather than config nickname.
+
+### Performance Improvements
+
+* **caddy:** serve static assets (`public/`) directly from Caddy instead of proxying to Node.
+
 ## [0.15.1](https://github.com/aynaash/NextDeploy/compare/v0.15.0...v0.15.1) (2026-07-03)
 
 

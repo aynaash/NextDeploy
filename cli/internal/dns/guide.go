@@ -27,7 +27,6 @@ type RoutingRecord struct {
 	Type  string // "CNAME" or "A"
 }
 
-// Provider-specific formatting rules.
 type ProviderRules struct {
 	Name             string
 	HostFormat       func(host string) string // How to format the host field

@@ -24,7 +24,7 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	log.Info("Analysing your Next.js project...")
 
 	// Basic analysis without requiring nextdeploy.yml
-	appName := "example-app"
+	appName := "myapp"
 	if data, err := os.ReadFile("package.json"); err == nil {
 		var pkg struct {
 			Name string `json:"name"`
@@ -79,7 +79,7 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	configContent := config.GetSampleConfigTemplate(targetType)
 	configContent = strings.ReplaceAll(configContent, "name: example-app", "name: "+appName)
 
-	if err := os.WriteFile("nextdeploy.yml", []byte(configContent), 0600); err != nil {
+	if err := os.WriteFile("nextdeploy.yml", []byte(configContent), 0o600); err != nil {
 		return fmt.Errorf("failed to save configuration: %w", err)
 	}
 
@@ -171,10 +171,10 @@ func runSniffExisting(log *shared.Logger, appName string) error {
 			log.Info("Added a commented domain block to nextdeploy.yml — set app.domain to attach a custom domain on ship.")
 		}
 		log.Warn("nextdeploy.yml already exists — writing the full suggestion to nextdeploy.suggested.yml.")
-		if err := os.WriteFile("nextdeploy.suggested.yml", []byte(configContent), 0600); err != nil {
+		if err := os.WriteFile("nextdeploy.suggested.yml", []byte(configContent), 0o600); err != nil {
 			return fmt.Errorf("failed to save suggestion: %w", err)
 		}
-	} else if err := os.WriteFile("nextdeploy.yml", []byte(configContent), 0600); err != nil {
+	} else if err := os.WriteFile("nextdeploy.yml", []byte(configContent), 0o600); err != nil {
 		return fmt.Errorf("failed to save configuration: %w", err)
 	}
 
@@ -205,7 +205,7 @@ func addDomainStubToFile(path string) (bool, error) {
 	if !added {
 		return false, nil
 	}
-	if err := os.WriteFile(path, []byte(out), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(out), 0o600); err != nil {
 		return false, err
 	}
 	return true, nil
