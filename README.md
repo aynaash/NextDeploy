@@ -4,10 +4,10 @@ Deploy Next.js apps to a VPS, AWS Lambda, or Cloudflare Workers from one
 config file and one command. Open source, self-hosted, no vendor lock-in.
 
 ```bash
-curl -fsSL https://nextdeploy.org/install.sh | bash
+curl -fsSL https://hersi.dev/nextdeploy/install.sh | bash
 ```
 
-Windows: download `install.bat` from <https://nextdeploy.org/install.bat>.
+Windows: download `install.bat` from <https://hersi.dev/nextdeploy/install.bat>.
 
 <p align="center">
   <img src="./assets/ship-demo.gif" alt="nextdeploy ship — edit a Next.js component and deploy to Cloudflare in seconds (2× speed, no edits)" width="820" />
