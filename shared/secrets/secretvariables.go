@@ -13,7 +13,7 @@ func (sm *SecretManager) GetAppName() string {
 }
 
 func (sm *SecretManager) GetKey() string {
-	if sm.cfg == nil && sm.cfg.App.Name == "" {
+	if sm.cfg == nil || sm.cfg.App.Name == "" {
 		return "nokey"
 	}
 	homedir, err := os.UserHomeDir()

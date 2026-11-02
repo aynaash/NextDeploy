@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"maps"
 
@@ -22,6 +23,7 @@ func (sm *SecretManager) ValidateSecret(name, value string) error {
 func (sm *SecretManager) SecureCompare(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
+
 func (sm *SecretManager) RotateSecrets() error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -42,7 +44,14 @@ func (sm *SecretManager) RotateSecrets() error {
 			continue
 		}
 
-		decrypted, err := Decrypt([]byte(secret.Value), []byte(oldKey))
+		var cipherBytes []byte
+		if decoded, err := base64.StdEncoding.DecodeString(secret.Value); err == nil {
+			cipherBytes = decoded
+		} else {
+			cipherBytes = []byte(secret.Value)
+		}
+
+		decrypted, err := Decrypt(cipherBytes, []byte(oldKey))
 		if err != nil {
 			SLogs.Warn("Failed to decrypt secret %s: %v", name, err)
 			continue
@@ -139,12 +148,18 @@ func (sm *SecretManager) GetSecret(name string) (string, error) {
 	}
 
 	key, err := sm.GeneratePlatformKey()
-	SLogs.Debug("The key from get secret is: %s", key)
 	if err != nil {
 		return "", err
 	}
 
-	decrypted, err := Decrypt([]byte(secret.Value), []byte(key))
+	var cipherBytes []byte
+	if decoded, err := base64.StdEncoding.DecodeString(secret.Value); err == nil {
+		cipherBytes = decoded
+	} else {
+		cipherBytes = []byte(secret.Value)
+	}
+
+	decrypted, err := Decrypt(cipherBytes, []byte(key))
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrDecryptionFailed, err)
 	}
@@ -207,7 +222,14 @@ func (sm *SecretManager) FlattenSecrets() map[string]string {
 			continue
 		}
 
-		decrypted, err := Decrypt([]byte(secret.Value), []byte(key))
+		var cipherBytes []byte
+		if decoded, err := base64.StdEncoding.DecodeString(secret.Value); err == nil {
+			cipherBytes = decoded
+		} else {
+			cipherBytes = []byte(secret.Value)
+		}
+
+		decrypted, err := Decrypt(cipherBytes, []byte(key))
 		if err != nil {
 			SLogs.Warn("Skipping secret %s — decryption failed: %v", name, err)
 			continue

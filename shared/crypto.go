@@ -1,5 +1,3 @@
-//go:build !windows
-
 package shared
 
 import (
@@ -16,20 +14,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math/big"
 	"os"
-	"runtime"
-	"syscall"
-	"unsafe"
 )
 
 const (
 	KeyIDLength       = 32
 	NonceSize         = 12
-	SignatureSize     = ed25519.SignatureSize // 64 bytes for Ed25519 signature
-	PublicKeySize     = 32
-	PrivateKeySize    = 32
+	SignatureSize     = ed25519.SignatureSize  // 64 bytes
+	PublicKeySize     = ed25519.PublicKeySize  // 32 bytes
+	PrivateKeySize    = ed25519.PrivateKeySize // 64 bytes
 	SharedKeySize     = 32
 	FingerprintLength = 16
 )
@@ -39,9 +33,7 @@ type ECCSignature struct {
 	S *big.Int
 }
 
-var (
-	SharedLogger = PackageLogger("shared", "🔗 SHARED")
-)
+var SharedLogger = PackageLogger("shared", "🔗 SHARED")
 
 type KeyPair struct {
 	ECDHPrivate *ecdh.PrivateKey
@@ -104,34 +96,6 @@ func VerifyMessageSignature(msg AgentMessage) bool {
 	return ecdsa.Verify(publicKey, hash[:], sig.R, sig.S)
 }
 
-func SecureKeyMemory(key []byte) {
-	if len(key) == 0 {
-		return
-	}
-
-	// #nosec G103
-	if _, _, err := syscall.Syscall(syscall.SYS_MLOCK, uintptr(unsafe.Pointer(&key[0])), uintptr(len(key)), 0); err != 0 {
-		log.Printf("Warning: failed to lock memory: %v", err)
-	}
-}
-
-func ZeroKey(key []byte) {
-	if len(key) == 0 {
-		return
-	}
-
-	for i := range key {
-		key[i] = 0
-	}
-
-	runtime.KeepAlive(key)
-
-	// #nosec G103
-	if _, _, err := syscall.Syscall(syscall.SYS_MUNLOCK, uintptr(unsafe.Pointer(&key[0])), uintptr(len(key)), 0); err != 0 {
-		log.Printf("Warning: failed to unlock memory: %v", err)
-	}
-}
-
 func GenerateKeyPair() (*KeyPair, error) {
 	curve := ecdh.X25519()
 	ecdhPrivate, err := curve.GenerateKey(rand.Reader)
@@ -163,6 +127,7 @@ func GenerateKeyPair() (*KeyPair, error) {
 		KeyID:       hex.EncodeToString(KeyID),
 	}, nil
 }
+
 func RunCryptoHealthChecks() error {
 	// TODO:Test ECDH key exchange
 	return nil
@@ -241,9 +206,9 @@ func Sign(data []byte, privateKey ed25519.PrivateKey) ([]byte, error) {
 }
 
 func Verify(data []byte, signature []byte, publicKey ed25519.PublicKey) (bool, error) {
-	if len(publicKey) != ed25519.PrivateKeySize {
-		SharedLogger.Error("Invalid public key size: expected %d, got %d", ed25519.PrivateKeySize, len(publicKey))
-		return false, fmt.Errorf("invalid public key size: expected %d, got %d", ed25519.PrivateKeySize, len(publicKey))
+	if len(publicKey) != ed25519.PublicKeySize {
+		SharedLogger.Error("Invalid public key size: expected %d, got %d", ed25519.PublicKeySize, len(publicKey))
+		return false, fmt.Errorf("invalid public key size: expected %d, got %d", ed25519.PublicKeySize, len(publicKey))
 	}
 	if len(signature) != SignatureSize {
 		SharedLogger.Error("Invalid signature size: expected %d, got %d", SignatureSize, len(signature))

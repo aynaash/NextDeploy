@@ -3,11 +3,7 @@
 package shared
 
 import (
-	"crypto/ecdh"
-	"crypto/ecdsa"
-	"crypto/ed25519"
 	"log"
-	"math/big"
 	"runtime"
 	"unsafe"
 
@@ -45,32 +41,4 @@ func ZeroKey(key []byte) {
 	if err != nil {
 		log.Printf("Warning: failed to unlock memory: %v", err)
 	}
-}
-
-const (
-	KeyIDLength       = 32
-	NonceSize         = 12
-	SignatureSize     = ed25519.SignatureSize
-	PublicKeySize     = 32
-	PrivateKeySize    = 32
-	SharedKeySize     = 32
-	FingerprintLength = 16
-)
-
-type ECCSignature struct {
-	R *big.Int
-	S *big.Int
-}
-
-var (
-	SharedLogger = PackageLogger("shared", "🔗 SHARED")
-)
-
-type KeyPair struct {
-	ECDHPrivate *ecdh.PrivateKey
-	ECDHPublic  *ecdh.PublicKey
-	SignPrivate ed25519.PrivateKey
-	SignPublic  ed25519.PublicKey
-	ECDSAKey    *ecdsa.PrivateKey
-	KeyID       string
 }

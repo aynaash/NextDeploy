@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/aynaash/nextdeploy/shared/secrets"
 )
@@ -20,9 +21,15 @@ func main() {
 		return
 	}
 	// Check if the key exists
-	master, err := os.ReadFile("~/app/.nextdeploykeys/master.key")
+	home, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Println("Failed to read encryption key:", err)
+		fmt.Println("Failed to get home directory:", err)
+		return
+	}
+	keyPath := filepath.Join(home, "app", ".nextdeploykeys", "master.key")
+	master, err := os.ReadFile(keyPath)
+	if err != nil {
+		fmt.Printf("Failed to read encryption key from %s: %v\n", keyPath, err)
 		return
 	}
 	// Decrypt the nextdeploy.yml file
@@ -31,14 +38,12 @@ func main() {
 		fmt.Println("Failed to decrypt nextdeploy.yml:", err)
 		return
 	}
-	fmt.Println("Decrypted nextdeploy.yml content:\n", string(nextdeployyml))
 	// Decrypt the .env file
 	envfile, err := sm.DecryptFile(".env.enc", master)
 	if err != nil {
 		fmt.Println("Failed to decrypt .env file:", err)
 		return
 	}
-	fmt.Println("Decrypted .env content:\n", string(envfile))
 	// save the decrypted files
 	err = os.WriteFile("nextdeploy.yml", []byte(nextdeployyml), 0600)
 	if err != nil {
@@ -51,6 +56,5 @@ func main() {
 		return
 	}
 	// Print success message
-	fmt.Println("Files decrypted successfully!")
-	fmt.Println("Using encryption key:", string(master))
+	fmt.Println("Files decrypted successfully with mode 0600.")
 }
