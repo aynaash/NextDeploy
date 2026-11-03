@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,7 @@ type CommandHandler struct {
 	config         *types.DaemonConfig
 	caddyManager   *CaddyManager
 	processManager *ProcessManager
+	sidecarManager *SidecarManager
 	stateManager   *StateManager
 	auditLogger    *AuditLogger
 	rateLimiter    *RateLimiter
@@ -94,12 +96,103 @@ func NewCommandHandler(config *types.DaemonConfig) *CommandHandler {
 		config:         config,
 		caddyManager:   NewCaddyManager(),
 		processManager: NewProcessManager(),
+		sidecarManager: NewSidecarManager(),
 		stateManager:   NewStateManager(statePath),
 		auditLogger:    NewAuditLogger(auditPath),
 		rateLimiter:    NewRateLimiter(rate, burst),
 		replayGuard:    NewReplayGuard(5 * time.Minute),
 		deployLocks:    newAppLocker(),
 	}
+}
+
+func (ch *CommandHandler) RestoreSidecars() error {
+	apps, err := os.ReadDir(appsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read apps directory for sidecar restore: %w", err)
+	}
+	if err := ch.caddyManager.EnsureMainCaddyfile(); err != nil {
+		return fmt.Errorf("ensure Caddyfile before sidecar restore: %w", err)
+	}
+
+	var restoreErrors []string
+	changed := false
+	for _, app := range apps {
+		if !app.IsDir() || validateAppName(app.Name()) != nil {
+			continue
+		}
+		appDir := filepath.Join(appsDir, app.Name())
+		current := filepath.Join(appDir, "current")
+		releaseDir, err := filepath.EvalSymlinks(current)
+		if err != nil {
+			continue
+		}
+		relative, err := filepath.Rel(filepath.Join(appDir, "releases"), releaseDir)
+		if err != nil || !filepath.IsLocal(relative) {
+			restoreErrors = append(restoreErrors, fmt.Sprintf("%s: current release is outside releases directory", app.Name()))
+			continue
+		}
+		meta, err := readMetadata(releaseDir)
+		if err != nil {
+			restoreErrors = append(restoreErrors, fmt.Sprintf("%s: read active release metadata: %v", app.Name(), err))
+			continue
+		}
+		if meta.GoSidecar == nil || !meta.GoSidecar.Enabled || meta.OutputMode == nextcore.OutputModeExport {
+			continue
+		}
+		portData, err := os.ReadFile(filepath.Join(releaseDir, ".nextdeploy", "node.port"))
+		if os.IsNotExist(err) {
+			portData, err = os.ReadFile(filepath.Join(appDir, "port"))
+		}
+		if err != nil {
+			restoreErrors = append(restoreErrors, fmt.Sprintf("%s: read Node.js port: %v", app.Name(), err))
+			continue
+		}
+		nodePort, err := strconv.Atoi(strings.TrimSpace(string(portData)))
+		if err != nil || nodePort < 1 || nodePort > 65535 {
+			restoreErrors = append(restoreErrors, fmt.Sprintf("%s: invalid Node.js port", app.Name()))
+			continue
+		}
+		sharedStaticDir := filepath.Join(appDir, "shared_static")
+		sidecarPort, err := ch.sidecarManager.Upsert(app.Name(), releaseDir, sharedStaticDir, nodePort, meta)
+		if err != nil {
+			log.Printf("[gosidecar] restore %s failed; configuring Node.js fallback: %v", app.Name(), err)
+		}
+		if err := ch.caddyManager.GenerateConfig(
+			app.Name(), Coalesce(meta.Domain, "localhost"), string(meta.OutputMode), nodePort,
+			releaseDir, meta.DetectedFeatures, meta.DistDir, meta.ExportDir, sidecarPort,
+		); err != nil {
+			if sidecarPort > 0 {
+				_ = ch.sidecarManager.Stop(app.Name())
+				if fallbackErr := ch.caddyManager.GenerateConfig(
+					app.Name(), Coalesce(meta.Domain, "localhost"), string(meta.OutputMode), nodePort,
+					releaseDir, meta.DetectedFeatures, meta.DistDir, meta.ExportDir, 0,
+				); fallbackErr == nil {
+					log.Printf("[gosidecar] restore %s Caddy fragment failed; installed Node.js-only config: %v", app.Name(), err)
+					changed = true
+					continue
+				}
+			}
+			restoreErrors = append(restoreErrors, fmt.Sprintf("%s: configure Caddy: %v", app.Name(), err))
+			continue
+		}
+		changed = true
+	}
+
+	if changed {
+		if err := ch.caddyManager.Validate(); err != nil {
+			return fmt.Errorf("validate restored sidecar Caddy config: %w", err)
+		}
+		if err := ch.caddyManager.Reload(); err != nil {
+			return fmt.Errorf("reload restored sidecar Caddy config: %w", err)
+		}
+	}
+	if len(restoreErrors) > 0 {
+		return fmt.Errorf("sidecar restore warnings: %s", strings.Join(restoreErrors, "; "))
+	}
+	return nil
 }
 
 var allowedCommands = map[string]struct{}{
@@ -428,6 +521,7 @@ func (ch *CommandHandler) handleShip(args map[string]interface{}) types.Response
 		ExportDir:        meta.ExportDir,
 		Resources:        meta.Resources,
 		HealthPath:       meta.HealthPath,
+		Metadata:         meta,
 	}
 	return ch.activateRelease(ctx)
 }
@@ -446,6 +540,7 @@ type ReleaseContext struct {
 	ExportDir        string
 	Resources        *config.ResourceLimits
 	HealthPath       string
+	Metadata         *nextcore.NextCorePayload
 }
 
 func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
@@ -457,13 +552,27 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 	}
 
 	currentSymlink := filepath.Join(appsDir, ctx.AppName, "current")
+	appDir := filepath.Join(appsDir, ctx.AppName)
+	previousTarget, hadCurrent, err := readSymlinkTarget(currentSymlink)
+	if err != nil {
+		return types.Response{Success: false, Message: fmt.Sprintf("failed to inspect current release link: %v", err)}
+	}
+	previousReleaseDir := ""
+	if hadCurrent {
+		previousReleaseDir = previousTarget
+	}
+	previousPort := ch.stateManager.GetPort(ctx.AppName)
+	portFilePath := filepath.Join(appDir, "port")
+	previousPortFile, hadPortFile, err := readOptionalFile(portFilePath)
+	if err != nil {
+		return types.Response{Success: false, Message: fmt.Sprintf("failed to inspect current app port file: %v", err)}
+	}
 	var serviceName string
 	var serviceGenerated bool
 	var portAcquired int
-	var err error
 
 	// Port selection with persistence
-	port := ch.stateManager.GetPort(ctx.AppName)
+	port := previousPort
 	var cleanupPort func() error
 	if port == 0 || !isPortAvailable(port) {
 		p, closePort, err := findFreePort()
@@ -486,6 +595,38 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 	}
 
 	log.Printf("[activate] Allocated port %d for release %s", port, ctx.ReleaseID)
+	sidecarPrepared := false
+	activationCommitted := false
+	var oldFragment []byte
+	var hadOldFragment bool
+	fragmentChanged := false
+	defer func() {
+		if activationCommitted {
+			return
+		}
+		if fragmentChanged {
+			if restoreErr := ch.rollbackCaddyActivation(ctx.AppName, oldFragment, hadOldFragment); restoreErr != nil {
+				log.Printf("[activate] failed to restore prior Caddy routing for %s: %v", ctx.AppName, restoreErr)
+			}
+		}
+		if sidecarPrepared {
+			if stopErr := ch.sidecarManager.StopRelease(ctx.AppName, ctx.ReleaseDir); stopErr != nil {
+				log.Printf("[gosidecar] failed to stop candidate sidecar for %s: %v", ctx.AppName, stopErr)
+			}
+		}
+		if serviceGenerated && serviceName != "" {
+			if removeErr := ch.processManager.RemoveService(serviceName); removeErr != nil {
+				log.Printf("[activate] failed to remove candidate service %s: %v", serviceName, removeErr)
+			}
+		}
+		ch.stateManager.SetPort(ctx.AppName, previousPort)
+		if saveErr := ch.stateManager.Save(); saveErr != nil {
+			log.Printf("[activate] failed to restore app port state for %s: %v", ctx.AppName, saveErr)
+		}
+		if restoreErr := restoreOptionalFile(portFilePath, previousPortFile, hadPortFile); restoreErr != nil {
+			log.Printf("[activate] failed to restore app port file for %s: %v", ctx.AppName, restoreErr)
+		}
+	}()
 
 	// Persisted secrets: render the store into this release's EnvironmentFile
 	// before the unit exists. Fail hard — starting a release without its known
@@ -500,8 +641,6 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 		ctx.AppName, ctx.ReleaseDir, ctx.OutputMode, ctx.DopplerToken, port, ctx.PackageManager, ctx.ReleaseID, ctx.Resources,
 	)
 	if err != nil {
-		ch.stateManager.SetPort(ctx.AppName, 0)
-		_ = ch.stateManager.Save()
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to generate service file: %v", err)}
 	}
 
@@ -515,8 +654,6 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 
 		if err := ch.processManager.StartService(serviceName); err != nil {
 			_ = ch.processManager.RemoveService(serviceName)
-			ch.stateManager.SetPort(ctx.AppName, 0)
-			_ = ch.stateManager.Save()
 			return types.Response{Success: false, Message: fmt.Sprintf("failed to start service: %v", err)}
 		}
 	}
@@ -524,12 +661,6 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 	log.Printf("[activate] Waiting for app to become healthy on port %d...", port)
 	if err := waitForHealthy(port, ctx.HealthPath, 5*time.Minute); err != nil {
 		log.Printf("[activate] Health check failed on port %d, cleaning up...", port)
-		if serviceGenerated {
-			_ = ch.processManager.RemoveService(serviceName)
-		}
-		// Release the port back to the pool
-		ch.stateManager.SetPort(ctx.AppName, 0)
-		_ = ch.stateManager.Save()
 		return types.Response{Success: false, Message: fmt.Sprintf("health check failed after 5m: %v", err)}
 	}
 
@@ -539,18 +670,14 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 		portAcquired = 0 // Mark as released
 	}
 
-	// Port file for Caddy and other discovery tools (write after health check passes)
-	portFilePath := filepath.Join(appsDir, ctx.AppName, "port")
-	// #nosec G306 -- must be world-readable for Caddy/other discovery tools to read the port
-	if err := os.WriteFile(portFilePath, []byte(fmt.Sprintf("%d", port)), 0o644); err != nil {
-		log.Printf("[activate] Warning: failed to write port file to %s: %v", portFilePath, err)
+	// Persist the candidate's port with its release. Startup can then recover
+	// the correct port even if the daemon restarts during the symlink handoff.
+	releaseStateDir := filepath.Join(ctx.ReleaseDir, ".nextdeploy")
+	if err := os.MkdirAll(releaseStateDir, 0o750); err != nil {
+		return types.Response{Success: false, Message: fmt.Sprintf("failed to create release state directory: %v", err)}
 	}
-
-	// Atomic symlink update
-	tmpSymlink := currentSymlink + ".tmp"
-	_ = os.Remove(tmpSymlink)
-	if err := os.Symlink(ctx.ReleaseDir, tmpSymlink); err != nil {
-		return types.Response{Success: false, Message: fmt.Sprintf("failed to create atomic symlink: %v", err)}
+	if err := writeReleasePort(filepath.Join(releaseStateDir, "node.port"), port); err != nil {
+		return types.Response{Success: false, Message: fmt.Sprintf("failed to persist candidate release port: %v", err)}
 	}
 
 	// Persistent Static Assets Sync
@@ -559,13 +686,15 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 	sourceStaticDir := filepath.Join(ctx.ReleaseDir, ctx.DistDir, "static")
 	if _, err := os.Stat(sourceStaticDir); err == nil {
 		// #nosec G301 -- static assets dir is served by Caddy, needs group/other traversal
-		if err := os.MkdirAll(sharedStaticDir, 0o755); err == nil {
+		if err := os.MkdirAll(sharedStaticDir, 0o755); err != nil {
+			return types.Response{Success: false, Message: fmt.Sprintf("failed to create shared static directory: %v", err)}
+		} else {
 			// Use cp -R to copy assets, overwriting existing ones to ensure newest versions are served
 			cpPath := resolveTool("cp")
 			// #nosec G204
 			cmd := exec.Command(cpPath, "-R", sourceStaticDir+string(filepath.Separator)+".", sharedStaticDir)
 			if out, err := cmd.CombinedOutput(); err != nil {
-				log.Printf("[activate] Warning: failed to sync shared static assets: %v - %s", err, string(out))
+				return types.Response{Success: false, Message: fmt.Sprintf("failed to sync shared static assets: %v - %s", err, string(out))}
 			} else {
 				log.Printf("[activate] Synced static assets to %s", sharedStaticDir)
 				_ = exec.Command(resolveTool("chown"), "-R", "nextdeploy:nextdeploy", sharedStaticDir).Run()
@@ -573,23 +702,85 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 		}
 	}
 
-	if err := os.Rename(tmpSymlink, currentSymlink); err != nil {
-		_ = os.Remove(tmpSymlink)
-		return types.Response{Success: false, Message: fmt.Sprintf("failed to rename atomic symlink: %v", err)}
+	sidecarPort := 0
+	sidecarEnabled := false
+	var sidecarConfig *config.GoSidecarConfig
+	if ctx.Metadata != nil {
+		sidecarConfig = ctx.Metadata.GoSidecar
+	}
+	if ctx.OutputMode != string(nextcore.OutputModeExport) && sidecarConfig != nil && sidecarConfig.Enabled {
+		sidecarEnabled = true
+		sidecarPort, err = ch.sidecarManager.Upsert(ctx.AppName, ctx.ReleaseDir, sharedStaticDir, port, ctx.Metadata)
+		if err != nil {
+			sidecarEnabled = false
+			log.Printf("[gosidecar] failed to start sidecar for %s release %s; continuing with Node.js fallback: %v", ctx.AppName, ctx.ReleaseID, err)
+		} else {
+			sidecarPrepared = true
+		}
 	}
 
 	if err := ch.caddyManager.EnsureMainCaddyfile(); err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to update main Caddyfile: %v", err)}
 	}
 
-	if err := ch.caddyManager.GenerateConfig(ctx.AppName, ctx.Domain, ctx.OutputMode, port, currentSymlink, ctx.DetectedFeatures, ctx.DistDir, ctx.ExportDir); err != nil {
+	oldFragment, hadOldFragment, err = ch.caddyManager.ReadConfigFragment(ctx.AppName)
+	if err != nil {
+		return types.Response{Success: false, Message: fmt.Sprintf("failed to snapshot existing Caddy config: %v", err)}
+	}
+	if err := ch.caddyManager.GenerateConfig(ctx.AppName, ctx.Domain, ctx.OutputMode, port, ctx.ReleaseDir, ctx.DetectedFeatures, ctx.DistDir, ctx.ExportDir, sidecarPort); err != nil {
 		return types.Response{Success: false, Message: fmt.Sprintf("failed to configure Caddy: %v", err)}
 	}
+	fragmentChanged = true
 
 	if err := ch.caddyManager.Validate(); err != nil {
-		return types.Response{Success: false, Message: fmt.Sprintf("Caddy validation failed: %v", err)}
+		rollbackErr := ch.rollbackCaddyActivation(ctx.AppName, oldFragment, hadOldFragment)
+		fragmentChanged = false
+		return types.Response{Success: false, Message: activationError("Caddy validation failed", err, rollbackErr)}
 	}
-	_ = ch.caddyManager.Reload()
+	if err := ch.caddyManager.Reload(); err != nil {
+		rollbackErr := ch.rollbackCaddyActivation(ctx.AppName, oldFragment, hadOldFragment)
+		fragmentChanged = false
+		return types.Response{Success: false, Message: activationError("failed to reload Caddy", err, rollbackErr)}
+	}
+
+	tmpSymlink := currentSymlink + ".tmp"
+	_ = os.Remove(tmpSymlink)
+	if err := os.Symlink(ctx.ReleaseDir, tmpSymlink); err != nil {
+		rollbackErr := ch.rollbackCaddyActivation(ctx.AppName, oldFragment, hadOldFragment)
+		fragmentChanged = false
+		return types.Response{Success: false, Message: activationError("failed to create candidate current symlink", err, rollbackErr)}
+	}
+	if err := os.Rename(tmpSymlink, currentSymlink); err != nil {
+		_ = os.Remove(tmpSymlink)
+		rollbackErr := ch.rollbackCaddyActivation(ctx.AppName, oldFragment, hadOldFragment)
+		fragmentChanged = false
+		return types.Response{Success: false, Message: activationError("failed to switch current symlink", err, rollbackErr)}
+	}
+	if err := writeReleasePort(portFilePath, port); err != nil {
+		linkErr := restoreSymlink(currentSymlink, previousTarget, hadCurrent)
+		rollbackErr := ch.rollbackCaddyActivation(ctx.AppName, oldFragment, hadOldFragment)
+		fragmentChanged = false
+		if linkErr != nil {
+			if rollbackErr != nil {
+				rollbackErr = fmt.Errorf("%v; restore current symlink: %w", rollbackErr, linkErr)
+			} else {
+				rollbackErr = fmt.Errorf("restore current symlink: %w", linkErr)
+			}
+		}
+		return types.Response{Success: false, Message: activationError("failed to persist active app port", err, rollbackErr)}
+	}
+	activationCommitted = true
+
+	if hadCurrent && previousReleaseDir != ctx.ReleaseDir {
+		if err := ch.sidecarManager.StopRelease(ctx.AppName, previousReleaseDir); err != nil {
+			log.Printf("[gosidecar] failed to retire prior release %s for %s: %v", previousReleaseDir, ctx.AppName, err)
+		}
+	}
+	if !sidecarEnabled {
+		if err := ch.sidecarManager.StopRelease(ctx.AppName, ctx.ReleaseDir); err != nil {
+			log.Printf("[gosidecar] failed to stop disabled sidecar for %s release %s: %v", ctx.AppName, ctx.ReleaseID, err)
+		}
+	}
 
 	if services, err := ch.processManager.FindAppServices(ctx.AppName); err == nil {
 		for _, s := range services {
@@ -602,6 +793,8 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 
 	if err := pruneReleases(ctx.AppName, 5); err != nil {
 		log.Printf("[activate] Warning: failed to prune releases: %v", err)
+	} else if err := pruneSharedStatic(ctx.AppName, 5); err != nil {
+		log.Printf("[activate] Warning: failed to prune shared static assets: %v", err)
 	}
 
 	if ctx.TarballPath != "" {
@@ -612,6 +805,113 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 		Success: true,
 		Message: fmt.Sprintf("Successfully activated release %s for %s", ctx.ReleaseID, ctx.AppName),
 	}
+}
+
+func (ch *CommandHandler) rollbackCaddyActivation(appName string, previousFragment []byte, fragmentExisted bool) error {
+	if err := ch.caddyManager.RestoreConfigFragment(appName, previousFragment, fragmentExisted); err != nil {
+		return fmt.Errorf("restore previous fragment: %w", err)
+	}
+	if err := ch.caddyManager.Validate(); err != nil {
+		return fmt.Errorf("validate restored fragment: %w", err)
+	}
+	if err := ch.caddyManager.Reload(); err != nil {
+		return fmt.Errorf("reload restored fragment: %w", err)
+	}
+	return nil
+}
+
+func activationError(action string, err, rollbackErr error) string {
+	message := fmt.Sprintf("%s: %v", action, err)
+	if rollbackErr != nil {
+		message += fmt.Sprintf("; rollback failed: %v", rollbackErr)
+	}
+	return message
+}
+
+func readSymlinkTarget(path string) (string, bool, error) {
+	target, err := os.Readlink(path)
+	if os.IsNotExist(err) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(path), target)
+	}
+	target, err = filepath.Abs(target)
+	if err != nil {
+		return "", false, err
+	}
+	return filepath.Clean(target), true, nil
+}
+
+func readOptionalFile(path string) ([]byte, bool, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return data, true, nil
+}
+
+func restoreOptionalFile(path string, content []byte, existed bool) error {
+	if !existed {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	return writeAtomicPort(path, content)
+}
+
+func writeReleasePort(path string, port int) error {
+	return writeAtomicPort(path, []byte(fmt.Sprintf("%d\n", port)))
+}
+
+func writeAtomicPort(path string, content []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".restore-port-*")
+	if err != nil {
+		return fmt.Errorf("create temporary port file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("set restored port file permissions: %w", err)
+	}
+	if _, err := tmp.Write(content); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write restored port file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close restored port file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("restore port file: %w", err)
+	}
+	return nil
+}
+
+func restoreSymlink(path, target string, existed bool) error {
+	if !existed {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	tmp := path + ".rollback"
+	_ = os.Remove(tmp)
+	if err := os.Symlink(target, tmp); err != nil {
+		return fmt.Errorf("create rollback symlink: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("restore current symlink: %w", err)
+	}
+	return nil
 }
 
 func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Response {
@@ -693,6 +993,7 @@ func (ch *CommandHandler) handleRollback(args map[string]interface{}) types.Resp
 		ExportDir:        meta.ExportDir,
 		Resources:        meta.Resources,
 		HealthPath:       meta.HealthPath,
+		Metadata:         meta,
 	}
 	return ch.activateRelease(ctx)
 }
@@ -876,6 +1177,125 @@ func pruneReleases(appName string, keep int) error {
 	return nil
 }
 
+func pruneSharedStatic(appName string, keep int) error {
+	if err := validateAppName(appName); err != nil {
+		return err
+	}
+	return pruneSharedStaticAt(filepath.Join(appsDir, appName), keep)
+}
+
+func pruneSharedStaticAt(appDir string, keep int) error {
+	releasesDir := filepath.Join(appDir, "releases")
+	entries, err := os.ReadDir(releasesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read releases for static cleanup: %w", err)
+	}
+	var releaseIDs []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			releaseIDs = append(releaseIDs, entry.Name())
+		}
+	}
+	sort.Strings(releaseIDs)
+	if keep < 1 {
+		keep = 1
+	}
+	if len(releaseIDs) > keep {
+		releaseIDs = releaseIDs[len(releaseIDs)-keep:]
+	}
+
+	needed := make(map[string]struct{})
+	for _, releaseID := range releaseIDs {
+		releaseDir := filepath.Join(releasesDir, releaseID)
+		meta, err := readMetadata(releaseDir)
+		if err != nil {
+			return fmt.Errorf("read retained release %s metadata before static cleanup: %w", releaseID, err)
+		}
+		distDir := meta.DistDir
+		if distDir == "" {
+			distDir = ".next"
+		}
+		staticDir := filepath.Join(releaseDir, distDir, "static")
+		walkErr := filepath.WalkDir(staticDir, func(file string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				if os.IsNotExist(walkErr) && file == staticDir {
+					return nil
+				}
+				return walkErr
+			}
+			if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+				return nil
+			}
+			if !entry.Type().IsRegular() {
+				return nil
+			}
+			relative, err := filepath.Rel(staticDir, file)
+			if err != nil {
+				return err
+			}
+			needed[filepath.Clean(relative)] = struct{}{}
+			return nil
+		})
+		if walkErr != nil {
+			return fmt.Errorf("collect static files from release %s: %w", releaseID, walkErr)
+		}
+	}
+
+	sharedDir := filepath.Join(appDir, "shared_static")
+	info, err := os.Lstat(sharedDir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect shared static directory: %w", err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("shared static path %s is not a real directory", sharedDir)
+	}
+
+	var dirs []string
+	if err := filepath.WalkDir(sharedDir, func(file string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if entry.IsDir() {
+			if file != sharedDir {
+				dirs = append(dirs, file)
+			}
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			return nil
+		}
+		relative, err := filepath.Rel(sharedDir, file)
+		if err != nil {
+			return err
+		}
+		if _, ok := needed[filepath.Clean(relative)]; ok {
+			return nil
+		}
+		if err := os.Remove(file); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove unreferenced shared static file %s: %w", file, err)
+		}
+		log.Printf("[prune] Removed unreferenced shared static asset %s", file)
+		return nil
+	}); err != nil {
+		return fmt.Errorf("walk shared static directory: %w", err)
+	}
+	for i := len(dirs) - 1; i >= 0; i-- {
+		if err := os.Remove(dirs[i]); err != nil && !os.IsNotExist(err) && !os.IsExist(err) {
+			return fmt.Errorf("remove empty shared static directory %s: %w", dirs[i], err)
+		}
+	}
+	return nil
+}
+
 // releasesToPrune returns the release IDs to delete, keeping the newest `keep`
 // by release-ID order. Pure and sort-stable so it can be unit-tested
 // independently of the filesystem.
@@ -1000,9 +1420,11 @@ func (ch *CommandHandler) handleDestroy(args map[string]interface{}) types.Respo
 	}
 	defer release()
 
-	log.Printf("[destroy] Destroying app: %s", appName)
-
 	var errors []string
+	log.Printf("[destroy] Destroying app: %s", appName)
+	if err := ch.sidecarManager.Stop(appName); err != nil {
+		errors = append(errors, fmt.Sprintf("failed to stop Go sidecar: %v", err))
+	}
 
 	// 1. Stop and remove services
 	services, err := ch.processManager.FindAppServices(appName)
@@ -1022,7 +1444,9 @@ func (ch *CommandHandler) handleDestroy(args map[string]interface{}) types.Respo
 		log.Printf("[destroy] Warning: failed to remove Caddy config: %v", err)
 		errors = append(errors, fmt.Sprintf("failed to remove Caddy config: %v", err))
 	}
-	_ = ch.caddyManager.Reload()
+	if err := ch.caddyManager.Reload(); err != nil {
+		errors = append(errors, fmt.Sprintf("failed to reload Caddy: %v", err))
+	}
 
 	// 3. Remove application files
 	appDir := filepath.Join(appsDir, appName)
@@ -1087,6 +1511,9 @@ func (ch *CommandHandler) handleStopApp(args map[string]interface{}) types.Respo
 	}
 
 	log.Printf("[stop] Stopping app: %s", appName)
+	if err := ch.sidecarManager.Stop(appName); err != nil {
+		return types.Response{Success: false, Message: fmt.Sprintf("failed to stop Go sidecar: %v", err)}
+	}
 
 	services, err := ch.processManager.FindAppServices(appName)
 	if err != nil {

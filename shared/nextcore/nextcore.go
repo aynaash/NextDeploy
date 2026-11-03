@@ -148,6 +148,7 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		OutputMode:       outputMode,
 		ImageAssets:      *imagesAssets,
 		Resources:        cfg.App.Resources,
+		GoSidecar:        cfg.ResolveGoSidecar(),
 	}
 
 	if len(metadata.RouteInfo.ISRDetail) > 0 {
@@ -285,15 +286,27 @@ func ConfigFingerprint(cfg *config.NextDeployConfig) string {
 	if cfg == nil {
 		return ""
 	}
+	sidecar := cfg.ResolveGoSidecar()
+	sidecarEnabled := sidecar != nil && sidecar.Enabled
+	isrEnabled := sidecar != nil && sidecar.ISRCacheEnabled()
+	imageEnabled := sidecar != nil && sidecar.ImageOptEnabled()
+	imageWorkers := 0
+	if sidecarEnabled {
+		imageWorkers = sidecar.Workers()
+	}
 	h := sha256.New()
 	// NUL separators so "ab"+"c" and "a"+"bc" can't collide.
-	fmt.Fprintf(h, "v1\x00name=%s\x00domain=%s\x00env=%s\x00port=%d\x00target=%s\x00cdn=%t\x00",
+	fmt.Fprintf(h, "v2\x00name=%s\x00domain=%s\x00env=%s\x00port=%d\x00target=%s\x00cdn=%t\x00gosidecar=%t\x00isr=%t\x00image=%t\x00imageworkers=%d\x00",
 		cfg.App.Name,
 		cfg.App.Domain.Name,
 		cfg.App.Environment,
 		cfg.App.Port,
 		cfg.ResolveTargetType(""),
 		cfg.App.CDNEnabled,
+		sidecarEnabled,
+		isrEnabled,
+		imageEnabled,
+		imageWorkers,
 	)
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -338,7 +351,7 @@ func ValidateBuildState(cfg *config.NextDeployConfig) error {
 	// shipped and rejected by the daemon.
 	current := ConfigFingerprint(cfg)
 	if current == "" || lock.ConfigHash == "" || lock.ConfigHash != current {
-		return errors.New("config changed since last build (app.name/domain/environment/port/target/cdn) — rebuilding")
+		return errors.New("config changed since last build (app, target, cdn, or GoSidecar settings) — rebuilding")
 	}
 
 	return nil
@@ -625,50 +638,24 @@ func parseMiddlewareMatchers(content string) ([]MiddlewareRoute, error) {
 
 		cleaned = strings.ReplaceAll(cleaned, "\n", "")
 		cleaned = fmt.Sprintf("{%s}", cleaned)
+		cleaned = trailingCommaRegex.ReplaceAllString(cleaned, `$1`)
 
 		var config struct {
-			Matcher []struct {
-				Pathname string `json:"pathname"`
-				Pattern  string `json:"pattern"`
-				Has      []struct {
-					Type  string `json:"type"`
-					Key   string `json:"key"`
-					Value string `json:"value"`
-				} `json:"has"`
-				Missing []struct {
-					Type  string `json:"type"`
-					Key   string `json:"key"`
-					Value string `json:"value"`
-				} `json:"missing"`
-			} `json:"matcher"`
+			Matcher json.RawMessage `json:"matcher"`
 		}
 
 		if err := json.Unmarshal([]byte(cleaned), &config); err == nil {
-			for _, m := range config.Matcher {
-				route := MiddlewareRoute{
-					Pathname: m.Pathname,
-					Pattern:  m.Pattern,
+			var paths []string
+			if err := json.Unmarshal(config.Matcher, &paths); err == nil {
+				for _, path := range paths {
+					matchers = append(matchers, MiddlewareRoute{Pathname: path})
 				}
-
-				for _, h := range m.Has {
-					route.Has = append(route.Has, MiddlewareCondition{
-						Type:  h.Type,
-						Key:   h.Key,
-						Value: h.Value,
-					})
-				}
-
-				for _, miss := range m.Missing {
-					route.Missing = append(route.Missing, MiddlewareCondition{
-						Type:  miss.Type,
-						Key:   miss.Key,
-						Value: miss.Value,
-					})
-				}
-
-				matchers = append(matchers, route)
+				return matchers, nil
 			}
-			return matchers, nil
+			var routes []MiddlewareRoute
+			if err := json.Unmarshal(config.Matcher, &routes); err == nil {
+				return routes, nil
+			}
 		}
 	}
 

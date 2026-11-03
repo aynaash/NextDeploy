@@ -124,11 +124,11 @@ func NewCaddyManager() *CaddyManager {
 	}
 }
 
-func (cm *CaddyManager) GenerateConfig(appName, domain, outputMode string, port int, appDir string, features *nextcore.DetectedFeatures, distDir, exportDir string) error {
+func (cm *CaddyManager) GenerateConfig(appName, domain, outputMode string, port int, appDir string, features *nextcore.DetectedFeatures, distDir, exportDir string, sidecarPorts ...int) error {
 	if err := sanitizeAppName(appName); err != nil {
 		return err
 	}
-	caddyConfig := caddy.GenerateCaddyfile(appName, domain, outputMode, port, appDir, features, distDir, exportDir)
+	caddyConfig := caddy.GenerateCaddyfile(appName, domain, outputMode, port, appDir, features, distDir, exportDir, sidecarPorts...)
 
 	// Fragments are keyed by app name, but Caddy routes on the SITE ADDRESS —
 	// and a site address may only appear in one block. Shipping the same domain
@@ -360,6 +360,33 @@ func (cm *CaddyManager) RemoveConfig(appName string) error {
 	configPath := filepath.Join(cm.configDir, fmt.Sprintf("%s.caddy", appName))
 	if err := os.Remove(configPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove caddy config for %s: %w", appName, err)
+	}
+	return nil
+}
+
+func (cm *CaddyManager) ReadConfigFragment(appName string) ([]byte, bool, error) {
+	if err := sanitizeAppName(appName); err != nil {
+		return nil, false, err
+	}
+	data, err := os.ReadFile(filepath.Join(cm.configDir, appName+".caddy"))
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read caddy config for %s: %w", appName, err)
+	}
+	return data, true, nil
+}
+
+func (cm *CaddyManager) RestoreConfigFragment(appName string, content []byte, existed bool) error {
+	if err := sanitizeAppName(appName); err != nil {
+		return err
+	}
+	if !existed {
+		return cm.RemoveConfig(appName)
+	}
+	if err := cm.commitFragmentSafely(appName, content); err != nil {
+		return fmt.Errorf("restore caddy config for %s: %w", appName, err)
 	}
 	return nil
 }

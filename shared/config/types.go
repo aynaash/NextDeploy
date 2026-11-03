@@ -12,6 +12,7 @@ type NextDeployConfig struct {
 	Version       string               `yaml:"version"`
 	TargetType    string               `yaml:"target_type"` // e.g., "vps", "serverless"
 	App           AppConfig            `yaml:"app"`
+	GoSidecar     *GoSidecarConfig     `yaml:"gosidecar,omitempty"`
 	Repository    Repository           `yaml:"repository"`
 	Docker        *DockerConfig        `yaml:"docker,omitempty"`
 	Serverless    *ServerlessConfig    `yaml:"serverless,omitempty"`
@@ -416,17 +417,64 @@ type AppConfig struct {
 	// and the Caddy fragment filename. MUST satisfy ValidateAppName: lowercase
 	// letters, digits and hyphens only (^[a-z0-9-]+$), 3–63 chars. This is a
 	// SLUG, not a domain — the domain belongs in Domain.Name.
-	Name        string          `yaml:"name"`
-	Port        int             `yaml:"port"`
-	Environment string          `yaml:"environment"`
-	Domain      DomainConfig    `yaml:"domain,omitempty"`
-	CDNEnabled  bool            `yaml:"cdn_enabled,omitempty"`
-	Secrets     *SecretsConfig  `yaml:"secrets,omitempty"`
-	Resources   *ResourceLimits `yaml:"resources,omitempty"`
+	Name        string           `yaml:"name"`
+	Port        int              `yaml:"port"`
+	Environment string           `yaml:"environment"`
+	Domain      DomainConfig     `yaml:"domain,omitempty"`
+	CDNEnabled  bool             `yaml:"cdn_enabled,omitempty"`
+	Secrets     *SecretsConfig   `yaml:"secrets,omitempty"`
+	Resources   *ResourceLimits  `yaml:"resources,omitempty"`
+	GoSidecar   *GoSidecarConfig `yaml:"gosidecar,omitempty"`
 	// DeletionProtection refuses `nextdeploy destroy` (which can drop the R2
 	// bucket / app data) unless explicitly overridden with --force. Off by
 	// default; set true for production apps.
 	DeletionProtection bool `yaml:"deletion_protection,omitempty"`
+}
+
+type GoSidecarConfig struct {
+	Enabled           bool  `yaml:"enabled" json:"enabled"`
+	ImageOptimization *bool `yaml:"image_optimization,omitempty" json:"image_optimization,omitempty"`
+	MaxImageWorkers   int   `yaml:"max_image_workers,omitempty" json:"max_image_workers,omitempty"`
+	ISRCache          *bool `yaml:"isr_cache,omitempty" json:"isr_cache,omitempty"`
+}
+
+func (g *GoSidecarConfig) ISRCacheEnabled() bool {
+	if g == nil || !g.Enabled {
+		return false
+	}
+	return g.ISRCache == nil || *g.ISRCache
+}
+
+func (g *GoSidecarConfig) ImageOptEnabled() bool {
+	if g == nil || !g.Enabled {
+		return false
+	}
+	return g.ImageOptimization == nil || *g.ImageOptimization
+}
+
+func (g *GoSidecarConfig) Workers() int {
+
+	if g == nil || g.MaxImageWorkers <= 0 {
+		return 4
+	}
+
+	if g.MaxImageWorkers > 64 {
+		return 64
+	}
+	return g.MaxImageWorkers
+
+}
+
+func (cfg *NextDeployConfig) ResolveGoSidecar() *GoSidecarConfig {
+	if cfg == nil {
+		return nil
+	}
+
+	if cfg.App.GoSidecar != nil {
+		return cfg.App.GoSidecar
+	}
+	return cfg.GoSidecar
+
 }
 
 // DomainConfig describes the app's custom domain and where its DNS lives. In
@@ -662,7 +710,7 @@ func SaveConfig(path string, cfg *NextDeployConfig) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 

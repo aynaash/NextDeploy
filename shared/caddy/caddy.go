@@ -33,7 +33,7 @@ type Config struct {
 	Format  string
 }
 
-func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir string, features *nextcore.DetectedFeatures, distDir, exportDir string) string {
+func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir string, features *nextcore.DetectedFeatures, distDir, exportDir string, sidecarPorts ...int) string {
 	if distDir == "" {
 		distDir = ".next"
 	}
@@ -96,8 +96,25 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 }`, domainList, commonHeaders, staticDir)
 	}
 
-	sharedStaticDir := filepath.Join(filepath.Dir(appDir), "shared_static")
+	appParent := filepath.Dir(appDir)
+	if filepath.Base(appParent) == "releases" {
+		appParent = filepath.Dir(appParent)
+	}
+	sharedStaticDir := filepath.Join(appParent, "shared_static")
 	publicDir := filepath.Join(appDir, "public")
+	upstream := fmt.Sprintf("reverse_proxy localhost:%d", port)
+	if len(sidecarPorts) > 0 && sidecarPorts[0] > 0 {
+		upstream = fmt.Sprintf(`reverse_proxy localhost:%d localhost:%d {
+			lb_policy first
+			health_uri /_nextdeploy/sidecar-healthz
+			health_interval 10s
+			health_timeout 2s
+			health_status 2xx
+			max_fails 1
+			fail_duration 5s
+			unhealthy_status 5xx
+		}`, sidecarPorts[0], port)
+	}
 
 	// public/ is served by Caddy rather than proxied to Node.
 	//
@@ -145,10 +162,10 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 		header @publicAsset Cache-Control "public, max-age=0, must-revalidate"
 		route {
 			file_server @publicAsset
-			reverse_proxy localhost:%d
+			%s
 		}
 	}
-}`, domainList, commonHeaders, sharedStaticDir, publicDir, port)
+}`, domainList, commonHeaders, sharedStaticDir, publicDir, upstream)
 }
 
 func (cm *CaddyManager) GetConfig(ctx context.Context) (*Config, error) {

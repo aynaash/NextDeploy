@@ -60,6 +60,7 @@ func NewNextDeployDaemon(configPath string, socketPathOverride string) (*NextDep
 
 	logger := logging.SetupLogger(logConfig)
 	commandHandler := NewCommandHandler(cfg)
+	commandHandler.sidecarManager.SetLogger(logger)
 	socketServer := NewSocketServer(cfg, commandHandler)
 
 	return &NextDeployDaemon{
@@ -74,6 +75,9 @@ func NewNextDeployDaemon(configPath string, socketPathOverride string) (*NextDep
 }
 
 func (d *NextDeployDaemon) Start() error {
+	if err := d.commandHandler.RestoreSidecars(); err != nil {
+		d.logger.Printf("[gosidecar] startup restore warning: %v", err)
+	}
 	if err := d.socketServer.Start(); err != nil {
 		return fmt.Errorf("failed to start socket server: %w", err)
 	}
@@ -146,6 +150,7 @@ func (d *NextDeployDaemon) handleSignals() error {
 func (d *NextDeployDaemon) Shutdown() {
 	d.logger.Println("Shutting down NextDeploy Daemon...")
 	d.cancel()
+	d.commandHandler.sidecarManager.Shutdown()
 	_ = d.socketServer.Close()
 	d.logger.Println("NextDeploy Daemon shut down gracefully")
 }

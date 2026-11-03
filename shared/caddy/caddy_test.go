@@ -47,6 +47,17 @@ func TestPublicAssetsAreServedByCaddyNotProxied(t *testing.T) {
 	}
 }
 
+func TestReleaseScopedCaddyRootsStayPinnedToCandidateRelease(t *testing.T) {
+	releaseDir := "/opt/nextdeploy/apps/demo/releases/123-release"
+	got := GenerateCaddyfile("demo", "example.com", "standalone", 3000, releaseDir, nil, ".next", "out", 4000)
+	if !strings.Contains(got, "root * "+releaseDir+"/public") {
+		t.Errorf("public assets are not pinned to the release:\n%s", got)
+	}
+	if !strings.Contains(got, "root * /opt/nextdeploy/apps/demo/shared_static") {
+		t.Errorf("shared static root is not app-scoped:\n%s", got)
+	}
+}
+
 func TestPublicMatcherCannotShadowRoutes(t *testing.T) {
 	got := generate(t, "standalone")
 
@@ -120,9 +131,31 @@ func TestHashedStaticAssetsStayImmutableAndShared(t *testing.T) {
 	}
 }
 
+func TestSidecarUpstreamFallsBackToNode(t *testing.T) {
+	got := GenerateCaddyfile("demo", "example.com", "standalone", 3000, testAppDir, nil, ".next", "out", 4000)
+
+	if !strings.Contains(got, "reverse_proxy localhost:4000 localhost:3000") {
+		t.Errorf("sidecar and Node upstreams missing:\n%s", got)
+	}
+	if !strings.Contains(got, "lb_policy first") ||
+		!strings.Contains(got, "fail_duration 5s") ||
+		!strings.Contains(got, "health_uri /_nextdeploy/sidecar-healthz") ||
+		!strings.Contains(got, "unhealthy_status 5xx") {
+		t.Errorf("sidecar fallback policy missing:\n%s", got)
+	}
+}
+
+func TestZeroSidecarPortKeepsNodeOnlyUpstream(t *testing.T) {
+	got := GenerateCaddyfile("demo", "example.com", "standalone", 3000, testAppDir, nil, ".next", "out", 0)
+
+	if strings.Contains(got, "lb_policy first") || !strings.Contains(got, "reverse_proxy localhost:3000") {
+		t.Errorf("zero sidecar port should retain the Node-only upstream:\n%s", got)
+	}
+}
+
 func TestExportModeIsUnaffected(t *testing.T) {
 	// A static export has no Node process to offload anything from.
-	got := generate(t, "export")
+	got := GenerateCaddyfile("demo", "example.com", "export", 3000, testAppDir, nil, ".next", "out", 4000)
 
 	if strings.Contains(got, "reverse_proxy") {
 		t.Errorf("export mode should not proxy:\n%s", got)

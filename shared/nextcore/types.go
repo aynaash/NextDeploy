@@ -42,7 +42,8 @@ type NextCorePayload struct {
 	I18n        *I18nConfig `json:"i18n,omitempty"`
 	// Resources carries the opt-in cgroup limits from nextdeploy.yml through to
 	// the daemon's systemd unit generator. Nil means "no limits" (the default).
-	Resources *config.ResourceLimits `json:"resources,omitempty"`
+	Resources *config.ResourceLimits  `json:"resources,omitempty"`
+	GoSidecar *config.GoSidecarConfig `json:"go_sidecar,omitempty"`
 	// HealthPath is the HTTP path the daemon probes before cutting over to a new
 	// release. Empty means "/". A release that binds its port but returns >=500
 	// on this path fails activation, so the old release stays live.
@@ -186,6 +187,7 @@ type ImageConfig struct {
 	Formats               []string             `json:"formats,omitempty"`
 	DeviceSizes           []int                `json:"deviceSizes,omitempty"`
 	ImageSizes            []int                `json:"imageSizes,omitempty"`
+	Qualities             []int                `json:"qualities,omitempty"`
 	Path                  string               `json:"path,omitempty"`
 	Loader                string               `json:"loader,omitempty"`
 	LoaderFile            string               `json:"loaderFile,omitempty"`
@@ -196,10 +198,12 @@ type ImageConfig struct {
 }
 
 type ImageRemotePattern struct {
-	Protocol string `json:"protocol,omitempty"`
-	Hostname string `json:"hostname,omitempty"`
-	Port     string `json:"port,omitempty"`
-	Pathname string `json:"pathname,omitempty"`
+	Protocol         string `json:"protocol,omitempty"`
+	Hostname         string `json:"hostname,omitempty"`
+	Port             string `json:"port,omitempty"`
+	Pathname         string `json:"pathname,omitempty"`
+	Search           string `json:"search,omitempty"`
+	SearchConfigured bool   `json:"search_configured,omitempty"`
 }
 
 type I18nConfig struct {

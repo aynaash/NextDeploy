@@ -107,6 +107,7 @@ func parseConfigObject(config map[string]interface{}) (*NextConfig, error) {
 			Formats:               getStringSliceFromMap(images, "formats"),
 			DeviceSizes:           getIntSliceFromMap(images, "deviceSizes"),
 			ImageSizes:            getIntSliceFromMap(images, "imageSizes"),
+			Qualities:             getIntSliceFromMap(images, "qualities"),
 			Path:                  getStringFromMap(images, "path"),
 			Loader:                getStringFromMap(images, "loader"),
 			LoaderFile:            getStringFromMap(images, "loaderFile"),
@@ -117,11 +118,15 @@ func parseConfigObject(config map[string]interface{}) (*NextConfig, error) {
 		if patterns, ok := images["remotePatterns"].([]interface{}); ok {
 			for _, p := range patterns {
 				if pattern, ok := p.(map[string]interface{}); ok {
+					search, searchConfigured := pattern["search"]
+					searchValue, _ := search.(string)
 					result.Images.RemotePatterns = append(result.Images.RemotePatterns, ImageRemotePattern{
-						Protocol: getStringFromMap(pattern, "protocol"),
-						Hostname: getStringFromMap(pattern, "hostname"),
-						Port:     getStringFromMap(pattern, "port"),
-						Pathname: getStringFromMap(pattern, "pathname"),
+						Protocol:         getStringFromMap(pattern, "protocol"),
+						Hostname:         getStringFromMap(pattern, "hostname"),
+						Port:             getStringFromMap(pattern, "port"),
+						Pathname:         getStringFromMap(pattern, "pathname"),
+						Search:           searchValue,
+						SearchConfigured: searchConfigured,
 					})
 				}
 			}

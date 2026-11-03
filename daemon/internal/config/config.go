@@ -1,3 +1,4 @@
+// Package config provides all the config state nextdeploy needs
 package config
 
 import (

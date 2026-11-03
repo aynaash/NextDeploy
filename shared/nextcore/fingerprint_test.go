@@ -53,6 +53,46 @@ func TestConfigFingerprintChangesWithBuildAffectingFields(t *testing.T) {
 	}
 }
 
+func TestConfigFingerprintIncludesEffectiveGoSidecarSettings(t *testing.T) {
+	boolPtr := func(v bool) *bool { return &v }
+	base := fpConfig()
+	base.App.GoSidecar = &config.GoSidecarConfig{Enabled: true}
+	baseHash := ConfigFingerprint(base)
+
+	tests := map[string]func(*config.GoSidecarConfig){
+		"ISR disabled":     func(g *config.GoSidecarConfig) { g.ISRCache = boolPtr(false) },
+		"image disabled":   func(g *config.GoSidecarConfig) { g.ImageOptimization = boolPtr(false) },
+		"worker count":     func(g *config.GoSidecarConfig) { g.MaxImageWorkers = 8 },
+		"sidecar disabled": func(g *config.GoSidecarConfig) { g.Enabled = false },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg := fpConfig()
+			cfg.App.GoSidecar = &config.GoSidecarConfig{Enabled: true}
+			mutate(cfg.App.GoSidecar)
+			if got := ConfigFingerprint(cfg); got == baseHash {
+				t.Fatal("effective sidecar setting did not change fingerprint")
+			}
+		})
+	}
+}
+
+func TestConfigFingerprintNormalizesGoSidecarDefaults(t *testing.T) {
+	boolPtr := func(v bool) *bool { return &v }
+	omitted := fpConfig()
+	omitted.App.GoSidecar = &config.GoSidecarConfig{Enabled: true}
+	explicit := fpConfig()
+	explicit.App.GoSidecar = &config.GoSidecarConfig{
+		Enabled:           true,
+		ISRCache:          boolPtr(true),
+		ImageOptimization: boolPtr(true),
+		MaxImageWorkers:   4,
+	}
+	if ConfigFingerprint(omitted) != ConfigFingerprint(explicit) {
+		t.Fatal("implicit and explicit Go sidecar defaults should fingerprint identically")
+	}
+}
+
 func TestConfigFingerprintIgnoresUnrelatedFields(t *testing.T) {
 	// Reformatting the YAML or editing an unrelated setting must not force a
 	// rebuild — the key covers the inputs that reach the artifact, no more.
