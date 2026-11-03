@@ -25,6 +25,14 @@ app:
   environment: production # Can be: development | staging | production. Affects env variables & caching.
   domain: app.example.com # Public domain where your app will be accessible
   port: 3000 # Internal app port (e.g., what your Node/Go server listens on)
+  # Optional Go sidecar for VPS deployments. Enable to serve eligible
+  # prerendered pages and supported image requests without Node.js.
+  # Requests requiring middleware or SSR continue to use Node.js.
+  gosidecar:
+    enabled: false # Opt in after reviewing the sidecar's supported request paths
+    image_optimization: true
+    isr_cache: true
+    max_image_workers: 4
 
 # -----
 # DEPLOYMENT TARGET

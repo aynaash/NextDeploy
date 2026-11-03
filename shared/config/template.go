@@ -92,6 +92,15 @@ app:
   domain: app.example.com # Public domain for your app
   port: 3000 # [REQUIRED] Internal port your app listens on
 
+  # Optional Go sidecar for VPS deployments. Enable to serve eligible
+  # prerendered pages and supported image requests without Node.js.
+  # Requests requiring middleware or SSR continue to use Node.js.
+  gosidecar:
+    enabled: false # Opt in after reviewing the sidecar's supported request paths
+    image_optimization: true
+    isr_cache: true
+    max_image_workers: 4
+
 # -----
 # DEPLOYMENT SERVERS
 # -----
