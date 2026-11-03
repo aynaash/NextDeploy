@@ -30,7 +30,6 @@ import (
 
 	"github.com/aynaash/nextdeploy/shared/nextcore"
 	xdraw "golang.org/x/image/draw"
-	_ "golang.org/x/image/webp"
 )
 
 const (

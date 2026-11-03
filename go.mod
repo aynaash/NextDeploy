@@ -34,7 +34,7 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/zalando/go-keyring v0.2.6
 	golang.org/x/crypto v0.56.0
-	golang.org/x/image v0.42.0
+	golang.org/x/image v0.45.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/vuln v1.2.0
