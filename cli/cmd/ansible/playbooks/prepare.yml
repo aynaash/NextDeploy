@@ -1,7 +1,6 @@
 # nextdeploy prepare playbook
 # Provisions a fresh Linux server with everything NextDeploy needs:
 #   Node.js      (webi latest → webi@18 → unofficial glibc-217 build)
-#   Bun          (official installer, symlinked to /usr/local/bin)
 #   Go           (auto-fetches latest stable from go.dev, falls back to go_version_fallback)
 #   Caddy        (apt repo OR yum COPR → static binary fallback)
 #   Doppler CLI
@@ -120,7 +119,6 @@
         echo "uptime : $(uptime)"
         echo "node   : $(node --version 2>/dev/null || echo 'missing')"
         echo "go     : $(go version 2>/dev/null || echo 'missing')"
-        echo "bun    : $(bun --version 2>/dev/null || echo 'missing')"
         echo "doppler: $(doppler --version 2>/dev/null || echo 'missing')"
       register: sysinfo
       changed_when: false
@@ -151,7 +149,6 @@
           - gcc
           - build-essential
           - ca-certificates
-          - unzip
           - file
           - acl # for permission management
         state: present
@@ -176,7 +173,6 @@
           - glibc-static
           - ca-certificates
           - yum-utils
-          - unzip
           - file
           - acl
         state: present
@@ -331,12 +327,8 @@
     # PHASE 2 – Corepack (pnpm / yarn)
     # ────────────────────────────────────────────────────────────────────────────
     #
-    # The daemon supports four package managers (npm/yarn/pnpm/bun) and
-    # resolveExecStart emits `ExecStart=/usr/local/bin/<pm> run start` for
-    # whichever the app declares. Installing only Node and Bun meant a pnpm or
-    # yarn app SHIPPED successfully and then failed at unit start on a missing
-    # binary. A support matrix in the daemon and a provisioning list here that
-    # disagree is a latent outage — they have to stay in sync.
+    # The daemon runs Bun-managed apps with Node/npm on the server. Corepack
+    # provides pnpm and yarn for apps that declare either of those managers.
     #
     # Corepack is Node's built-in package-manager manager (bundled since 16.9).
     # The shim reads the app's own "packageManager" field and fetches that exact
@@ -377,73 +369,11 @@
         msg: >-
           WARNING: {{ item.item }} is not runnable at /usr/local/bin/{{ item.item }}.
           An app whose package manager is {{ item.item }} will ship successfully and
-          then fail to start. Install it manually or use npm/bun for that app.
+          then fail to start. Install it manually or use npm for that app.
       loop: "{{ corepack_check.results }}"
       loop_control:
         label: "{{ item.item }}"
       when: item.rc != 0
-
-    # ────────────────────────────────────────────────────────────────────────────
-    # PHASE 2 – Bun
-    # ────────────────────────────────────────────────────────────────────────────
-
-    - name: "Phase 2 | Bun | check pre-existence"
-      ansible.builtin.set_fact:
-        bun_installed: "{{ 'missing' not in (sysinfo.stdout_lines | select('match', '^bun.*') | first | default('missing')) }}"
-
-    - name: "Phase 2 | Bun | Install via official installer"
-      ansible.builtin.shell: |
-        set -euo pipefail
-
-        # bun installer requires unzip — installed in base packages but double-check
-        if command -v apt-get >/dev/null 2>&1; then
-          sudo apt-get install -y unzip >/dev/null 2>&1 || true
-        elif command -v yum >/dev/null 2>&1; then
-          sudo yum install -y unzip >/dev/null 2>&1 || true
-        fi
-
-        curl -fsSL https://bun.sh/install | bash
-
-        # Symlink into /usr/local/bin from all known landing spots
-        LINKED=false
-        for BUN_BIN in \
-            "${HOME}/.bun/bin/bun" \
-            "${HOME}/.local/bin/bun" \
-            "${HOME}/.local/opt/bun/bin/bun"; do
-          if [ -x "${BUN_BIN}" ]; then
-            sudo install -m 0755 "${BUN_BIN}" /usr/local/bin/bun
-            echo "Installed bun globally from ${BUN_BIN}"
-            LINKED=true
-            break
-          fi
-        done
-
-        if [ "${LINKED}" = "false" ]; then
-          echo "ERROR: bun binary not found in any expected location after install" >&2
-          echo "Searched: ~/.bun/bin/bun  ~/.local/bin/bun  ~/.local/opt/bun/bin/bun" >&2
-          exit 1
-        fi
-      args:
-        executable: /bin/bash
-        # Idempotency guard: skip the curl|bash install entirely if the binary
-        # is already in place, independent of the PATH-based fact above.
-        creates: /usr/local/bin/bun
-      when: not bun_installed
-
-    - name: "Phase 2 | Bun | Verify symlink is executable"
-      ansible.builtin.stat:
-        path: /usr/local/bin/bun
-      register: bun_stat_post
-
-    - name: "Phase 2 | Bun | Assert installed and executable"
-      ansible.builtin.assert:
-        that:
-          - bun_stat_post.stat.exists
-          - bun_stat_post.stat.executable
-        fail_msg: >-
-          /usr/local/bin/bun does not exist or is not executable after install.
-          Check that bun.sh installer succeeded and that one of
-          ~/.bun/bin/bun | ~/.local/bin/bun | ~/.local/opt/bun/bin/bun was created.
 
     # ────────────────────────────────────────────────────────────────────────────
     # PHASE 2 – Go  (auto-resolves latest stable; falls back to go_version_fallback)
@@ -1182,7 +1112,6 @@
 
         check "node"        node --version
         check "npm"         npm  --version
-        check "bun"         bun  --version
         check "go"          go   version
         check "caddy"       caddy version
         check "doppler"     doppler --version

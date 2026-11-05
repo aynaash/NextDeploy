@@ -1,6 +1,10 @@
 package server
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 )
@@ -55,5 +59,19 @@ func TestTailBufferBoundedUnderStreaming(t *testing.T) {
 	}
 	if len(tb.buf) > stderrTailLimit {
 		t.Errorf("buffer grew to %d bytes, limit %d", len(tb.buf), stderrTailLimit)
+	}
+}
+
+func TestContextReaderStopsCopyWhenCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var dst bytes.Buffer
+	_, err := io.Copy(&dst, contextReader{ctx: ctx, reader: strings.NewReader("archive")})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("copy error = %v, want context.Canceled", err)
+	}
+	if dst.Len() != 0 {
+		t.Errorf("copied %d bytes after cancellation", dst.Len())
 	}
 }

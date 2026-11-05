@@ -71,20 +71,34 @@ if [ -z "$TAG" ]; then
   exit 1
 fi
 
-URL="https://github.com/aynaash/nextdeploy/releases/download/${TAG}/nextdeployd-linux-${ARCH}"
+VERSION="${TAG#v}"
+ARCHIVE="nextdeployd_${VERSION}_linux_${ARCH}.tar.gz"
+URL="https://github.com/aynaash/nextdeploy/releases/download/${TAG}/${ARCHIVE}"
 echo "Fetching nextdeployd ${TAG} for linux/${ARCH}..."
-$FETCH_OUT /tmp/nextdeployd.new "$URL"
+$FETCH_OUT /tmp/nextdeployd.tar.gz "$URL"
 
-# A 404 from GitHub is an HTML page, not a binary. Catch it here rather than
-# letting the "binary" fail to exec with a confusing message.
-if ! head -c 4 /tmp/nextdeployd.new | od -An -tx1 | grep -q '7f 45 4c 46'; then
-  echo "downloaded file is not an ELF binary (URL: $URL)" >&2
-  rm -f /tmp/nextdeployd.new
+# Release assets are GoReleaser archives (the daemon binary plus LICENSE and
+# README.md), not raw executables.
+if ! tar -tzf /tmp/nextdeployd.tar.gz >/dev/null 2>&1; then
+  echo "downloaded file is not a valid tar.gz archive (URL: $URL)" >&2
+  rm -f /tmp/nextdeployd.tar.gz
+  exit 1
+fi
+if ! tar -xzf /tmp/nextdeployd.tar.gz -C /tmp nextdeployd; then
+  echo "could not extract nextdeployd from release archive" >&2
+  rm -f /tmp/nextdeployd.tar.gz /tmp/nextdeployd
+  exit 1
+fi
+rm -f /tmp/nextdeployd.tar.gz
+
+if ! head -c 4 /tmp/nextdeployd | od -An -tx1 | grep -q '7f 45 4c 46'; then
+  echo "extracted nextdeployd is not an ELF binary (URL: $URL)" >&2
+  rm -f /tmp/nextdeployd
   exit 1
 fi
 
-$SUDO install -m 0755 /tmp/nextdeployd.new /usr/local/bin/nextdeployd
-rm -f /tmp/nextdeployd.new
+$SUDO install -m 0755 /tmp/nextdeployd /usr/local/bin/nextdeployd
+rm -f /tmp/nextdeployd
 echo "Installed: $(/usr/local/bin/nextdeployd version)"
 
 $SUDO /usr/local/bin/nextdeployd prepare ` + prepareArgs + `

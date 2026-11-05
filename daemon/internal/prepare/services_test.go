@@ -39,11 +39,44 @@ func TestPrepareProvisionsTheEdgeAndControlPlane(t *testing.T) {
 	if !h.dirs[CaddyFragmentDir] {
 		t.Errorf("%s was not created — the import directive would dangle", CaddyFragmentDir)
 	}
+	for _, path := range []string{CaddyLogDir, CaddyLogDir + "/access.log", CaddyLogDir + "/audit.log"} {
+		if !h.Exists(path) {
+			t.Errorf("%s was not created for Caddy", path)
+		}
+		if got := h.owners[path]; got != "caddy:caddy" {
+			t.Errorf("%s owned by %q, want caddy:caddy", path, got)
+		}
+	}
 	if _, ok := h.files[DaemonConfPath]; !ok {
 		t.Errorf("%s was not written — the daemon would have no HMAC secret", DaemonConfPath)
 	}
 	if _, ok := h.files[DaemonUnitPath]; !ok {
 		t.Errorf("%s was not written — nextdeployd would never run as a service", DaemonUnitPath)
+	}
+}
+
+func TestPrepareRepairsCaddyLogOwnershipOnRerun(t *testing.T) {
+	h := aptHost()
+	h.onRun = installEverything
+	h.dirs[CaddyLogDir] = true
+	h.dirs[CaddyFragmentDir] = true
+	h.files[CaddyLogDir+"/access.log"] = []byte("existing access log")
+	h.files[CaddyLogDir+"/audit.log"] = []byte("existing audit log")
+	h.owners[CaddyLogDir] = "root:root"
+	h.owners[CaddyLogDir+"/access.log"] = "root:root"
+	h.owners[CaddyLogDir+"/audit.log"] = "root:root"
+
+	report := Run(h, Options{}, io.Discard)
+	if report.Failed() {
+		t.Fatalf("prepare failed:\n%s", report.Summary())
+	}
+	for _, path := range []string{CaddyLogDir, CaddyLogDir + "/access.log", CaddyLogDir + "/audit.log"} {
+		if got := h.owners[path]; got != "caddy:caddy" {
+			t.Errorf("%s owned by %q after prepare, want caddy:caddy", path, got)
+		}
+	}
+	if got := string(h.files[CaddyLogDir+"/access.log"]); got != "existing access log" {
+		t.Errorf("prepare overwrote existing access log: %q", got)
 	}
 }
 
@@ -282,7 +315,7 @@ func TestPackagedCaddyUnitIsLeftAlone(t *testing.T) {
 }
 
 func TestSkipRuntimesStillProvisionsTheEdgeAndControlPlane(t *testing.T) {
-	// --skip-runtimes means "the host manages Node/Bun separately", not "skip
+	// --skip-runtimes means "the host manages Node separately", not "skip
 	// the parts of NextDeploy that make a deploy possible".
 	h := aptHost()
 	h.onRun = installEverything
@@ -303,7 +336,7 @@ func TestSkipRuntimesStillProvisionsTheEdgeAndControlPlane(t *testing.T) {
 }
 
 func TestDopplerFailureDoesNotBlockTheDeploy(t *testing.T) {
-	// Doppler is opt-in per deploy, same as Bun: the daemon only emits
+	// Doppler is opt-in per deploy: the daemon only emits
 	// `doppler run --` when a deploy carries a token.
 	h := aptHost()
 	h.onRun = installEverything

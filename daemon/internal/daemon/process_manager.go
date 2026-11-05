@@ -163,17 +163,11 @@ func (pm *ProcessManager) resolveExecStart(outputMode, packageManager, dopplerTo
 	switch outputMode {
 	case "standalone":
 		bin := resolveBinary("node")
-		if packageManager == "bun" {
-			bin = resolveBinary("bun")
-		}
 		cmd = fmt.Sprintf("%s server.js", bin)
 	case "default":
 		bin := resolveBinary("npm")
 		args := "start"
 		switch packageManager {
-		case "bun":
-			bin = resolveBinary("bun")
-			args = "run start"
 		case "yarn":
 			bin = resolveBinary("yarn")
 		case "pnpm":
@@ -195,7 +189,6 @@ func (pm *ProcessManager) resolveExecStart(outputMode, packageManager, dopplerTo
 func resolveBinary(name string) string {
 	candidates := map[string]string{
 		"node":    "/usr/local/bin/node",
-		"bun":     "/usr/local/bin/bun",
 		"npm":     "/usr/local/bin/npm",
 		"yarn":    "/usr/local/bin/yarn",
 		"pnpm":    "/usr/local/bin/pnpm",

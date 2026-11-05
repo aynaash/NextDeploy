@@ -1,3 +1,5 @@
+// package daemon:This is nextdeployd which runs on the server where the nextjs web app is running for management
+
 package daemon
 
 import (

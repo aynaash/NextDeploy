@@ -55,10 +55,10 @@ fi
 
 // dopplerStep installs the Doppler CLI.
 //
-// Optional for the same reason Bun is: the daemon only emits
-// `doppler run -- <cmd>` when a deploy actually carries a Doppler token, so a
-// host that never uses Doppler runs fine without it. Failing the whole prepare
-// because cli.doppler.com was unreachable would punish every non-Doppler user.
+// The daemon only emits `doppler run -- <cmd>` when a deploy actually carries
+// a Doppler token, so a host that never uses Doppler runs fine without it.
+// Failing the whole prepare because cli.doppler.com was unreachable would
+// punish every non-Doppler user.
 func dopplerStep() Step {
 	return Step{
 		Name: "Install Doppler CLI",

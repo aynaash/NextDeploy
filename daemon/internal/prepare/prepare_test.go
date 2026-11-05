@@ -12,6 +12,12 @@ import (
 // state so the idempotency tests have something to converge on.
 func installEverything(h *fakeHost, cmd string) {
 	switch {
+	case strings.HasPrefix(cmd, "touch "):
+		for _, path := range strings.Fields(strings.TrimPrefix(cmd, "touch ")) {
+			if _, ok := h.files[path]; !ok {
+				h.files[path] = nil
+			}
+		}
 	case strings.Contains(cmd, "nodesource"):
 		h.bins["node"] = "/usr/bin/node"
 		h.bins["npm"] = "/usr/bin/npm"
@@ -20,8 +26,6 @@ func installEverything(h *fakeHost, cmd string) {
 	case strings.Contains(cmd, "corepack enable"):
 		h.bins["pnpm"] = "/usr/bin/pnpm"
 		h.bins["yarn"] = "/usr/bin/yarn"
-	case strings.Contains(cmd, "bun.sh/install"):
-		h.files[BinDir+"/bun"] = []byte("elf")
 	case strings.Contains(cmd, "cli.doppler.com"):
 		h.bins["doppler"] = "/usr/bin/doppler"
 	case strings.Contains(cmd, "dl.cloudsmith.io"), strings.Contains(cmd, "copr enable"):
@@ -143,10 +147,13 @@ func TestPrepareInstallsEveryPackageManagerTheDaemonCanEmit(t *testing.T) {
 		t.Fatalf("prepare failed:\n%s", report.Summary())
 	}
 
-	for _, pm := range []string{"node", "npm", "pnpm", "yarn", "bun"} {
+	for _, pm := range []string{"node", "npm", "pnpm", "yarn"} {
 		if !h.Exists(BinDir + "/" + pm) {
 			t.Errorf("%s is not at %s/%s — an app using it would ship then fail to start", pm, BinDir, pm)
 		}
+	}
+	if h.Exists(BinDir+"/bun") || len(h.commandsMatching("bun.sh/install")) > 0 {
+		t.Error("prepare should not install Bun on the server")
 	}
 }
 
@@ -165,15 +172,14 @@ func TestPrepareIsIdempotent(t *testing.T) {
 		t.Fatalf("second run failed:\n%s", report.Summary())
 	}
 
-	// Everything with a Done predicate must be skipped the second time. Only
-	// the package-index refresh (no Done — it's inherently re-runnable) should
-	// still execute.
+	// Most steps with a Done predicate should be skipped. The package index
+	// refresh and Caddy log ownership reconciliation intentionally run each time.
 	ok, skipped, _, _ := report.Counts()
 	if skipped == 0 {
 		t.Fatal("second run skipped nothing — check-before-change is not working")
 	}
-	if ok > 1 {
-		t.Errorf("second run re-applied %d steps, want at most 1 (the index refresh):\n%s", ok, report.Summary())
+	if ok > 2 {
+		t.Errorf("second run re-applied %d steps, want at most 2 (index refresh and Caddy log reconciliation):\n%s", ok, report.Summary())
 	}
 	if len(h.ran) >= firstRunCommands {
 		t.Errorf("second run issued %d commands vs %d on a bare host — not converging", len(h.ran), firstRunCommands)
@@ -202,11 +208,10 @@ func TestPrepareStopsAtFirstRequiredFailure(t *testing.T) {
 }
 
 func TestPrepareOptionalFailureWarnsButContinues(t *testing.T) {
-	// Bun is opt-in per app; a host without it still runs Node/pnpm apps.
+	// Doppler is only needed by deployments that use Doppler-managed secrets.
 	h := aptHost()
 	h.onRun = installEverything
-	h.bins["fail2ban-client"] = "/usr/bin/fail2ban-client" // isolate bun as the only warning
-	h.failCmd["bun.sh/install"] = errors.New("network unreachable")
+	h.failCmd["cli.doppler.com"] = errors.New("network unreachable")
 
 	report := Run(h, Options{}, io.Discard)
 	if report.Failed() {

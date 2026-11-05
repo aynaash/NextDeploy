@@ -58,6 +58,41 @@ func TestRenderResourceLimits(t *testing.T) {
 	}
 }
 
+func TestResolveExecStartUsesNodeForBunManagedProjects(t *testing.T) {
+	pm := NewProcessManager()
+	tests := []struct {
+		name       string
+		outputMode string
+		want       string
+	}{
+		{
+			name:       "default output uses npm start",
+			outputMode: "default",
+			want:       resolveBinary("npm") + " start",
+		},
+		{
+			name:       "standalone output uses node",
+			outputMode: "standalone",
+			want:       resolveBinary("node") + " server.js",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := pm.resolveExecStart(tt.outputMode, "bun", "")
+			if err != nil {
+				t.Fatalf("resolveExecStart: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("resolveExecStart = %q, want %q", got, tt.want)
+			}
+			if strings.Contains(got, "bun") {
+				t.Errorf("Bun-managed app should run on Node, got %q", got)
+			}
+		})
+	}
+}
+
 func TestResourceLimitsValidate(t *testing.T) {
 	valid := []*config.ResourceLimits{
 		nil,

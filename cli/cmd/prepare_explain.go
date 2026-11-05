@@ -29,7 +29,7 @@ var prepareExplanation = explanation{
 		{
 			Num:       3,
 			Title:     "Bootstrap the agent (default path)",
-			Narrative: "Runs a POSIX-sh script over SSH that detects the target's architecture, resolves the latest release tag, downloads nextdeployd-linux-<arch>, verifies its ELF magic (a bad URL returns an HTML 404 page, not a binary) and installs it to /usr/local/bin.",
+			Narrative: "Runs a POSIX-sh script over SSH that detects the target's architecture, resolves the latest release tag, downloads the matching nextdeployd GoReleaser archive, extracts and verifies the ELF binary, then installs it to /usr/local/bin.",
 			Ref:       "cli/cmd/prepare_agent.go:38",
 			Function:  "bootstrapScript + runPrepareAgent",
 			Notes: []string{
@@ -40,13 +40,13 @@ var prepareExplanation = explanation{
 		{
 			Num:       4,
 			Title:     "Run nextdeployd prepare on the target",
-			Narrative: "The daemon provisions itself: package index, base packages, the nextdeploy user/group, /opt/nextdeploy tree, Node (NodeSource signed repo), Corepack pnpm/yarn shims, Bun, Caddy log dirs, logrotate and the fail2ban jails. Each step declares a Done predicate; satisfied steps are skipped.",
+			Narrative: "The daemon provisions itself: package index, base packages, the nextdeploy user/group, /opt/nextdeploy tree, Node (NodeSource signed repo), Corepack pnpm/yarn shims, Caddy log dirs, logrotate and the fail2ban jails. Apps built with Bun use Node.js to run on the server. Each step declares a Done predicate; satisfied steps are skipped.",
 			Ref:       "daemon/internal/prepare/plan.go:90",
 			Function:  "prepare.Plan + prepare.RunSteps",
 			Output:    "a per-step report; non-zero exit if a required step failed",
 			Notes: []string{
 				"A required failure stops the run — later steps assume earlier ones landed.",
-				"Optional steps (Bun, fail2ban) warn and continue.",
+				"Optional steps (Doppler, fail2ban) warn and continue.",
 				"Every package manager the daemon can emit an ExecStart for is installed, so a pnpm/yarn app can't ship successfully and then fail to start.",
 			},
 		},

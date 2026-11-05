@@ -61,7 +61,8 @@ func registerExplain(parent *cobra.Command, e *explanation) {
 
 func renderExplainNarrativeMode(b *strings.Builder, e *explanation) {
 	fmt.Fprintf(b, "nextdeploy %s — end-to-end pipeline\n", e.Name)
-	b.WriteString(strings.Repeat("═", 60) + "\n\n")
+	b.WriteString(strings.Repeat("==", 60))
+	b.WriteString("\n\n")
 	if e.Summary != "" {
 		b.WriteString(wrap(e.Summary, 72, "") + "\n\n")
 	}

@@ -34,8 +34,8 @@ var (
 var prepareCmd = &cobra.Command{
 	Use:   "prepare",
 	Short: "Prepare target server with required tools",
-	Long: `Provisions the target server end to end: the JS runtimes (Node, Corepack,
-Bun) and Doppler, Caddy with the Coraza WAF module, the nextdeployd control
+	Long: `Provisions the target server end to end: the JS runtimes (Node and
+	Corepack) and Doppler, Caddy with the Coraza WAF module, the nextdeployd control
 plane (systemd unit, HMAC secret, socket permissions), plus log rotation and
 fail2ban jails.
 
@@ -55,9 +55,12 @@ var (
 	prepareUseAnsible    bool
 	prepareSkipRuntimes  bool
 	prepareSkipHardening bool
+	prepareAllServers    bool
+	prepareServerName    string
 )
 
 func rootCredentialBlocked(username string, allowRoot bool) (bool, string) {
+	username = strings.TrimSpace(username)
 	if username == "root" && !allowRoot {
 		return true, "refusing to provision over the 'root' SSH login. Use a sudo-capable " +
 			"non-root user (recommended for security/compliance), or pass --allow-root to override."
@@ -71,8 +74,10 @@ func init() {
 	prepareCmd.Flags().BoolVar(&streamMode, "stream", false, "stream raw Ansible output (no colour filter)")
 	prepareCmd.Flags().BoolVar(&prepareAllowRoot, "allow-root", false, "allow provisioning over a root SSH login (not recommended)")
 	prepareCmd.Flags().BoolVar(&prepareUseAnsible, "ansible", false, "use the legacy Ansible playbook (requires ansible-playbook locally and python3 on the target)")
-	prepareCmd.Flags().BoolVar(&prepareSkipRuntimes, "skip-runtimes", false, "do not install Node/Corepack/Bun (the host manages runtimes separately)")
+	prepareCmd.Flags().BoolVar(&prepareSkipRuntimes, "skip-runtimes", false, "do not install Node/Corepack (the host manages runtimes separately)")
 	prepareCmd.Flags().BoolVar(&prepareSkipHardening, "skip-hardening", false, "do not install logrotate or the fail2ban jails")
+	prepareCmd.Flags().StringVar(&prepareServerName, "server", "", "prepare a specific server by name; defaults to the first configured server")
+	prepareCmd.Flags().BoolVar(&prepareAllServers, "all", false, "prepare every configured server")
 	rootCmd.AddCommand(prepareCmd)
 }
 
@@ -90,69 +95,81 @@ func runPrepare(cmd *cobra.Command, args []string) {
 
 	out := cmd.OutOrStdout()
 
-	serverName, serverCfg, err := resolveTargetServer()
+	targets, err := resolveTargetServers()
 	if err != nil {
 		PrepLogs.Error("Failed to resolve target server: %v", err)
 		os.Exit(1)
 	}
 
-	if blocked, reason := rootCredentialBlocked(serverCfg.Username, prepareAllowRoot); blocked {
-		PrepLogs.Error("%s", reason)
-		os.Exit(1)
-	}
-
-	// Agent path by default: nextdeployd is a static binary, so the target needs
-	// no Python and this machine needs no Ansible. The playbook remains
-	// available behind --ansible until the Go path has proven parity in the
-	// field, but it is no longer what a new user pays for.
-	if !prepareUseAnsible {
-		if err := runPrepareAgent(ctx, serverName, serverCfg, out, agentOptions{
-			SkipRuntimes:  prepareSkipRuntimes,
-			SkipHardening: prepareSkipHardening,
-		}); err != nil {
-			PrepLogs.Error("Preparation failed: %v", err)
+	if prepareUseAnsible {
+		legacyAnsibleNotice(out)
+		if err := ensureAnsible(out); err != nil {
+			PrepLogs.Error("Ansible setup failed: %v", err)
 			os.Exit(1)
 		}
+	}
+
+	for _, serverCfg := range targets {
+		serverName := serverCfg.Name
+		if serverName == "" {
+			serverName = serverCfg.Host
+		}
+
+		if blocked, reason := rootCredentialBlocked(serverCfg.Username, prepareAllowRoot); blocked {
+			PrepLogs.Error("%s", reason)
+			os.Exit(1)
+		}
+
+		// Agent path by default: nextdeployd is a static binary, so the target needs
+		// no Python and this machine needs no Ansible. The playbook remains
+		// available behind --ansible until the Go path has proven parity in the
+		// field, but it is no longer what a new user pays for.
+		if !prepareUseAnsible {
+			if err := runPrepareAgent(ctx, serverName, serverCfg, out, agentOptions{
+				SkipRuntimes:  prepareSkipRuntimes,
+				SkipHardening: prepareSkipHardening,
+			}); err != nil {
+				PrepLogs.Error("Preparation failed: %v", err)
+				os.Exit(1)
+			}
+			_, _ = color.New(color.FgGreen, color.Bold).Fprintf(out, "\n✨  Server %s prepared successfully!\n", serverName)
+			PrepLogs.Success("Server %s prepared successfully!", serverName)
+			continue
+		}
+
+		_, _ = color.New(color.FgCyan).Fprintf(out, "\n Preparing server: %s (%s)\n\n", serverName, serverCfg.Host)
+		PrepLogs.Info("Starting Ansible-based preparation of server %s", serverName)
+
+		tmpDir, err := os.MkdirTemp("", "nextdeploy-prepare-*")
+		if err != nil {
+			PrepLogs.Error("Failed to create temp dir: %v", err)
+			os.Exit(1)
+		}
+
+		inventoryPath, err := writeInventory(tmpDir, serverName, serverCfg)
+		if err != nil {
+			PrepLogs.Error("Failed to write Ansible inventory: %v", err)
+			os.RemoveAll(tmpDir)
+			os.Exit(1)
+		}
+
+		playbookPath := filepath.Join(tmpDir, "prepare.yml")
+		if err := os.WriteFile(playbookPath, []byte(preparePlaybookYAML), 0600); err != nil {
+			PrepLogs.Error("Failed to write playbook: %v", err)
+			os.RemoveAll(tmpDir)
+			os.Exit(1)
+		}
+
+		if err := runAnsible(ctx, inventoryPath, playbookPath, out, verbose); err != nil {
+			PrepLogs.Error("Preparation failed: %v", err)
+			os.RemoveAll(tmpDir)
+			os.Exit(1)
+		}
+		os.RemoveAll(tmpDir)
+
 		_, _ = color.New(color.FgGreen, color.Bold).Fprintf(out, "\n✨  Server %s prepared successfully!\n", serverName)
 		PrepLogs.Success("Server %s prepared successfully!", serverName)
-		return
 	}
-
-	legacyAnsibleNotice(out)
-	if err := ensureAnsible(out); err != nil {
-		PrepLogs.Error("Ansible setup failed: %v", err)
-		os.Exit(1)
-	}
-
-	_, _ = color.New(color.FgCyan).Fprintf(out, "\n Preparing server: %s (%s)\n\n", serverName, serverCfg.Host)
-	PrepLogs.Info("Starting Ansible-based preparation of server %s", serverName)
-
-	tmpDir, err := os.MkdirTemp("", "nextdeploy-prepare-*")
-	if err != nil {
-		PrepLogs.Error("Failed to create temp dir: %v", err)
-		os.Exit(1)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	inventoryPath, err := writeInventory(tmpDir, serverName, serverCfg)
-	if err != nil {
-		PrepLogs.Error("Failed to write Ansible inventory: %v", err)
-		os.Exit(1)
-	}
-
-	playbookPath := filepath.Join(tmpDir, "prepare.yml")
-	if err := os.WriteFile(playbookPath, []byte(preparePlaybookYAML), 0600); err != nil {
-		PrepLogs.Error("Failed to write playbook: %v", err)
-		os.Exit(1)
-	}
-
-	if err := runAnsible(ctx, inventoryPath, playbookPath, out, verbose); err != nil {
-		PrepLogs.Error("Preparation failed: %v", err)
-		os.Exit(1)
-	}
-
-	_, _ = color.New(color.FgGreen, color.Bold).Fprintf(out, "\n✨  Server %s prepared successfully!\n", serverName)
-	PrepLogs.Success("Server %s prepared successfully!", serverName)
 }
 
 type ansibleInstallMethod struct {
@@ -258,18 +275,45 @@ func ensureAnsible(out io.Writer) error {
 }
 
 func resolveTargetServer() (string, config.ServerConfig, error) {
-	cfg, err := config.Load()
+	targets, err := resolveTargetServers()
 	if err != nil {
-		return "", config.ServerConfig{}, fmt.Errorf("failed to load config: %w", err)
+		return "", config.ServerConfig{}, err
 	}
-
-	if len(cfg.Servers) == 0 {
+	if len(targets) == 0 {
 		return "", config.ServerConfig{}, fmt.Errorf("no servers configured in nextdeploy.yml")
 	}
-
-	first := cfg.Servers[0]
+	first := targets[0]
 	PrepLogs.Debug("Using primary server: %s (%s)", first.Name, first.Host)
 	return first.Name, first, nil
+}
+
+func resolveTargetServers() ([]config.ServerConfig, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+	if len(cfg.Servers) == 0 {
+		return nil, fmt.Errorf("no servers configured in nextdeploy.yml")
+	}
+	if prepareAllServers && prepareServerName != "" {
+		return nil, fmt.Errorf("cannot combine --all with --server; choose one target or all targets")
+	}
+
+	if prepareAllServers {
+		return cfg.Servers, nil
+	}
+
+	if prepareServerName != "" {
+		for _, serverCfg := range cfg.Servers {
+			if strings.EqualFold(strings.TrimSpace(serverCfg.Name), strings.TrimSpace(prepareServerName)) ||
+				strings.EqualFold(strings.TrimSpace(serverCfg.Host), strings.TrimSpace(prepareServerName)) {
+				return []config.ServerConfig{serverCfg}, nil
+			}
+		}
+		return nil, fmt.Errorf("server %q not found in nextdeploy.yml", prepareServerName)
+	}
+
+	return []config.ServerConfig{cfg.Servers[0]}, nil
 }
 
 func writeInventory(tmpDir, serverName string, cfg config.ServerConfig) (string, error) {

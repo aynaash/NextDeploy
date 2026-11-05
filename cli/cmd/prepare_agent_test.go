@@ -65,11 +65,24 @@ func TestBootstrapScriptMapsArchitectures(t *testing.T) {
 }
 
 func TestBootstrapScriptVerifiesTheDownloadIsABinary(t *testing.T) {
-	// GitHub answers a bad release URL with an HTML 404 page. Without this the
-	// "binary" gets installed and fails to exec with a useless message.
+	// GitHub answers a bad release URL with an HTML 404 page. Without checking
+	// the extracted binary, the install fails later with a confusing message.
 	s := bootstrapScript("")
 	if !strings.Contains(s, "7f 45 4c 46") {
-		t.Error("script does not verify the ELF magic of the download")
+		t.Error("script does not verify the ELF magic of the extracted binary")
+	}
+}
+
+func TestBootstrapScriptUsesGoReleaserDaemonArchive(t *testing.T) {
+	s := bootstrapScript("")
+	for _, want := range []string{
+		`VERSION="${TAG#v}"`,
+		`ARCHIVE="nextdeployd_${VERSION}_linux_${ARCH}.tar.gz"`,
+		`tar -xzf /tmp/nextdeployd.tar.gz -C /tmp nextdeployd`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("bootstrap script missing release archive handling %q", want)
+		}
 	}
 }
 

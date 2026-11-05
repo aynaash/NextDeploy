@@ -73,11 +73,28 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 		return runCloudflareInit(log, appName)
 	}
 
+	enableGoSidecar := false
+	if targetType == "vps" {
+		if err := survey.AskOne(&survey.Confirm{
+			Message: "Enable the Go sidecar for eligible prerendered pages and image requests?",
+			Default: false,
+		}, &enableGoSidecar); err != nil {
+			return fmt.Errorf("prompt failed: %w", err)
+		}
+	}
+
 	// Use the raw template to preserve comments. The domain is configured in the
 	// generated nextdeploy.yml (bare hostname or a provider/DNS block), not via a
 	// prompt — see the `domain:` field and its comment in the template.
 	configContent := config.GetSampleConfigTemplate(targetType)
 	configContent = strings.ReplaceAll(configContent, "name: example-app", "name: "+appName)
+	if enableGoSidecar {
+		var err error
+		configContent, err = setGoSidecarEnabled(configContent)
+		if err != nil {
+			return err
+		}
+	}
 
 	if err := os.WriteFile("nextdeploy.yml", []byte(configContent), 0o600); err != nil {
 		return fmt.Errorf("failed to save configuration: %w", err)
@@ -88,6 +105,14 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	log.Info("- Run 'nextdeploy prepare' to prepare a target server")
 
 	return nil
+}
+
+func setGoSidecarEnabled(configContent string) (string, error) {
+	const disabled = "enabled: false # Opt in after reviewing the sidecar's supported request paths"
+	if strings.Count(configContent, disabled) != 1 {
+		return "", fmt.Errorf("could not find the Go sidecar setting in the VPS configuration template")
+	}
+	return strings.Replace(configContent, disabled, strings.Replace(disabled, "false", "true", 1), 1), nil
 }
 
 // runCloudflareInit drives the Cloudflare-specific init: scaffold a new

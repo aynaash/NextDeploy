@@ -517,25 +517,14 @@ func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, re
 	client.mu.Lock()
 	defer client.mu.Unlock()
 
-	// Ensure the remote directory exists before uploading
-	remoteDir := filepath.Dir(remotePath)
-	mkdirSession, err := client.Client.NewSession()
-	if err != nil {
-		return fmt.Errorf("failed to create SSH session for mkdir: %w", err)
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("upload canceled before starting: %w", err)
 	}
-	if out, err := mkdirSession.CombinedOutput(fmt.Sprintf("mkdir -p %q", remoteDir)); err != nil {
-		mkdirSession.Close()
-		return fmt.Errorf("failed to create remote directory %s: %w (output: %s)", remoteDir, err, string(out))
-	}
-	mkdirSession.Close()
 
-	// Optimization: Use raw SSH pipe (cat > remotePath) instead of SFTP.
-	// This is significantly faster for single file transfers as it avoids SFTP protocol overhead.
-	session, err := client.Client.NewSession()
-	if err != nil {
-		return fmt.Errorf("failed to create SSH session for upload: %w", err)
+	remoteDir := filepath.Dir(remotePath)
+	if err := client.SFTPClient.MkdirAll(remoteDir); err != nil {
+		return fmt.Errorf("failed to create remote directory %s: %w", remoteDir, err)
 	}
-	defer session.Close()
 
 	// #nosec G304
 	localFile, err := os.Open(localPath)
@@ -544,47 +533,41 @@ func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, re
 	}
 	defer localFile.Close()
 
-	stdin, err := session.StdinPipe()
+	remoteFile, err := client.SFTPClient.OpenFile(remotePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
 	if err != nil {
-		return fmt.Errorf("failed to get stdin pipe: %w", err)
+		return fmt.Errorf("failed to open remote file %s: %w", remotePath, err)
 	}
 
-	// Capture stderr so we can diagnose remote-side failures (e.g. permission denied)
-	var stderrBuf bytes.Buffer
-	session.Stderr = &stderrBuf
-
-	// #nosec G204
-	// Using sh to ensure the path is correctly handled
-	cmd := fmt.Sprintf("cat > %q", remotePath)
-	if err := session.Start(cmd); err != nil {
-		return fmt.Errorf("failed to start remote cat: %w", err)
+	_, copyErr := io.Copy(remoteFile, contextReader{ctx: ctx, reader: localFile})
+	closeErr := remoteFile.Close()
+	if copyErr != nil {
+		removeErr := client.SFTPClient.Remove(remotePath)
+		return errors.Join(fmt.Errorf("failed to upload %s to %s:%s: %w", localPath, serverName, remotePath, copyErr),
+			closeErr, removeErr)
 	}
-
-	// Fast streaming
-	if _, err := io.Copy(stdin, localFile); err != nil {
-		_ = stdin.Close()
-		remoteErr := strings.TrimSpace(stderrBuf.String())
-		if remoteErr != "" {
-			return fmt.Errorf("failed to stream upload to pipe: %w (remote stderr: %s)", err, remoteErr)
-		}
-		return fmt.Errorf("failed to stream upload to pipe: %w (hint: check remote directory permissions for %s)", err, remoteDir)
+	if closeErr != nil {
+		return fmt.Errorf("failed to close remote file %s: %w", remotePath, closeErr)
 	}
-
-	if err := stdin.Close(); err != nil {
-		return fmt.Errorf("failed to close upload pipe: %w", err)
-	}
-
-	if err := session.Wait(); err != nil {
-		remoteErr := strings.TrimSpace(stderrBuf.String())
-		if remoteErr != "" {
-			return fmt.Errorf("upload session failed: %w (remote stderr: %s)", err, remoteErr)
-		}
-		return fmt.Errorf("upload session failed: %w", err)
+	if err := ctx.Err(); err != nil {
+		removeErr := client.SFTPClient.Remove(remotePath)
+		return errors.Join(fmt.Errorf("upload canceled: %w", err), removeErr)
 	}
 
 	client.LastUsed = time.Now()
-	serverlogger.Info("Uploaded %s to %s:%s (High-speed SSH pipe)", localPath, serverName, remotePath)
+	serverlogger.Info("Uploaded %s to %s:%s (SFTP)", localPath, serverName, remotePath)
 	return nil
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }
 
 func (s *ServerStruct) DownloadFile(ctx context.Context, serverName, remotePath, localPath string) error {

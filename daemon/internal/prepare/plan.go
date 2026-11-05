@@ -32,7 +32,7 @@ const (
 
 // Options tunes what a run provisions.
 type Options struct {
-	// SkipRuntimes leaves Node/Bun/Corepack alone. Useful when the host is
+	// SkipRuntimes leaves Node/Corepack alone. Useful when the host is
 	// managed separately and prepare should only own the NextDeploy layer.
 	SkipRuntimes bool
 	// SkipHardening leaves fail2ban and logrotate alone.
@@ -186,7 +186,7 @@ func Plan(h Host, opts Options) []Step {
 
 // runtimeSteps installs the JS runtimes the daemon can emit an ExecStart for.
 //
-// The daemon supports npm/yarn/pnpm/bun and will happily write
+// The daemon supports npm/yarn/pnpm and will happily write
 // ExecStart=/usr/local/bin/pnpm for a pnpm app. If pnpm isn't here, that app
 // ships "successfully" and then fails at unit start. A support matrix in one
 // component and a provisioning list in another that disagree is a latent
@@ -238,23 +238,6 @@ func runtimeSteps(pm PackageManager) []Step {
 				}
 				return linkIntoBinDir(h, "pnpm", "yarn")
 			},
-		},
-		{
-			Name: "Install Bun",
-			Done: func(h Host) bool { return h.Exists(BinDir + "/bun") },
-			Apply: func(h Host) error {
-				if _, err := h.RunShell(
-					"set -e\n" +
-						"export BUN_INSTALL=/usr/local/lib/bun\n" +
-						"curl -fsSL https://bun.sh/install | bash\n" +
-						"install -m0755 \"$BUN_INSTALL/bin/bun\" " + BinDir + "/bun\n"); err != nil {
-					return err
-				}
-				return nil
-			},
-			// Bun is the one runtime an app opts into rather than defaults to;
-			// a failure here shouldn't block a Node/pnpm deployment.
-			Optional: true,
 		},
 	}
 }
@@ -315,15 +298,30 @@ func hardeningSteps(pm PackageManager) []Step {
 		},
 		{
 			Name: "Create " + CaddyLogDir + " and Caddy fragment dir",
-			Done: func(h Host) bool { return h.Exists(CaddyLogDir) && h.Exists(CaddyFragmentDir) },
 			Apply: func(h Host) error {
 				for _, d := range []string{CaddyLogDir, CaddyFragmentDir} {
 					if err := h.MkdirAll(d, 0o755); err != nil {
 						return err
 					}
 				}
-				// Best-effort: caddy may not have a user yet on a bare host.
-				_ = h.Chown(CaddyLogDir, "caddy", "caddy")
+				if err := h.Chown(CaddyLogDir, "caddy", "caddy"); err != nil {
+					return fmt.Errorf("set Caddy log directory ownership: %w", err)
+				}
+				if _, err := h.Run("chmod", "0755", CaddyLogDir); err != nil {
+					return fmt.Errorf("set Caddy log directory permissions: %w", err)
+				}
+				for _, name := range []string{"access.log", "audit.log"} {
+					path := CaddyLogDir + "/" + name
+					if _, err := h.Run("touch", path); err != nil {
+						return fmt.Errorf("create Caddy log %s: %w", path, err)
+					}
+					if err := h.Chown(path, "caddy", "caddy"); err != nil {
+						return fmt.Errorf("set Caddy log ownership for %s: %w", path, err)
+					}
+					if _, err := h.Run("chmod", "0644", path); err != nil {
+						return fmt.Errorf("set Caddy log permissions for %s: %w", path, err)
+					}
+				}
 				return nil
 			},
 		},

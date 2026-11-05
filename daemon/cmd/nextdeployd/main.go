@@ -308,7 +308,7 @@ func handleHelpSubcommand() {
 // target needs no Python interpreter and the control node needs no Ansible.
 func handlePrepareSubcommand() {
 	fs := flag.NewFlagSet("prepare", flag.ExitOnError)
-	skipRuntimes := fs.Bool("skip-runtimes", false, "Do not install Node/Corepack/Bun (host manages runtimes separately)")
+	skipRuntimes := fs.Bool("skip-runtimes", false, "Do not install Node/Corepack (host manages runtimes separately)")
 	skipHardening := fs.Bool("skip-hardening", false, "Do not install logrotate or fail2ban jails")
 	_ = fs.Parse(os.Args[2:])
 
