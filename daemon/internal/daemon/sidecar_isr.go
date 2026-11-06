@@ -46,6 +46,13 @@ func (s *SidecarHandler) servePrerendered(w http.ResponseWriter, r *http.Request
 	} else {
 		w.Header().Set("X-NextDeploy-Cache", "HIT")
 	}
+	if isRSC {
+		w.Header().Set("X-NextDeploy-Handler", "go-rsc")
+		s.stats.rscHits.Add(1)
+	} else {
+		w.Header().Set("X-NextDeploy-Handler", "go-html")
+		s.stats.htmlHits.Add(1)
+	}
 	if matchesETag(r.Header.Get("If-None-Match"), etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return true
@@ -94,7 +101,7 @@ func (s *SidecarHandler) triggerBackgroundRevalidation(route string, entry *cach
 		for attempt := 0; attempt < 10; attempt++ {
 			body, state, err := s.requestNodeForRevalidation(ctx, requestURI, headers)
 			if err != nil {
-				s.logf("[gosidecar] revalidate %q: %v", route, err)
+				s.recordRevalidationFailure("revalidate %q: %v", route, err)
 				return
 			}
 			switch strings.ToUpper(state) {
@@ -116,15 +123,20 @@ func (s *SidecarHandler) triggerBackgroundRevalidation(route string, entry *cach
 				case <-time.After(300 * time.Millisecond):
 				}
 			default:
-				s.logf("[gosidecar] Node.js did not confirm revalidation for %q (x-nextjs-cache=%q)", route, state)
+				s.recordRevalidationFailure("Node.js did not confirm revalidation for %q (x-nextjs-cache=%q)", route, state)
 				return
 			}
 		}
-		s.logf("[gosidecar] revalidation did not complete for %q before retry limit", route)
+		s.recordRevalidationFailure("revalidation did not complete for %q before retry limit", route)
 	})
 	if !started {
 		reval.Store(false)
 	}
+}
+
+func (s *SidecarHandler) recordRevalidationFailure(format string, args ...any) {
+	s.stats.revalidationFailures.Add(1)
+	s.logf("[gosidecar] "+format, args...)
 }
 
 func (s *SidecarHandler) requestNodeForRevalidation(ctx context.Context, requestURI string, headers http.Header) ([]byte, string, error) {

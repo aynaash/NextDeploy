@@ -78,7 +78,7 @@ export async function dispatch(request, env, ctx, tables) {
     if (mw.response) return mw.response;
     request = mw.request;
 
-    const staticRes = await tryStaticAsset(env, pathname);
+    const staticRes = await tryStaticAsset(env, pathname, manifest);
     if (staticRes) return staticRes;
 
     const routed = await tryRouteDispatch(request, env, ctx, url, pathname, tables);
@@ -144,11 +144,11 @@ async function runMiddlewareStack(request, env, ctx, tables) {
  * Response on hit (including the 404 when a prefixed path isn't in R2),
  * or null when the path isn't in a static prefix.
  */
-async function tryStaticAsset(env, pathname) {
+async function tryStaticAsset(env, pathname, manifest) {
   if (!pathname.startsWith("/_next/static/") && !pathname.startsWith("/public/")) {
     return null;
   }
-  const res = await serveStaticFromR2(env, pathname);
+  const res = await serveStaticFromR2(env, pathname, manifest);
   return res || notFound();
 }
 
@@ -190,7 +190,7 @@ async function tryCachedRender(env, manifest, pathname) {
     if (!target) continue;
     const stale = await isStale(pathname, isrTagsFor(pathname, manifest), env);
     if (stale) continue;
-    const res = await serveSSGFromR2(env, target);
+    const res = await serveSSGFromR2(env, target, manifest);
     if (res) return res;
   }
   return null;

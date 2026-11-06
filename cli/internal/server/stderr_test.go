@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTailBufferKeepsLastBytes(t *testing.T) {
@@ -73,5 +74,31 @@ func TestContextReaderStopsCopyWhenCanceled(t *testing.T) {
 	}
 	if dst.Len() != 0 {
 		t.Errorf("copied %d bytes after cancellation", dst.Len())
+	}
+}
+
+func TestCloseOnContextCancellationClosesConnection(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	closed := make(chan struct{})
+	stopWatcher := closeOnContextCancellation(ctx, func() error {
+		close(closed)
+		return nil
+	})
+	defer stopWatcher()
+
+	cancel()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("connection was not closed after context cancellation")
+	}
+}
+
+func TestUploadPercent(t *testing.T) {
+	if got := uploadPercent(5, 20); got != 25 {
+		t.Errorf("uploadPercent(5, 20) = %v, want 25", got)
+	}
+	if got := uploadPercent(5, 0); got != 0 {
+		t.Errorf("uploadPercent(5, 0) = %v, want 0", got)
 	}
 }

@@ -1,6 +1,8 @@
 package nextcompile
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -31,6 +33,7 @@ type Manifest struct {
 	NextVersion   string          `json:"nextVersion"`
 	ReactVersion  string          `json:"reactVersion,omitempty"`
 	BuildID       string          `json:"buildId,omitempty"`
+	AssetVersion  string          `json:"assetVersion,omitempty"`
 	GitCommit     string          `json:"gitCommit,omitempty"`
 	Routes        ManifestRoutes  `json:"routes"`
 	ISR           ManifestISR     `json:"isr"`
@@ -123,6 +126,10 @@ type ManifestI18n struct {
 // scanned refs (for feature detection). Pure — no I/O — so tests can call
 // it without a filesystem.
 func BuildManifest(p Payload, next NextVersion, react ReactVersion, refs []ModuleRef, generatedAt time.Time) Manifest {
+	assetVersion := p.AssetVersion
+	if assetVersion == "" {
+		assetVersion = AssetVersionForBuild(p.BuildID)
+	}
 	m := Manifest{
 		SchemaVersion: manifestSchemaVersion,
 		GeneratedAt:   generatedAt.UTC().Format(time.RFC3339),
@@ -132,6 +139,7 @@ func BuildManifest(p Payload, next NextVersion, react ReactVersion, refs []Modul
 		NextVersion:   next.Raw,
 		ReactVersion:  react.Raw,
 		BuildID:       p.BuildID,
+		AssetVersion:  assetVersion,
 		GitCommit:     p.GitCommit,
 		HasAppRouter:  p.HasAppRouter,
 		OutputMode:    p.OutputMode,
@@ -167,6 +175,16 @@ func BuildManifest(p Payload, next NextVersion, react ReactVersion, refs []Modul
 	}
 
 	return m
+}
+
+// AssetVersionForBuild returns a path-safe fallback identifier when a
+// deployment has no asset-content fingerprint.
+func AssetVersionForBuild(buildID string) string {
+	if buildID == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(buildID))
+	return hex.EncodeToString(sum[:])
 }
 
 func buildManifestRoutes(r RouteInfo) ManifestRoutes {

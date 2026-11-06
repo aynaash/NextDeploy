@@ -22,7 +22,6 @@ import (
 
 	"github.com/aynaash/nextdeploy/cli/internal/serverless/cfstate"
 	"github.com/aynaash/nextdeploy/shared/config"
-	"github.com/aynaash/nextdeploy/shared/secrets"
 )
 
 // isCFNotFound reports whether err is a Cloudflare 404 — treated as
@@ -107,19 +106,25 @@ func (p *CloudflareProvider) deleteProvisionedResource(ctx context.Context, kind
 // including orphans. Successfully-deleted (or already-gone) records are dropped
 // from state; records that fail to delete are kept so a re-run can retry.
 // Returns the failed "kind:name" list.
-func (p *CloudflareProvider) teardownProvisionedResources(ctx context.Context) []string {
+func (p *CloudflareProvider) teardownProvisionedResources(ctx context.Context, cfg *config.NextDeployConfig) []string {
 	if p.apiToken == "" {
 		return nil
 	}
-	key, err := secrets.DeriveKey(p.apiToken)
+	if p.remoteStateEnabled() {
+		if err := p.SyncResourceState(ctx, cfg); err != nil {
+			return []string{"resource state sync: " + err.Error()}
+		}
+	}
+	key, err := p.cfStateEncryptionKey()
 	if err != nil {
 		p.log.Warn("teardown: derive state key failed (skipping resource cleanup): %v", err)
-		return nil
+		return []string{"resource state encryption key"}
 	}
-	manifest, err := cfstate.Load(cfStatePath, key)
+	statePath := p.cfStatePath()
+	manifest, err := p.loadResourceManifest(statePath, key)
 	if err != nil {
 		p.log.Warn("teardown: could not read state manifest (skipping resource cleanup): %v", err)
-		return nil
+		return []string{"resource state manifest"}
 	}
 	records := manifest.List()
 	if len(records) == 0 {
@@ -138,11 +143,13 @@ func (p *CloudflareProvider) teardownProvisionedResources(ctx context.Context) [
 	}
 
 	if len(survivors.Resources) == 0 {
-		if err := os.Remove(cfStatePath); err != nil && !os.IsNotExist(err) {
-			p.log.Warn("teardown: could not remove state file %s: %v", cfStatePath, err)
+		if err := os.Remove(statePath); err != nil && !os.IsNotExist(err) {
+			p.log.Warn("teardown: could not remove state file %s: %v", statePath, err)
+			failed = append(failed, "resource state file")
 		}
-	} else if err := cfstate.Save(cfStatePath, survivors, key); err != nil {
+	} else if err := cfstate.Save(statePath, survivors, key); err != nil {
 		p.log.Warn("teardown: could not persist remaining state: %v", err)
+		failed = append(failed, "resource state persistence")
 	}
 	return failed
 }
@@ -151,6 +158,13 @@ func (p *CloudflareProvider) teardownProvisionedResources(ctx context.Context) [
 // by (name, type, content) so unrelated sibling records in the zone are never
 // touched. Returns the failed record descriptors.
 func (p *CloudflareProvider) teardownDeclaredDNS(ctx context.Context, cfg *config.NextDeployConfig) []string {
+	// Non-production environments must never delete production DNS records.
+	// DNS declarations in nextdeploy.yml are not env-scoped, so a preview
+	// destroy would match and delete the live production records.
+	if !p.isProductionEnv() {
+		p.log.Info("Skipping DNS record teardown — non-production environment %q", p.environment)
+		return nil
+	}
 	if cfg.Serverless == nil || cfg.Serverless.Cloudflare == nil || cfg.Serverless.Cloudflare.Resources == nil {
 		return nil
 	}

@@ -96,6 +96,14 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 		return fmt.Errorf("provider initialization failed: %w", err)
 	}
 
+	if syncer, ok := p.(interface {
+		SyncResourceState(context.Context, *config.NextDeployConfig) error
+	}); ok {
+		if err := syncer.SyncResourceState(ctx, cfg); err != nil {
+			return fmt.Errorf("synchronize provider state: %w", err)
+		}
+	}
+
 	// ── 1b. Provision declared resources (idempotent; --no-provision opts out) ─
 	if err := maybeProvisionResources(ctx, p, cfg, provision, log); err != nil {
 		return err

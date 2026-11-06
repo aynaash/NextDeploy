@@ -63,6 +63,7 @@ test_src_dir/
 !cli/internal/serverless/REVIEW.md
 !**/README.md
 !CLOUDFLARE_PARITY.md
+!docs/deploy-nextjs-vps-go-sidecar.md
 
 # ── Misc ─────────────────────────────────────────────────────────
 /daemon.md

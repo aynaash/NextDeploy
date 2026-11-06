@@ -53,11 +53,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-          cache: true
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -75,12 +70,7 @@ jobs:
             npm ci
           fi
 
-      - name: Install nextdeploy CLI (pinned)
-        run: |
-          go install github.com/aynaash/nextdeploy/cli@` + CLIVersion + `
-          GOBIN="$(go env GOPATH)/bin"
-          ln -sf "$GOBIN/cli" "$GOBIN/nextdeploy"
-          echo "$GOBIN" >> "$GITHUB_PATH"
+` + renderCLIInstallStep() + `
 
       - name: Deploy preview
         id: deploy
@@ -89,11 +79,12 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          NEXTDEPLOY_CF_STATE_KEY: ${{ secrets.NEXTDEPLOY_CF_STATE_KEY }}
           SUBDOMAIN: ${{ secrets.CLOUDFLARE_WORKERS_SUBDOMAIN }}
         run: |
           set -o pipefail
           ENV_NAME="pr-${{ github.event.number }}"
-          nextdeploy apply --environment "$ENV_NAME"
+          nextdeploy apply --environment "$ENV_NAME" --yes
           nextdeploy ship --environment "$ENV_NAME" --no-provision --verify | tee ship.log
           WORKER=$(grep -oE 'NEXTDEPLOY_WORKER_NAME=[^[:space:]]+' ship.log | tail -1 | cut -d= -f2)
           if [ -z "$WORKER" ]; then
@@ -164,22 +155,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-          cache: true
-
-      - name: Install nextdeploy CLI (pinned)
-        run: |
-          go install github.com/aynaash/nextdeploy/cli@` + CLIVersion + `
-          GOBIN="$(go env GOPATH)/bin"
-          ln -sf "$GOBIN/cli" "$GOBIN/nextdeploy"
-          echo "$GOBIN" >> "$GITHUB_PATH"
+` + renderCLIInstallStep() + `
 
       - name: Destroy preview stack
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          NEXTDEPLOY_CF_STATE_KEY: ${{ secrets.NEXTDEPLOY_CF_STATE_KEY }}
         run: nextdeploy destroy --environment "pr-${{ github.event.number }}" --yes --force
 `
 }

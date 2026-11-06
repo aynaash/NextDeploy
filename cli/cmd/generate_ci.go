@@ -136,9 +136,10 @@ func secretsForTarget(target, provider string) []string {
 		case "cloudflare":
 			return []string{
 				"CLOUDFLARE_API_TOKEN  (required)",
-				"CLOUDFLARE_ACCOUNT_ID (required)",
-				"R2_ACCESS_KEY_ID      (required if you upload assets to R2)",
-				"R2_SECRET_ACCESS_KEY  (required if you upload assets to R2)",
+				"CLOUDFLARE_ACCOUNT_ID (optional; auto-discovered when unset)",
+				"NEXTDEPLOY_CF_STATE_KEY (optional; same value across team/CI for shared resource state)",
+				"R2_ACCESS_KEY_ID      (optional; API token can provide R2 access)",
+				"R2_SECRET_ACCESS_KEY  (optional; API token can provide R2 access)",
 			}
 		case "aws":
 			return []string{

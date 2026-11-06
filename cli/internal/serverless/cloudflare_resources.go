@@ -2,15 +2,14 @@ package serverless
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/aynaash/nextdeploy/cli/internal/serverless/cfstate"
 	"github.com/aynaash/nextdeploy/shared/config"
-	"github.com/aynaash/nextdeploy/shared/secrets"
 )
 
 // resourceMap holds the IDs of resources provisioned by ensure* methods so
@@ -52,11 +51,20 @@ func (r *resourceMap) snapshot() map[string]string {
 // matching ensure* helper for each declared resource. Stops on first error.
 // Results are stashed on p.provisioned for binding ref resolution at upload
 // time. Safe to call before DeployCompute.
-func (p *CloudflareProvider) ProvisionResources(ctx context.Context, cfg *config.NextDeployConfig) error {
+func (p *CloudflareProvider) ProvisionResources(ctx context.Context, cfg *config.NextDeployConfig) (retErr error) {
 	if cfg.Serverless == nil || cfg.Serverless.Cloudflare == nil || cfg.Serverless.Cloudflare.Resources == nil {
 		return nil
 	}
 	res := cfg.Serverless.Cloudflare.Resources
+	if p.remoteStateEnabled() {
+		bucket := p.getBucketName(cfg)
+		if err := p.ensureR2BucketExists(ctx, bucket); err != nil {
+			return fmt.Errorf("ensure R2 bucket for remote state: %w", err)
+		}
+		if err := p.SyncResourceState(ctx, cfg); err != nil {
+			return err
+		}
+	}
 	if p.provisioned == nil {
 		p.provisioned = newResourceMap()
 	}
@@ -64,7 +72,11 @@ func (p *CloudflareProvider) ProvisionResources(ctx context.Context, cfg *config
 	// each loop below returns on first error, and without this a partial
 	// provision would leave already-created (paid) resources unrecorded and
 	// invisible to orphan detection / `nextdeploy destroy`.
-	defer p.persistResourceState()
+	defer func() {
+		if err := p.persistResourceState(ctx, cfg); err != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("persist resource state: %w", err))
+		}
+	}()
 
 	for _, d := range res.D1 {
 		id, err := p.ensureD1Database(ctx, d)
@@ -129,30 +141,66 @@ func (p *CloudflareProvider) ProvisionResources(ctx context.Context, cfg *config
 	return nil
 }
 
-// cfStatePath is where the encrypted resource manifest lives, relative to the
-// project root.
-const cfStatePath = ".nextdeploy/cf-state.json.enc"
+// cfStatePath returns the env-scoped path for the encrypted resource manifest.
+// Production uses the legacy path (backward compatible with existing deploys);
+// non-production environments get an env-suffixed path so a preview teardown
+// can never read — or delete — production's provisioned resources.
+func (p *CloudflareProvider) cfStatePath() string {
+	if p.isProductionEnv() {
+		return ".nextdeploy/cf-state.json.enc"
+	}
+	return fmt.Sprintf(".nextdeploy/cf-state.%s.json.enc", p.environment)
+}
 
-// persistResourceState writes the provisioned resource IDs to the encrypted
-// manifest and logs any orphaned resources. The encryption key is derived from
-// the account's API token, so the manifest is only readable with the same
-// credential. Every failure is logged and swallowed — this is bookkeeping, not
-// a deploy gate.
-func (p *CloudflareProvider) persistResourceState() {
+// refResolverWithFallback tries the in-memory provisioned map first, then falls
+// back to the encrypted cf-state manifest. This lets `ship --no-provision`
+// (the CI path: apply in one process, ship in another) resolve ref: bindings
+// from resources provisioned by a prior `apply` without re-provisioning.
+func (p *CloudflareProvider) refResolverWithFallback() refResolver {
+	return func(kind, name string) (string, bool) {
+		// Fast path: in-memory map from a ProvisionResources call in this process.
+		if p.provisioned != nil {
+			if id, ok := p.provisioned.get(kind, name); ok {
+				return id, true
+			}
+		}
+		// Fallback: the persisted state manifest from a prior apply/ship.
+		if p.apiToken == "" {
+			return "", false
+		}
+		key, err := p.cfStateEncryptionKey()
+		if err != nil {
+			return "", false
+		}
+		manifest, err := p.loadResourceManifest(p.cfStatePath(), key)
+		if err != nil {
+			p.log.Warn("ref resolution: could not read state manifest (%v)", err)
+			return "", false
+		}
+		rec, ok := manifest.Get(kind, name)
+		if !ok {
+			return "", false
+		}
+		p.log.Info("Resolved ref %s:%s from state manifest (id=%s)", kind, name, rec.ID)
+		return rec.ID, true
+	}
+}
+
+// persistResourceState writes provisioned IDs locally and syncs them to R2
+// when shared state encryption is configured.
+func (p *CloudflareProvider) persistResourceState(ctx context.Context, cfg *config.NextDeployConfig) error {
 	if p.provisioned == nil || p.apiToken == "" {
-		return
+		return nil
 	}
-	key, err := secrets.DeriveKey(p.apiToken)
+	key, err := p.cfStateEncryptionKey()
 	if err != nil {
-		p.log.Warn("state manifest: derive key failed (skipping): %v", err)
-		return
+		return fmt.Errorf("derive encryption key: %w", err)
 	}
 
-	prior, err := cfstate.Load(cfStatePath, key)
+	statePath := p.cfStatePath()
+	prior, err := p.loadResourceManifest(statePath, key)
 	if err != nil {
-		// Don't mask a corrupt/foreign state file, but don't block the deploy.
-		p.log.Warn("state manifest: could not read prior state (%v) — rewriting fresh", err)
-		prior = cfstate.New()
+		return fmt.Errorf("read prior manifest: %w", err)
 	}
 
 	snap := p.provisioned.snapshot()
@@ -165,7 +213,7 @@ func (p *CloudflareProvider) persistResourceState() {
 			orphan.Kind, orphan.Name, orphan.ID)
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := stateRecordTimestamp()
 	// Merge into the prior manifest rather than rebuilding from scratch. The old
 	// cfstate.New() dropped orphans (recorded earlier, no longer declared) right
 	// after warning about them — destroying the only record that made cleanup
@@ -178,9 +226,14 @@ func (p *CloudflareProvider) persistResourceState() {
 		}
 		manifest.Set(kind, name, id, now)
 	}
-	if err := cfstate.Save(cfStatePath, manifest, key); err != nil {
-		p.log.Warn("state manifest: save failed (non-fatal): %v", err)
-		return
+	if err := cfstate.Save(statePath, manifest, key); err != nil {
+		return fmt.Errorf("save local manifest: %w", err)
 	}
-	p.log.Info("Recorded %d resource(s) to encrypted state manifest (%s)", len(snap), cfStatePath)
+	p.log.Info("Recorded %d resource(s) to encrypted state manifest (%s)", len(snap), statePath)
+	if p.remoteStateEnabled() {
+		if err := p.SyncResourceState(ctx, cfg); err != nil {
+			return err
+		}
+	}
+	return nil
 }

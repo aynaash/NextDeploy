@@ -2,7 +2,11 @@
 import { test } from "node:test";
 import assert from "node:assert";
 
-import { serveStaticFromR2, serveRootPublicFromR2 } from "./serve.mjs";
+import {
+  serveStaticFromR2,
+  serveRootPublicFromR2,
+  serveSSGFromR2,
+} from "./serve.mjs";
 
 // Records the key passed to ASSETS.get so we can assert what R2 was queried for.
 function mockEnv(stored = {}) {
@@ -31,6 +35,28 @@ test("serveStaticFromR2 decodes %5B...%5D before the R2 lookup", async () => {
     calls[0],
     "_next/static/chunks/app/(docs)/docs/[...slug]/page-abc.js",
   );
+});
+
+test("mutable public assets use the build-specific R2 prefix", async () => {
+  const { env, calls } = mockEnv();
+  await serveStaticFromR2(env, "/public/logo.svg", { assetVersion: "build-1" });
+  assert.strictEqual(calls[0], "_nextdeploy/releases/build-1/logo.svg");
+});
+
+test("content-hashed Next assets stay shared across build versions", async () => {
+  const { env, calls } = mockEnv();
+  await serveStaticFromR2(env, "/_next/static/chunks/app.js", { assetVersion: "build-1" });
+  assert.strictEqual(calls[0], "_next/static/chunks/app.js");
+});
+
+test("SSG and root public objects use the build-specific R2 prefix", async () => {
+  const { env, calls } = mockEnv();
+  await serveSSGFromR2(env, "/index.html", { assetVersion: "build-1" });
+  await serveRootPublicFromR2(env, "/robots.txt", { assetVersion: "build-1", publicFiles: ["robots.txt"] });
+  assert.deepStrictEqual(calls, [
+    "_nextdeploy/releases/build-1/index.html",
+    "_nextdeploy/releases/build-1/robots.txt",
+  ]);
 });
 
 test("serveStaticFromR2 serves a decoded key and 200s", async () => {

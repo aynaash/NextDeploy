@@ -23,6 +23,29 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	log.Info("----------------------------------------")
 	log.Info("Analysing your Next.js project...")
 
+	// Non-interactive flags (skip survey.AskOne when provided).
+	flagTarget, err := cmd.Flags().GetString("target")
+	if err != nil {
+		return fmt.Errorf("read --target: %w", err)
+	}
+	flagMode, err := cmd.Flags().GetString("mode")
+	if err != nil {
+		return fmt.Errorf("read --mode: %w", err)
+	}
+	flagDB, err := cmd.Flags().GetString("db")
+	if err != nil {
+		return fmt.Errorf("read --db: %w", err)
+	}
+
+	if flagMode != "" || flagDB != "" {
+		if flagTarget == "" {
+			return fmt.Errorf("--mode and --db require --target=cloudflare")
+		}
+		if target := normalizeInitTarget(flagTarget); target != "cloudflare" {
+			return fmt.Errorf("--mode and --db are only valid with --target=cloudflare")
+		}
+	}
+
 	// Basic analysis without requiring nextdeploy.yml
 	appName := "myapp"
 	if data, err := os.ReadFile("package.json"); err == nil {
@@ -46,35 +69,46 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	log.Info("\nNextDeploy understands your application.\n")
-	prompt := &survey.Select{
-		Message: "Where would you like to deploy your Next.js application?",
-		Options: []string{
-			"VPS (Virtual Private Server - SSH)",
-			"Serverless (AWS CloudFront & Lambda)",
-			"Serverless (Cloudflare Workers + R2)",
-		},
-	}
-	var targetChoice string
-	if err := survey.AskOne(prompt, &targetChoice); err != nil {
-		return fmt.Errorf("prompt failed: %w", err)
-	}
 
-	targetType := "vps"
-	switch {
-	case strings.Contains(targetChoice, "Cloudflare"):
-		targetType = "cloudflare"
-	case strings.Contains(targetChoice, "Serverless"):
-		targetType = "serverless"
+	// Target selection: use the flag if provided, otherwise prompt.
+	targetType := ""
+	if flagTarget != "" {
+		targetType = normalizeInitTarget(flagTarget)
+		if targetType == "" {
+			return fmt.Errorf("--target must be one of: vps, aws, cloudflare (got %q)", flagTarget)
+		}
+		log.Info("Target: %s (from --target flag)", targetType)
+	} else {
+		prompt := &survey.Select{
+			Message: "Where would you like to deploy your Next.js application?",
+			Options: []string{
+				"VPS (Virtual Private Server - SSH)",
+				"Serverless (AWS CloudFront & Lambda)",
+				"Serverless (Cloudflare Workers + R2)",
+			},
+		}
+		var targetChoice string
+		if err := survey.AskOne(prompt, &targetChoice); err != nil {
+			return fmt.Errorf("prompt failed: %w", err)
+		}
+		switch {
+		case strings.Contains(targetChoice, "Cloudflare"):
+			targetType = "cloudflare"
+		case strings.Contains(targetChoice, "Serverless"):
+			targetType = "serverless"
+		default:
+			targetType = "vps"
+		}
 	}
 
 	// Cloudflare has two paths: scaffold a fresh fullstack app, or sniff the
 	// existing app in this directory and prefill its bindings.
 	if targetType == "cloudflare" {
-		return runCloudflareInit(log, appName)
+		return runCloudflareInit(log, appName, flagMode, flagDB)
 	}
 
 	enableGoSidecar := false
-	if targetType == "vps" {
+	if targetType == "vps" && flagTarget == "" {
 		if err := survey.AskOne(&survey.Confirm{
 			Message: "Enable the Go sidecar for eligible prerendered pages and image requests?",
 			Default: false,
@@ -107,6 +141,19 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func normalizeInitTarget(target string) string {
+	switch strings.ToLower(strings.TrimSpace(target)) {
+	case "vps":
+		return "vps"
+	case "aws", "serverless":
+		return "serverless"
+	case "cloudflare":
+		return "cloudflare"
+	default:
+		return ""
+	}
+}
+
 func setGoSidecarEnabled(configContent string) (string, error) {
 	const disabled = "enabled: false # Opt in after reviewing the sidecar's supported request paths"
 	if strings.Count(configContent, disabled) != 1 {
@@ -117,36 +164,65 @@ func setGoSidecarEnabled(configContent string) (string, error) {
 
 // runCloudflareInit drives the Cloudflare-specific init: scaffold a new
 // opinionated fullstack template, or use the current directory's app (sniffing
-// its infra to prefill nextdeploy.yml).
-func runCloudflareInit(log *shared.Logger, appName string) error {
+// its infra to prefill nextdeploy.yml). When flagMode/flagDB are non-empty the
+// interactive prompts are bypassed (non-interactive / CI use).
+func runCloudflareInit(log *shared.Logger, appName string, flagMode, flagDB string) error {
 	var choice string
-	if err := survey.AskOne(&survey.Select{
-		Message: "Cloudflare deployment — how do you want to start?",
-		Options: []string{
-			"Scaffold deployment infra (nextdeploy.yml + proxy.ts + bindings + CI)",
-			"Use my existing app in this directory",
-		},
-	}, &choice); err != nil {
-		return fmt.Errorf("prompt failed: %w", err)
+	if flagMode != "" {
+		flagMode = strings.ToLower(strings.TrimSpace(flagMode))
+		if flagMode == "scaffold" {
+			choice = "Scaffold deployment infra (nextdeploy.yml + proxy.ts + bindings + CI)"
+		} else if flagMode == "sniff" || flagMode == "existing" {
+			choice = "Use my existing app in this directory"
+		} else {
+			return fmt.Errorf("--mode must be one of: scaffold, sniff (got %q)", flagMode)
+		}
+		log.Info("Mode: %s (from --mode flag)", flagMode)
+	} else {
+		if err := survey.AskOne(&survey.Select{
+			Message: "Cloudflare deployment — how do you want to start?",
+			Options: []string{
+				"Scaffold deployment infra (nextdeploy.yml + proxy.ts + bindings + CI)",
+				"Use my existing app in this directory",
+			},
+		}, &choice); err != nil {
+			return fmt.Errorf("prompt failed: %w", err)
+		}
 	}
 
 	if strings.Contains(choice, "Scaffold") {
-		return runScaffold(log, appName)
+		return runScaffold(log, appName, flagDB)
+	}
+	if flagDB != "" {
+		return fmt.Errorf("--db is only valid with --mode=scaffold")
 	}
 	return runSniffExisting(log, appName)
 }
 
-// runScaffold writes the opinionated fullstack starter into the cwd.
-func runScaffold(log *shared.Logger, appName string) error {
+// runScaffold writes the opinionated fullstack starter into the cwd. When
+// flagDB is non-empty the database prompt is bypassed (non-interactive / CI).
+func runScaffold(log *shared.Logger, appName string, flagDB string) error {
 	var dbChoice string
-	if err := survey.AskOne(&survey.Select{
-		Message: "Which database?",
-		Options: []string{
-			"Cloudflare D1 (native SQLite)",
-			"Bring my own Postgres/MySQL (via Hyperdrive)",
-		},
-	}, &dbChoice); err != nil {
-		return fmt.Errorf("prompt failed: %w", err)
+	if flagDB != "" {
+		flagDB = strings.ToLower(strings.TrimSpace(flagDB))
+		if flagDB == "d1" {
+			dbChoice = "Cloudflare D1 (native SQLite)"
+		} else if flagDB == "byo" {
+			dbChoice = "Bring my own Postgres/MySQL (via Hyperdrive)"
+		} else {
+			return fmt.Errorf("--db must be one of: d1, byo (got %q)", flagDB)
+		}
+		log.Info("Database: %s (from --db flag)", flagDB)
+	} else {
+		if err := survey.AskOne(&survey.Select{
+			Message: "Which database?",
+			Options: []string{
+				"Cloudflare D1 (native SQLite)",
+				"Bring my own Postgres/MySQL (via Hyperdrive)",
+			},
+		}, &dbChoice); err != nil {
+			return fmt.Errorf("prompt failed: %w", err)
+		}
 	}
 	variant := scaffold.DBD1
 	if strings.Contains(dbChoice, "Bring my own") {

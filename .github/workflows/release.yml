@@ -11,9 +11,6 @@ concurrency:
 permissions:
   contents: write
 
-env:
-  GO_VERSION: "1.26.x"
-
 jobs:
   test:
     name: Pre-Release Test
@@ -27,7 +24,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
 
@@ -58,7 +55,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
 

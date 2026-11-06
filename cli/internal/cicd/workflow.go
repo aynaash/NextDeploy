@@ -13,10 +13,9 @@ const WorkflowPath = ".github/workflows/nextdeploy.yml"
 // CLIVersion pins the nextdeploy CLI installed in CI. Bump on release; keep in
 // sync with .release-please-manifest.json.
 //
-// Pinning rather than @latest is deliberate: @latest recompiles on every run
-// and silently picks up breaking releases, so a deploy that worked yesterday
-// can fail today with no change to the repo.
-const CLIVersion = "v0.15.1"
+// The generated workflows download this release's prebuilt binary and verify
+// its checksum. release-please updates this pin from the package manifest.
+const CLIVersion = "v0.16.3" // {x-release-please-version}
 
 // RenderDeployWorkflow returns the YAML for WorkflowPath.
 //
@@ -59,11 +58,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-          cache: true
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -82,15 +76,7 @@ jobs:
             npm ci
           fi
 
-      # Version-pinned CLI — see cicd.CLIVersion. ` + "`go install …/cli`" + ` yields a binary
-      # named ` + "`cli`" + `, so ` + "`nextdeploy`" + ` would be "command not found" without
-      # the symlink below.
-      - name: Install nextdeploy CLI (pinned)
-        run: |
-          go install github.com/aynaash/nextdeploy/cli@` + CLIVersion + `
-          GOBIN="$(go env GOPATH)/bin"
-          ln -sf "$GOBIN/cli" "$GOBIN/nextdeploy"
-          echo "$GOBIN" >> "$GITHUB_PATH"
+` + renderCLIInstallStep() + `
 
       # Decide the deployment type from nextdeploy.yml — the "deploy according
       # to type" step. Keeping this at runtime is what makes one file portable.
@@ -119,8 +105,9 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          NEXTDEPLOY_CF_STATE_KEY: ${{ secrets.NEXTDEPLOY_CF_STATE_KEY }}
         run: |
-          nextdeploy apply
+          nextdeploy apply --yes
           nextdeploy ship --no-provision --verify
 
       - name: Deploy to AWS

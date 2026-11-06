@@ -20,6 +20,7 @@ type NextCorePayload struct {
 	Middleware        *MiddlewareConfig `json:"middleware"`
 	StaticAssets      *StaticAssets     `json:"static_assets"`
 	GitCommit         string            `json:"git_commit,omitempty"`
+	AssetVersion      string            `json:"asset_version,omitempty"`
 	GitDirty          bool              `json:"git_dirty,omitempty"`
 	GeneratedAt       string            `json:"generated_at,omitempty"`
 	Config            config.SafeConfig `json:"config,omitempty"`

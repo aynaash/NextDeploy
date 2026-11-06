@@ -44,9 +44,6 @@ var shipCmd = &cobra.Command{
 		log := shared.PackageLogger("ship", "🚀 SHIP")
 		log.Info("Starting NextDeploy ship process...")
 
-		// Signal-aware context so Ctrl+C / SIGTERM cancels the build + deploy
-		// cleanly (the ctx is threaded through every provider call) rather than
-		// killing the process mid-upload and leaving half-applied state.
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 
@@ -88,7 +85,7 @@ var shipCmd = &cobra.Command{
 			telemetry.RecordShipSuccess(cfg.Serverless.Provider, shared.Version)
 			return
 		}
-		shipVPS(log, cfg, result)
+		shipVPS(ctx, log, cfg, result)
 		telemetry.RecordShipSuccess("vps", shared.Version)
 	},
 }
@@ -120,7 +117,7 @@ func shipServerless(ctx context.Context, log *shared.Logger, cfg *config.NextDep
 	}
 }
 
-func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow.Result) {
+func shipVPS(ctx context.Context, log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow.Result) {
 	log.Info("Deployment Target: VPS (Traditional Server)")
 	meta := &result.Payload
 
@@ -217,7 +214,7 @@ func shipVPS(log *shared.Logger, cfg *config.NextDeployConfig, result *buildflow
 
 	remotePath := fmt.Sprintf("/opt/nextdeploy/uploads/nextdeploy_%s_%d.tar.gz", cfg.App.Name, time.Now().Unix())
 	log.Info("Uploading %s to %s on %s...", tarballName, remotePath, deploymentServer)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
 	if err := srv.UploadFile(ctx, deploymentServer, tarballName, remotePath); err != nil {

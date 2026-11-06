@@ -310,7 +310,7 @@ func hardeningSteps(pm PackageManager) []Step {
 				if _, err := h.Run("chmod", "0755", CaddyLogDir); err != nil {
 					return fmt.Errorf("set Caddy log directory permissions: %w", err)
 				}
-				for _, name := range []string{"access.log", "audit.log"} {
+				for _, name := range []string{"access.log", "audit.log", "debug.log"} {
 					path := CaddyLogDir + "/" + name
 					if _, err := h.Run("touch", path); err != nil {
 						return fmt.Errorf("create Caddy log %s: %w", path, err)

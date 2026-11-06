@@ -39,7 +39,12 @@ func TestPrepareProvisionsTheEdgeAndControlPlane(t *testing.T) {
 	if !h.dirs[CaddyFragmentDir] {
 		t.Errorf("%s was not created — the import directive would dangle", CaddyFragmentDir)
 	}
-	for _, path := range []string{CaddyLogDir, CaddyLogDir + "/access.log", CaddyLogDir + "/audit.log"} {
+	for _, path := range []string{
+		CaddyLogDir,
+		CaddyLogDir + "/access.log",
+		CaddyLogDir + "/audit.log",
+		CaddyLogDir + "/debug.log",
+	} {
 		if !h.Exists(path) {
 			t.Errorf("%s was not created for Caddy", path)
 		}
@@ -62,21 +67,31 @@ func TestPrepareRepairsCaddyLogOwnershipOnRerun(t *testing.T) {
 	h.dirs[CaddyFragmentDir] = true
 	h.files[CaddyLogDir+"/access.log"] = []byte("existing access log")
 	h.files[CaddyLogDir+"/audit.log"] = []byte("existing audit log")
+	h.files[CaddyLogDir+"/debug.log"] = []byte("existing debug log")
 	h.owners[CaddyLogDir] = "root:root"
 	h.owners[CaddyLogDir+"/access.log"] = "root:root"
 	h.owners[CaddyLogDir+"/audit.log"] = "root:root"
+	h.owners[CaddyLogDir+"/debug.log"] = "root:root"
 
 	report := Run(h, Options{}, io.Discard)
 	if report.Failed() {
 		t.Fatalf("prepare failed:\n%s", report.Summary())
 	}
-	for _, path := range []string{CaddyLogDir, CaddyLogDir + "/access.log", CaddyLogDir + "/audit.log"} {
+	for _, path := range []string{
+		CaddyLogDir,
+		CaddyLogDir + "/access.log",
+		CaddyLogDir + "/audit.log",
+		CaddyLogDir + "/debug.log",
+	} {
 		if got := h.owners[path]; got != "caddy:caddy" {
 			t.Errorf("%s owned by %q after prepare, want caddy:caddy", path, got)
 		}
 	}
 	if got := string(h.files[CaddyLogDir+"/access.log"]); got != "existing access log" {
 		t.Errorf("prepare overwrote existing access log: %q", got)
+	}
+	if got := string(h.files[CaddyLogDir+"/debug.log"]); got != "existing debug log" {
+		t.Errorf("prepare overwrote existing debug log: %q", got)
 	}
 }
 

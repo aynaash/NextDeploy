@@ -15,10 +15,10 @@
  * Serve a /_next/static or /public path from R2. Returns null on miss so
  * the dispatcher can fall through to a 404 or compute route.
  */
-export async function serveStaticFromR2(env, pathname) {
+export async function serveStaticFromR2(env, pathname, manifest) {
   if (!env.ASSETS) return null;
 
-  const key = r2KeyForStatic(pathname);
+  const key = r2KeyForStatic(pathname, manifest?.assetVersion);
   if (!key) return null;
 
   const obj = await env.ASSETS.get(key);
@@ -60,7 +60,7 @@ export async function serveRootPublicFromR2(env, pathname, manifest) {
   // "/dashboard".
   if (isPrerenderedPageKey(key, manifest)) return null;
 
-  const obj = await env.ASSETS.get(key);
+  const obj = await env.ASSETS.get(versionedKey(key, manifest?.assetVersion));
   if (!obj) return null;
 
   const headers = new Headers();
@@ -96,10 +96,10 @@ function isPrerenderedPageKey(key, manifest) {
  * Serve a pre-rendered HTML file (SSG or ISR) from R2. The dispatcher
  * resolves the R2 key from manifest.routes.ssg/isr and passes it here.
  */
-export async function serveSSGFromR2(env, htmlKey) {
+export async function serveSSGFromR2(env, htmlKey, manifest) {
   if (!env.ASSETS) return null;
   // Manifest entries are typically "/foo.html" — normalize to the bare key.
-  const key = htmlKey.replace(/^\/+/, "");
+  const key = versionedKey(htmlKey.replace(/^\/+/, ""), manifest?.assetVersion);
   const obj = await env.ASSETS.get(key);
   if (!obj) return null;
 
@@ -114,7 +114,7 @@ export async function serveSSGFromR2(env, htmlKey) {
   return new Response(obj.body, { headers });
 }
 
-function r2KeyForStatic(pathname) {
+function r2KeyForStatic(pathname, assetVersion) {
   let key;
   if (pathname.startsWith("/_next/static/")) {
     key = pathname.slice(1); // drop leading slash
@@ -131,7 +131,16 @@ function r2KeyForStatic(pathname) {
   // (".../[...slug]/page.js" → ".../%5B...slug%5D/page.js"). Decode so the GET
   // matches the stored key — otherwise the chunk 404s and the page throws a
   // ChunkLoadError ("Application error: a client-side exception").
-  return safeDecode(key);
+  const decoded = safeDecode(key);
+  return pathname.startsWith("/_next/static/")
+    ? decoded
+    : versionedKey(decoded, assetVersion);
+}
+
+function versionedKey(key, assetVersion) {
+  return assetVersion
+    ? `_nextdeploy/releases/${assetVersion}/${key}`
+    : key;
 }
 
 // safeDecode URL-decodes a key, falling back to the raw value on a malformed

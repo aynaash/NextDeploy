@@ -96,6 +96,13 @@ func TestSidecarServesIndexedPrerenderedRoute(t *testing.T) {
 	if recorder.Header().Get("X-NextDeploy-Cache") != "HIT" {
 		t.Fatalf("cache header = %q", recorder.Header().Get("X-NextDeploy-Cache"))
 	}
+	if recorder.Header().Get("X-NextDeploy-Handler") != "go-html" {
+		t.Fatalf("handler header = %q, want go-html", recorder.Header().Get("X-NextDeploy-Handler"))
+	}
+	stats := handler.stats.snapshot()
+	if stats.Requests != 1 || stats.HTMLHits != 1 || stats.NodeFallbacks != 0 {
+		t.Fatalf("sidecar stats = %+v, want one HTML hit and no Node fallback", stats)
+	}
 }
 
 func TestSidecarRSCRequiresIndexedPayload(t *testing.T) {
@@ -124,6 +131,74 @@ func TestSidecarRSCRequiresIndexedPayload(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 	if recorder.Body.String() != "node-rsc" || nodeRequests.Load() != 1 {
 		t.Fatalf("RSC response = %q, Node requests = %d", recorder.Body.String(), nodeRequests.Load())
+	}
+	if recorder.Header().Get("X-NextDeploy-Handler") != "node" ||
+		recorder.Header().Get("X-NextDeploy-Fallback") != "not-prerendered" {
+		t.Fatalf("handler/fallback headers = %q/%q",
+			recorder.Header().Get("X-NextDeploy-Handler"),
+			recorder.Header().Get("X-NextDeploy-Fallback"))
+	}
+	stats := handler.stats.snapshot()
+	if stats.Requests != 1 || stats.NodeFallbacks != 1 || stats.RSCHits != 0 {
+		t.Fatalf("sidecar stats = %+v, want one Node fallback and no RSC hit", stats)
+	}
+}
+
+func TestSidecarReportsNodeFallbackReasons(t *testing.T) {
+	release := t.TempDir()
+	pageDir := filepath.Join(release, ".next", "server", "pages")
+	if err := os.MkdirAll(pageDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pageDir, "index.html"), []byte("prerendered"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, r.URL.RequestURI())
+	}))
+	defer node.Close()
+	meta := sidecarTestMeta(".next")
+	meta.Middleware = &nextcore.MiddlewareConfig{
+		Matchers: []nextcore.MiddlewareRoute{{Pathname: "/admin/:path*"}},
+	}
+	handler, err := NewSidecarHandler(release, "", filepath.Join(t.TempDir(), "cache"), testHTTPPort(t, node), meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handler.Close()
+
+	tests := []struct {
+		path   string
+		reason string
+	}{
+		{path: "/posts/1", reason: "not-prerendered"},
+		{path: "/?preview=1", reason: "query-string"},
+		{path: "/admin/users", reason: "middleware"},
+	}
+	for _, test := range tests {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, test.path, nil))
+		if got := recorder.Header().Get("X-NextDeploy-Handler"); got != "node" {
+			t.Errorf("%s handler = %q, want node", test.path, got)
+		}
+		if got := recorder.Header().Get("X-NextDeploy-Fallback"); got != test.reason {
+			t.Errorf("%s fallback = %q, want %q", test.path, got, test.reason)
+		}
+	}
+	if stats := handler.stats.snapshot(); stats.Requests != 3 || stats.NodeFallbacks != 3 {
+		t.Errorf("sidecar stats = %+v, want 3 requests and 3 Node fallbacks", stats)
+	}
+}
+
+func TestSidecarCountsRevalidationFailures(t *testing.T) {
+	var logs synchronizedBuffer
+	handler := &SidecarHandler{logger: log.New(&logs, "", 0)}
+	handler.recordRevalidationFailure("failed to refresh route %q", "/news")
+	if stats := handler.stats.snapshot(); stats.RevalidationFailures != 1 {
+		t.Fatalf("revalidation failures = %d, want 1", stats.RevalidationFailures)
+	}
+	if !strings.Contains(logs.String(), `failed to refresh route "/news"`) {
+		t.Fatalf("revalidation failure was not logged: %q", logs.String())
 	}
 }
 
@@ -255,6 +330,12 @@ func TestSidecarImageOptimizationResizesLocalAsset(t *testing.T) {
 	}
 	if decoded.Bounds().Dx() != 20 || decoded.Bounds().Dy() != 10 {
 		t.Fatalf("optimized dimensions = %v", decoded.Bounds())
+	}
+	if recorder.Header().Get("X-NextDeploy-Handler") != "go-image" {
+		t.Fatalf("image handler header = %q, want go-image", recorder.Header().Get("X-NextDeploy-Handler"))
+	}
+	if stats := handler.stats.snapshot(); stats.ImageHits != 1 {
+		t.Fatalf("image hits = %d, want 1", stats.ImageHits)
 	}
 }
 

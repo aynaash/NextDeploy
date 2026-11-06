@@ -217,6 +217,15 @@ func (p *CloudflareProvider) bucketNameFromApp(appName string) string {
 	return CloudflareAssetBucketName(appName, p.environment)
 }
 
+// isProductionEnv returns true when the current environment is production (the
+// empty string or "production"). Non-production environments (e.g. "pr-42",
+// "staging") must never mutate production custom domains, routes, DNS records,
+// or purge the production zone cache — those mutations would hijack or delete
+// live production traffic.
+func (p *CloudflareProvider) isProductionEnv() bool {
+	return p.environment == "" || p.environment == "production"
+}
+
 // Initialize wires up the Cloudflare SDK client and verifies the API token.
 //
 // The deploy is designed around a single-token UX: the user sets
@@ -545,6 +554,17 @@ func (p *CloudflareProvider) DeployStatic(ctx context.Context, pkg *packaging.Pa
 	// its return is a hard barrier between the phases. A failure in the
 	// immutable phase aborts before any mutable key is touched.
 	immutable, mutable := partitionAssets(pkg.S3Assets)
+	if meta != nil && meta.OutputMode != nextcore.OutputModeExport {
+		if len(mutable) > 0 {
+			version, err := assetVersionForAssets(mutable)
+			if err != nil {
+				return fmt.Errorf("fingerprint mutable assets: %w", err)
+			}
+			meta.AssetVersion = version
+			mutable = versionMutableAssets(mutable, version)
+			p.log.Info("Versioning %d mutable R2 assets for build %s", len(mutable), version[:12])
+		}
+	}
 
 	upImm, skImm, err := p.uploadBatch(ctx, bucketName, immutable)
 	if err != nil {
@@ -562,6 +582,51 @@ func (p *CloudflareProvider) DeployStatic(ctx context.Context, pkg *packaging.Pa
 		p.log.Info("R2 asset sync: %d uploaded to %s", uploaded, bucketName)
 	}
 	return nil
+}
+
+const mutableAssetPrefix = "_nextdeploy/releases/"
+
+func versionMutableAssets(assets []packaging.S3Asset, version string) []packaging.S3Asset {
+	versioned := make([]packaging.S3Asset, len(assets))
+	for i, asset := range assets {
+		asset.S3Key = mutableAssetPrefix + version + "/" + strings.TrimLeft(asset.S3Key, "/")
+		versioned[i] = asset
+	}
+	return versioned
+}
+
+func assetVersionForAssets(assets []packaging.S3Asset) (string, error) {
+	ordered := append([]packaging.S3Asset(nil), assets...)
+	slices.SortFunc(ordered, func(a, b packaging.S3Asset) int {
+		return strings.Compare(a.S3Key, b.S3Key)
+	})
+
+	hash := sha256.New()
+	for _, asset := range ordered {
+		if _, err := fmt.Fprintf(hash, "%d:", len(asset.S3Key)); err != nil {
+			return "", err
+		}
+		if _, err := io.WriteString(hash, asset.S3Key); err != nil {
+			return "", err
+		}
+		file, err := os.Open(asset.LocalPath) // #nosec G304 — packager output path
+		if err != nil {
+			return "", fmt.Errorf("open %s: %w", asset.LocalPath, err)
+		}
+		contentHash := sha256.New()
+		_, copyErr := io.Copy(contentHash, file)
+		closeErr := file.Close()
+		if copyErr != nil {
+			return "", fmt.Errorf("hash %s: %w", asset.LocalPath, copyErr)
+		}
+		if closeErr != nil {
+			return "", fmt.Errorf("close %s: %w", asset.LocalPath, closeErr)
+		}
+		if _, err := hash.Write(contentHash.Sum(nil)); err != nil {
+			return "", err
+		}
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 // immutableKeyPrefix marks content-hashed assets that are safe to upload before
@@ -942,10 +1007,11 @@ func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.P
 	if cfg.Serverless != nil {
 		cfBlock = cfg.Serverless.Cloudflare
 	}
-	var resolve refResolver = noResolver
-	if p.provisioned != nil {
-		resolve = p.provisioned.get
-	}
+	// Resolve ref: bindings — try the in-memory provisioned map first, then
+	// fall back to the encrypted cf-state manifest. This lets `ship --no-provision`
+	// (the CI path: apply in one process, ship in another) resolve refs without
+	// re-running ProvisionResources.
+	var resolve refResolver = p.refResolverWithFallback()
 
 	// Guard: a Worker upload is replace-not-merge. If the incoming set omits a
 	// secret currently live on the Worker, abort unless the operator opted into
@@ -1060,6 +1126,16 @@ func (p *CloudflareProvider) wireQueueConsumers(ctx context.Context, workerName 
 // instructions as a fallback for permission-denied or rate-limited
 // cases (commonly: API token missing Workers Routes:Edit / DNS:Edit).
 func (p *CloudflareProvider) attachEdgeRoutes(ctx context.Context, workerName string, cfg *config.NextDeployConfig, cfBlock *config.CloudflareConfig) {
+	// Non-production environments (pr-42, staging, …) must never touch
+	// production custom domains or routes. ensureCustomDomain re-points the
+	// hostname with override_existing_origin, and ensureWorkerRouteForZone
+	// binds the pattern to this worker — both would hijack the live domain
+	// and point it at a preview worker. The preview is still reachable on
+	// its *.workers.dev URL.
+	if !p.isProductionEnv() {
+		p.log.Info("Skipping edge routes/domains — non-production environment %q", p.environment)
+		return
+	}
 	if cfBlock != nil {
 		for _, cd := range cfBlock.CustomDomains {
 			if err := p.ensureCustomDomain(ctx, workerName, cd); err != nil {
@@ -1282,6 +1358,12 @@ func (p *CloudflareProvider) putWorkerSecret(ctx context.Context, workerName, ke
 
 // InvalidateCache purges the Cloudflare zone cache for the configured domain.
 func (p *CloudflareProvider) InvalidateCache(ctx context.Context, cfg *config.NextDeployConfig) error {
+	// A non-production deploy must never purge the production zone cache —
+	// that would nuke every cached asset for the live domain.
+	if !p.isProductionEnv() {
+		p.log.Info("Skipping cache purge — non-production environment %q", p.environment)
+		return nil
+	}
 	if cfg.App.Domain.Name == "" {
 		p.log.Info("No domain configured, skipping cache purge.")
 		return nil
@@ -1361,11 +1443,7 @@ func (p *CloudflareProvider) Rollback(ctx context.Context, cfg *config.NextDeplo
 	if err := p.InvalidateCache(ctx, cfg); err != nil {
 		p.log.Warn("Rollback: cache invalidation failed (edge may serve stale HTML): %v", err)
 	}
-	p.log.Warn("Rollback re-pointed the Worker to %s, but R2 HTML/RSC assets are NOT "+
-		"version-restored. If this deploy changed prerendered pages, redeploy the "+
-		"known-good commit to realign assets with server code.", previousVersionID)
-
-	p.log.Info("Rollback complete. Worker is now running version %s", previousVersionID)
+	p.log.Info("Rollback complete. Worker is now running version %s with its matching build assets", previousVersionID)
 	return nil
 }
 
@@ -1395,6 +1473,10 @@ func (p *CloudflareProvider) Destroy(ctx context.Context, cfg *config.NextDeploy
 	workerName := p.getWorkerName(cfg)
 	bucketName := p.getBucketName(cfg)
 
+	if err := p.SyncResourceState(ctx, cfg); err != nil {
+		return fmt.Errorf("synchronize resource state before destroy: %w", err)
+	}
+
 	var problems []string
 
 	// 1. Worker — its routes and secret_text bindings are removed with it.
@@ -1406,23 +1488,41 @@ func (p *CloudflareProvider) Destroy(ctx context.Context, cfg *config.NextDeploy
 		problems = append(problems, "worker "+workerName)
 	}
 
-	// 2. R2 — empty the bucket, then delete it.
-	p.log.Info("Emptying + deleting R2 bucket: %s...", bucketName)
-	if err := p.sweepR2Bucket(ctx, bucketName); err != nil {
-		p.log.Warn("R2 sweep failed (bucket not deleted, still holds objects): %v", err)
-		problems = append(problems, "r2 bucket "+bucketName+" (objects remain)")
-	} else if _, err := p.cf.R2.Buckets.Delete(ctx, bucketName, r2.BucketDeleteParams{
-		AccountID: cloudflare.F(p.accountID),
-	}); err != nil && !isCFNotFound(err) {
-		p.log.Warn("R2 bucket delete failed: %v", err)
-		problems = append(problems, "r2 bucket "+bucketName)
+	// 2. Provisioned resources recorded in the state manifest (incl. orphans).
+	// Non-production environments skip this: shared stateful resources (D1, KV,
+	// Hyperdrive, Queues, Vectorize) are account-scoped, not env-scoped. A
+	// preview apply may have recorded a production resource's ID in the
+	// env-scoped manifest (because ensure* found it already existed and
+	// returned its ID), and deleting it would destroy production data.
+	if p.isProductionEnv() {
+		problems = append(problems, p.teardownProvisionedResources(ctx, cfg)...)
+	} else {
+		p.log.Info("Skipping provisioned resource teardown — non-production environment %q", p.environment)
 	}
 
-	// 3. Provisioned resources recorded in the state manifest (incl. orphans).
-	problems = append(problems, p.teardownProvisionedResources(ctx)...)
-
 	// 4. DNS records nextdeploy added (matched by value; siblings untouched).
-	problems = append(problems, p.teardownDeclaredDNS(ctx, cfg)...)
+	if p.isProductionEnv() {
+		problems = append(problems, p.teardownDeclaredDNS(ctx, cfg)...)
+	} else {
+		p.log.Info("Skipping DNS record teardown — non-production environment %q", p.environment)
+	}
+
+	// Delete the asset bucket last. If any earlier cleanup failed, keep it so
+	// the encrypted remote state remains available for a retry.
+	if len(problems) == 0 {
+		p.log.Info("Emptying + deleting R2 bucket: %s...", bucketName)
+		if err := p.sweepR2Bucket(ctx, bucketName); err != nil {
+			p.log.Warn("R2 sweep failed (bucket not deleted, still holds objects): %v", err)
+			problems = append(problems, "r2 bucket "+bucketName+" (objects remain)")
+		} else if _, err := p.cf.R2.Buckets.Delete(ctx, bucketName, r2.BucketDeleteParams{
+			AccountID: cloudflare.F(p.accountID),
+		}); err != nil && !isCFNotFound(err) {
+			p.log.Warn("R2 bucket delete failed: %v", err)
+			problems = append(problems, "r2 bucket "+bucketName)
+		}
+	} else {
+		p.log.Warn("Keeping R2 bucket %s so remote state is available for cleanup retry", bucketName)
+	}
 
 	if len(problems) > 0 {
 		return fmt.Errorf("destroy incomplete — these still exist and need manual cleanup "+

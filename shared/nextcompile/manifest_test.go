@@ -14,6 +14,8 @@ func TestBuildManifest_MinimalPayload(t *testing.T) {
 		AppName:      "demo",
 		BasePath:     "/app",
 		OutputMode:   "standalone",
+		BuildID:      "build-123",
+		AssetVersion: "content-hash-123",
 		HasAppRouter: true,
 		Routes: RouteInfo{
 			StaticRoutes:  []string{"/", "/about"},
@@ -39,9 +41,13 @@ func TestBuildManifest_MinimalPayload(t *testing.T) {
 	if m.AppName != "demo" {
 		t.Errorf("app name lost")
 	}
+	if m.AssetVersion != "content-hash-123" {
+		t.Errorf("asset version does not preserve the content fingerprint: %q", m.AssetVersion)
+	}
 	if m.GeneratedAt != "2026-04-18T12:00:00Z" {
 		t.Errorf("generated at: %s", m.GeneratedAt)
 	}
+
 	if m.ISR.Intervals["/news"] != 60 {
 		t.Errorf("interval missing")
 	}
@@ -50,6 +56,19 @@ func TestBuildManifest_MinimalPayload(t *testing.T) {
 	}
 	if got := m.Routes.Static; len(got) != 2 || got[0] != "/" {
 		t.Errorf("static routes: %v", got)
+	}
+}
+
+func TestAssetVersionForBuild(t *testing.T) {
+	first := AssetVersionForBuild("build-123")
+	if first == "" || first != AssetVersionForBuild("build-123") {
+		t.Fatalf("asset version should be stable and non-empty, got %q", first)
+	}
+	if first == AssetVersionForBuild("build-456") {
+		t.Fatal("different build IDs must get different asset versions")
+	}
+	if got := AssetVersionForBuild(""); got != "" {
+		t.Fatalf("empty build ID asset version = %q, want empty", got)
 	}
 }
 

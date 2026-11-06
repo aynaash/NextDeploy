@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/aynaash/nextdeploy/shared"
@@ -521,7 +522,11 @@ func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, re
 		return fmt.Errorf("upload canceled before starting: %w", err)
 	}
 
+	stopContextWatcher := closeOnContextCancellation(ctx, client.Client.Close)
+	defer stopContextWatcher()
+
 	remoteDir := filepath.Dir(remotePath)
+	serverlogger.Info("Preparing remote upload directory %s on %s", remoteDir, serverName)
 	if err := client.SFTPClient.MkdirAll(remoteDir); err != nil {
 		return fmt.Errorf("failed to create remote directory %s: %w", remoteDir, err)
 	}
@@ -533,14 +538,48 @@ func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, re
 	}
 	defer localFile.Close()
 
+	localInfo, err := localFile.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat local file: %w", err)
+	}
+
+	serverlogger.Info("Opening remote upload file %s on %s", remotePath, serverName)
 	remoteFile, err := client.SFTPClient.OpenFile(remotePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
 	if err != nil {
 		return fmt.Errorf("failed to open remote file %s: %w", remotePath, err)
 	}
 
-	_, copyErr := io.Copy(remoteFile, contextReader{ctx: ctx, reader: localFile})
+	progress := &uploadProgressWriter{writer: remoteFile}
+	progressDone := make(chan struct{})
+	var progressWG sync.WaitGroup
+	progressWG.Add(1)
+	go func() {
+		defer progressWG.Done()
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				written := progress.written.Load()
+				serverlogger.Info("Upload progress to %s: %d/%d bytes (%.0f%%)",
+					serverName, written, localInfo.Size(), uploadPercent(written, localInfo.Size()))
+			case <-progressDone:
+				return
+			}
+		}
+	}()
+
+	_, copyErr := io.Copy(progress, contextReader{ctx: ctx, reader: localFile})
+	close(progressDone)
+	progressWG.Wait()
 	closeErr := remoteFile.Close()
 	if copyErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return errors.Join(
+				fmt.Errorf("upload canceled after %d/%d bytes: %w", progress.written.Load(), localInfo.Size(), ctxErr),
+				copyErr,
+			)
+		}
 		removeErr := client.SFTPClient.Remove(remotePath)
 		return errors.Join(fmt.Errorf("failed to upload %s to %s:%s: %w", localPath, serverName, remotePath, copyErr),
 			closeErr, removeErr)
@@ -556,6 +595,41 @@ func (s *ServerStruct) UploadFile(ctx context.Context, serverName, localPath, re
 	client.LastUsed = time.Now()
 	serverlogger.Info("Uploaded %s to %s:%s (SFTP)", localPath, serverName, remotePath)
 	return nil
+}
+
+type uploadProgressWriter struct {
+	writer  io.Writer
+	written atomic.Int64
+}
+
+func (w *uploadProgressWriter) Write(p []byte) (int, error) {
+	n, err := w.writer.Write(p)
+	w.written.Add(int64(n))
+	return n, err
+}
+
+func uploadPercent(written, total int64) float64 {
+	if total <= 0 {
+		return 0
+	}
+	return float64(written) / float64(total) * 100
+}
+
+func closeOnContextCancellation(ctx context.Context, closeConn func() error) func() {
+	done := make(chan struct{})
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		select {
+		case <-ctx.Done():
+			_ = closeConn()
+		case <-done:
+		}
+	}()
+	return func() {
+		close(done)
+		<-watcherDone
+	}
 }
 
 type contextReader struct {

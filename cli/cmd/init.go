@@ -24,5 +24,8 @@ var initCmd = &cobra.Command{
 }
 
 func init() {
+	initCmd.Flags().String("target", "", "Deploy target: vps | aws | cloudflare (skip the interactive prompt)")
+	initCmd.Flags().String("mode", "", "Cloudflare only: scaffold | sniff (skip the interactive prompt)")
+	initCmd.Flags().String("db", "", "Cloudflare scaffold only: d1 | byo (skip the interactive prompt)")
 	rootCmd.AddCommand(initCmd)
 }

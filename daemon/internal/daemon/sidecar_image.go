@@ -42,13 +42,14 @@ const (
 )
 
 func (s *SidecarHandler) handleImageOptimization(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-NextDeploy-Handler", "go-image")
 	cfg := s.meta.ImageConfig
 	if cfg != nil && (cfg.Unoptimized || (cfg.Loader != "" && cfg.Loader != "default")) {
-		s.nodeProxy.ServeHTTP(w, r)
+		s.proxyToNode(w, r, "image-config")
 		return
 	}
 	if !sidecarCanServeJPEG(r.Header.Get("Accept"), cfg) {
-		s.nodeProxy.ServeHTTP(w, r)
+		s.proxyToNode(w, r, "image-format")
 		return
 	}
 
@@ -110,7 +111,7 @@ func (s *SidecarHandler) handleImageOptimization(w http.ResponseWriter, r *http.
 	source, err := s.loadImageSource(r.Context(), sourceURL)
 	if err != nil {
 		if errors.Is(err, errImageSourceTooLarge) {
-			s.nodeProxy.ServeHTTP(w, r)
+			s.proxyToNode(w, r, "image-source-too-large")
 			return
 		}
 		status := http.StatusBadGateway
@@ -124,28 +125,28 @@ func (s *SidecarHandler) handleImageOptimization(w http.ResponseWriter, r *http.
 	}
 	imageConfig, sourceFormat, err := image.DecodeConfig(bytes.NewReader(source))
 	if err != nil {
-		s.nodeProxy.ServeHTTP(w, r)
+		s.proxyToNode(w, r, "image-decode-config")
 		return
 	}
 	if !imagePixelCountWithin(imageConfig.Width, imageConfig.Height, maxImagePixels) {
-		s.nodeProxy.ServeHTTP(w, r)
+		s.proxyToNode(w, r, "image-dimensions")
 		return
 	}
 	if !sidecarSupportsImageSource(source, sourceFormat) {
-		s.nodeProxy.ServeHTTP(w, r)
+		s.proxyToNode(w, r, "image-source-format")
 		return
 	}
 	decoded, format, err := image.Decode(bytes.NewReader(source))
 	if err != nil {
-		s.nodeProxy.ServeHTTP(w, r)
+		s.proxyToNode(w, r, "image-decode")
 		return
 	}
 	if format != "jpeg" && format != "png" {
-		s.nodeProxy.ServeHTTP(w, r)
+		s.proxyToNode(w, r, "image-decoded-format")
 		return
 	}
 	if _, cmyk := decoded.(*image.CMYK); cmyk {
-		s.nodeProxy.ServeHTTP(w, r)
+		s.proxyToNode(w, r, "image-colorspace")
 		return
 	}
 	bounds := decoded.Bounds()
@@ -153,7 +154,7 @@ func (s *SidecarHandler) handleImageOptimization(w http.ResponseWriter, r *http.
 	targetHeight := max(1, int(math.Round(float64(bounds.Dy())*float64(targetWidth)/float64(bounds.Dx()))))
 	if targetWidth > maxImageOutputDimension || targetHeight > maxImageOutputDimension ||
 		!imagePixelCountWithin(targetWidth, targetHeight, maxImageOutputPixels) {
-		s.nodeProxy.ServeHTTP(w, r)
+		s.proxyToNode(w, r, "image-output-dimensions")
 		return
 	}
 	resized := image.NewRGBA(image.Rect(0, 0, targetWidth, targetHeight))
@@ -162,7 +163,7 @@ func (s *SidecarHandler) handleImageOptimization(w http.ResponseWriter, r *http.
 	encoded := &limitedImageBuffer{limit: maxEncodedImageBytes}
 	if err := jpeg.Encode(encoded, resized, &jpeg.Options{Quality: quality}); err != nil {
 		if errors.Is(err, errImageOutputTooLarge) {
-			s.nodeProxy.ServeHTTP(w, r)
+			s.proxyToNode(w, r, "image-output-too-large")
 			return
 		}
 		http.Error(w, "failed to encode optimized image", http.StatusInternalServerError)
@@ -547,10 +548,12 @@ func writeAtomicFile(path string, data []byte) error {
 }
 
 func (s *SidecarHandler) writeOptimizedImage(w http.ResponseWriter, r *http.Request, data []byte, ttl int) {
+	w.Header().Set("X-NextDeploy-Handler", "go-image")
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", ttl))
 	w.Header().Add("Vary", "Accept")
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	s.stats.imageHits.Add(1)
 	w.WriteHeader(http.StatusOK)
 	if r.Method == http.MethodHead {
 		return

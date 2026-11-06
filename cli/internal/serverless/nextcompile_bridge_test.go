@@ -8,10 +8,11 @@ import (
 
 func TestToCompilePayload_MapsAllFields(t *testing.T) {
 	meta := &nextcore.NextCorePayload{
-		AppName:    "demo",
-		DistDir:    ".next",
-		OutputMode: nextcore.OutputModeStandalone,
-		GitCommit:  "abc123",
+		AppName:      "demo",
+		DistDir:      ".next",
+		OutputMode:   nextcore.OutputModeStandalone,
+		GitCommit:    "abc123",
+		AssetVersion: "content-hash-42",
 		NextBuildMetadata: nextcore.NextBuildMetadata{
 			BuildID:      "build-id-42",
 			HasAppRouter: true,
@@ -58,6 +59,9 @@ func TestToCompilePayload_MapsAllFields(t *testing.T) {
 	}
 	if got.BuildID != "build-id-42" {
 		t.Errorf("BuildID: got %q", got.BuildID)
+	}
+	if got.AssetVersion != "content-hash-42" {
+		t.Errorf("AssetVersion: got %q", got.AssetVersion)
 	}
 	if got.GitCommit != "abc123" {
 		t.Errorf("GitCommit: got %q", got.GitCommit)

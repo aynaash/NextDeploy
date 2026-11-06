@@ -8,6 +8,8 @@ import (
 
 func TestFilterPlanByModules(t *testing.T) {
 	full := &serverless.PlanResult{Items: []serverless.PlanItem{
+		{Kind: "d1", Name: "app-db", Action: serverless.PlanCreate},
+		{Kind: "kv", Name: "rate-limit", Action: serverless.PlanNoOp},
 		{Kind: "hyperdrive", Name: "db", Action: serverless.PlanCreate},
 		{Kind: "queue", Name: "q1", Action: serverless.PlanNoOp},
 		{Kind: "vectorize", Name: "v1", Action: serverless.PlanCreate},
@@ -22,11 +24,11 @@ func TestFilterPlanByModules(t *testing.T) {
 		wantKinds []string
 		wantErr   bool
 	}{
-		{"empty passes through", "", 5, nil, false},
-		{"dataplane only", "dataplane", 4, []string{"hyperdrive", "queue", "vectorize", "ai_gateway"}, false},
+		{"empty passes through", "", 7, nil, false},
+		{"dataplane only", "dataplane", 6, []string{"d1", "kv", "hyperdrive", "queue", "vectorize", "ai_gateway"}, false},
 		{"edge only", "edge", 1, []string{"dns"}, false},
-		{"both modules", "dataplane,edge", 5, nil, false},
-		{"whitespace + case", " Dataplane , EDGE ", 5, nil, false},
+		{"both modules", "dataplane,edge", 7, nil, false},
+		{"whitespace + case", " Dataplane , EDGE ", 7, nil, false},
 		{"unknown module", "frontend", 0, nil, true},
 		{"one valid one invalid", "dataplane,frontend", 0, nil, true},
 	}
@@ -60,7 +62,7 @@ func TestFilterPlanByModules(t *testing.T) {
 // kind to Plan() but forgetting to register it in kindToModule — without this
 // guard, `--only dataplane` would silently drop the new resource.
 func TestKindToModule_AllPlanKindsCovered(t *testing.T) {
-	knownKinds := []string{"hyperdrive", "queue", "vectorize", "ai_gateway", "dns"}
+	knownKinds := []string{"d1", "kv", "hyperdrive", "queue", "vectorize", "ai_gateway", "dns"}
 	for _, k := range knownKinds {
 		if _, ok := kindToModule[k]; !ok {
 			t.Errorf("kind %q is emitted by Plan() but missing from kindToModule — --only would silently drop it", k)

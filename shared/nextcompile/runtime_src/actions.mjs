@@ -13,12 +13,9 @@
 //   5. Invokes the export inside the ALS request context
 //   6. Returns the action result, preferring Response passthrough
 //
-// Flight-encoded responses (what the Next client ideally wants) require
-// the vendored react-server-dom-webpack bundle AND a bundler config we
-// haven't built yet. For now, action results that are plain data go out
-// as JSON — the Next client will log a format warning but form-action
-// redirects and simple mutations work. Flight-encoded responses arrive
-// in the next milestone alongside RSC page-rendering improvements.
+// Action results are returned as Flight when the compiled module or vendored
+// react-server-dom-webpack encoder is available; otherwise plain data falls
+// back to JSON. Flight action replies do not yet guarantee a page re-render.
 
 import { runWithContext, createRequestContext } from "./context.mjs";
 

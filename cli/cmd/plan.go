@@ -139,6 +139,8 @@ func renderPlanWarnings(r *serverless.PlanResult) {
 }
 
 var kindToModule = map[string]string{
+	"d1":         "dataplane",
+	"kv":         "dataplane",
 	"hyperdrive": "dataplane",
 	"queue":      "dataplane",
 	"vectorize":  "dataplane",

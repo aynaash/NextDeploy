@@ -10,7 +10,7 @@
 //	nextdeploy ship        # Build and deploy app to server
 //	nextdeploy update      # Update the CLI to the latest version
 //
-// Author: Yussuf Hersi <yussuf@hersi.dev>
+// Author: Yussuf Hersi <caynaashow@gmail.com>
 // License: MIT
 // Source: https://github.com/aynaash/nextdeploy
 //

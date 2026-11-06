@@ -987,8 +987,17 @@
         mode: "0644"
       become: true
 
+    - name: "Phase 5 | Caddy | Ensure debug.log exists (Coraza WAF diagnostics)"
+      ansible.builtin.file:
+        path: /var/log/caddy/debug.log
+        state: touch
+        owner: caddy
+        group: caddy
+        mode: "0644"
+      become: true
+
     # Log rotation. Caddy appends to access.log forever, and Coraza writes
-    # audit.log plus a debug.log at SecDebugLogLevel 3 (verbose). A full /var
+    # audit.log and debug.log. A full /var
     # takes down the daemon, Caddy and the app together — anything appended to
     # indefinitely needs a retention policy provisioned alongside it.
     #

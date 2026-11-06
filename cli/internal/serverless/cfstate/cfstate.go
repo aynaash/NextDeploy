@@ -84,18 +84,27 @@ func (m *Manifest) Orphans(declared map[string]bool) []Record {
 // Save writes the manifest AES-256-GCM encrypted (key must be 32 bytes) to path,
 // mode 0600. Parent dirs are created.
 func Save(path string, m *Manifest, encKey []byte) error {
-	data, err := json.MarshalIndent(m, "", "  ")
+	ciphertext, err := Encode(m, encKey)
 	if err != nil {
 		return err
-	}
-	ciphertext, err := secrets.Encrypt(data, encKey)
-	if err != nil {
-		return fmt.Errorf("encrypt manifest: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	return os.WriteFile(path, ciphertext, 0o600)
+}
+
+// Encode serializes and encrypts a manifest for local or remote storage.
+func Encode(m *Manifest, encKey []byte) ([]byte, error) {
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	ciphertext, err := secrets.Encrypt(data, encKey)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt manifest: %w", err)
+	}
+	return ciphertext, nil
 }
 
 // Load reads + decrypts the manifest. A missing file yields a fresh (empty)
@@ -109,6 +118,11 @@ func Load(path string, encKey []byte) (*Manifest, error) {
 	if err != nil {
 		return nil, err
 	}
+	return Decode(data, encKey)
+}
+
+// Decode decrypts and parses a manifest from its encrypted representation.
+func Decode(data, encKey []byte) (*Manifest, error) {
 	// secrets.Encrypt base64-encodes its output, but secrets.Decrypt expects raw
 	// ciphertext — decode here so the pair round-trips correctly.
 	rawCipher, err := base64.StdEncoding.DecodeString(string(data))

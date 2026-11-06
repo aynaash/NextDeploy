@@ -2,6 +2,7 @@ package caddy
 
 import (
 	"context"
+
 	"encoding/json"
 	"fmt"
 	"io"
@@ -46,7 +47,8 @@ func GenerateCaddyfile(appName, domain, outputMode string, port int, appDir stri
 	// every rule evaluation for every request — a dev default that fills the
 	// disk in production, and a full /var takes Caddy, the daemon and the app
 	// down together. Raise it temporarily when debugging a rule, then put it
-	// back. (logrotate for /var/log/caddy/*.log is provisioned in prepare.yml.)
+	// back. Prepare provisions /var/log/caddy/debug.log and rotates all *.log
+	// files in that directory.
 	commonHeaders := fmt.Sprintf(`
 	encode zstd gzip
 	header {

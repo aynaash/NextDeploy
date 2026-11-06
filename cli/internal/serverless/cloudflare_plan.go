@@ -66,6 +66,9 @@ func (r *PlanResult) HasDrift() bool {
 // routes are tied to worker upload (not standalone resources) and so are not
 // planned here — they're computed during DeployCompute.
 func (p *CloudflareProvider) Plan(ctx context.Context, cfg *config.NextDeployConfig) (*PlanResult, error) {
+	if err := p.SyncResourceState(ctx, cfg); err != nil {
+		return nil, err
+	}
 	if cfg.Serverless == nil || cfg.Serverless.Cloudflare == nil {
 		return &PlanResult{}, nil
 	}

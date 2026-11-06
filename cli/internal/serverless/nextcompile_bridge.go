@@ -68,6 +68,7 @@ func toCompilePayload(meta *nextcore.NextCorePayload, _ *config.NextDeployConfig
 		OutputMode:   string(meta.OutputMode),
 		HasAppRouter: meta.NextBuildMetadata.HasAppRouter,
 		BuildID:      meta.NextBuildMetadata.BuildID,
+		AssetVersion: meta.AssetVersion,
 		GitCommit:    meta.GitCommit,
 		Routes:       convertRoutes(meta.RouteInfo),
 		BasePath:     meta.BasePath,

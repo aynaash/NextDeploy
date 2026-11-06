@@ -60,6 +60,36 @@ type SidecarHandler struct {
 	lifecycleMu    sync.Mutex
 	closed         bool
 	revalidations  sync.WaitGroup
+	stats          sidecarStats
+}
+
+type sidecarStats struct {
+	requests             atomic.Uint64
+	htmlHits             atomic.Uint64
+	rscHits              atomic.Uint64
+	imageHits            atomic.Uint64
+	nodeFallbacks        atomic.Uint64
+	revalidationFailures atomic.Uint64
+}
+
+type sidecarStatsSnapshot struct {
+	Requests             uint64
+	HTMLHits             uint64
+	RSCHits              uint64
+	ImageHits            uint64
+	NodeFallbacks        uint64
+	RevalidationFailures uint64
+}
+
+func (s *sidecarStats) snapshot() sidecarStatsSnapshot {
+	return sidecarStatsSnapshot{
+		Requests:             s.requests.Load(),
+		HTMLHits:             s.htmlHits.Load(),
+		RSCHits:              s.rscHits.Load(),
+		ImageHits:            s.imageHits.Load(),
+		NodeFallbacks:        s.nodeFallbacks.Load(),
+		RevalidationFailures: s.revalidationFailures.Load(),
+	}
 }
 
 func NewSidecarHandler(releaseDir, sharedStatic, imageCacheDir string, nodePort int, meta *nextcore.NextCorePayload) (*SidecarHandler, error) {
@@ -187,6 +217,11 @@ func (s *SidecarHandler) Close() {
 	}
 	s.lifecycleMu.Unlock()
 	s.revalidations.Wait()
+	stats := s.stats.snapshot()
+	if stats.Requests > 0 {
+		s.logf("[gosidecar] request stats: requests=%d html_hits=%d rsc_hits=%d image_hits=%d node_fallbacks=%d revalidation_failures=%d",
+			stats.Requests, stats.HTMLHits, stats.RSCHits, stats.ImageHits, stats.NodeFallbacks, stats.RevalidationFailures)
+	}
 	if s.nodeTransport != nil {
 		s.nodeTransport.CloseIdleConnections()
 	}
@@ -326,6 +361,10 @@ func (s *SidecarHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+	requests := s.stats.requests.Add(1)
+	if requests%100 == 0 {
+		s.logStats()
+	}
 	reqPath := r.URL.Path
 	if s.basePath != "" && (reqPath == s.basePath || strings.HasPrefix(reqPath, s.basePath+"/")) {
 		reqPath = strings.TrimPrefix(reqPath, s.basePath)
@@ -342,6 +381,16 @@ func (s *SidecarHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.meta.GoSidecar != nil && s.meta.GoSidecar.ImageOptEnabled() {
 		s.handleImageOptimization(w, r)
 		return
+	}
+	fallbackReason := "not-prerendered"
+	if middlewareMatch {
+		fallbackReason = "middleware"
+	} else if !eligible {
+		fallbackReason = "request-not-cacheable"
+	} else if reqPath == "/_next/image" {
+		fallbackReason = "image-disabled"
+	} else if len(r.URL.RawQuery) != 0 {
+		fallbackReason = "query-string"
 	}
 	if eligible && !middlewareMatch {
 		cleanRoute := reqPath
@@ -362,7 +411,20 @@ func (s *SidecarHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("X-NextDeploy-Cache", "MISS-SSR")
+	s.proxyToNode(w, r, fallbackReason)
+}
+
+func (s *SidecarHandler) proxyToNode(w http.ResponseWriter, r *http.Request, reason string) {
+	w.Header().Set("X-NextDeploy-Handler", "node")
+	w.Header().Set("X-NextDeploy-Fallback", reason)
+	s.stats.nodeFallbacks.Add(1)
 	s.nodeProxy.ServeHTTP(w, r)
+}
+
+func (s *SidecarHandler) logStats() {
+	stats := s.stats.snapshot()
+	s.logf("[gosidecar] request stats: requests=%d html_hits=%d rsc_hits=%d image_hits=%d node_fallbacks=%d revalidation_failures=%d",
+		stats.Requests, stats.HTMLHits, stats.RSCHits, stats.ImageHits, stats.NodeFallbacks, stats.RevalidationFailures)
 }
 
 func (s *SidecarHandler) logf(format string, args ...any) {

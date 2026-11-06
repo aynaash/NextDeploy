@@ -69,6 +69,8 @@ sample.nextdeploy.yml      Annotated reference config
 ## Documentation
 
 - Full docs: <https://hersi.dev/nextdeploy>
+- VPS deployment with the Go sidecar:
+  [`docs/deploy-nextjs-vps-go-sidecar.md`](./docs/deploy-nextjs-vps-go-sidecar.md)
 - Sample config: [`sample.nextdeploy.yml`](./sample.nextdeploy.yml)
 - Each command also has `nextdeploy <cmd> explain` for inline help
 
@@ -83,4 +85,3 @@ yes/no on direction before you spend time on a PR.
 ## License
 
 MIT — see [LICENSE](./LICENSE).
-

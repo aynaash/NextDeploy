@@ -138,6 +138,7 @@ type Payload struct {
 	ImageConfig  *ImageConfig
 	I18n         *I18nConfig
 	BuildID      string
+	AssetVersion string
 	GitCommit    string
 	PublicFiles  []string
 }

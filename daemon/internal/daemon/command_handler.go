@@ -597,12 +597,21 @@ func (ch *CommandHandler) activateRelease(ctx ReleaseContext) types.Response {
 	log.Printf("[activate] Allocated port %d for release %s", port, ctx.ReleaseID)
 	sidecarPrepared := false
 	activationCommitted := false
+	pointerMoved := false
 	var oldFragment []byte
 	var hadOldFragment bool
 	fragmentChanged := false
 	defer func() {
 		if activationCommitted {
 			return
+		}
+		// The release pointer moves before Caddy does. If we bail out after
+		// that rename, put current back so a failed reload cannot leave the
+		// symlink naming a release Caddy is not serving.
+		if pointerMoved {
+			if linkErr := restoreSymlink(currentSymlink, previousTarget, hadCurrent); linkErr != nil {
+				log.Printf("[activate] failed to restore current symlink for %s: %v", ctx.AppName, linkErr)
+			}
 		}
 		if fragmentChanged {
 			if restoreErr := ch.rollbackCaddyActivation(ctx.AppName, oldFragment, hadOldFragment); restoreErr != nil {

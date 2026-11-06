@@ -9,9 +9,6 @@ on:
 permissions:
   contents: read
 
-env:
-  GO_VERSION: "1.25.x"
-
 jobs:
   scan:
     name: Security Scan
@@ -23,7 +20,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "stable"
+          go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
 

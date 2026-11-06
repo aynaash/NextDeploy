@@ -17,7 +17,13 @@
     ".": {
       "release-type": "go",
       "package-name": "nextdeploy",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "cli/internal/cicd/workflow.go"
+        }
+      ]
     }
   }
 }

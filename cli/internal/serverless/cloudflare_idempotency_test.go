@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/aynaash/nextdeploy/internal/packaging"
 	"github.com/cloudflare/cloudflare-go/v6"
 	"github.com/cloudflare/cloudflare-go/v6/workers"
 )
@@ -22,6 +23,7 @@ func TestComputeDeployHash_Deterministic(t *testing.T) {
 	meta1 := workers.ScriptUpdateParamsMetadata{
 		MainModule: cloudflare.F("worker.mjs"),
 	}
+
 	secrets1 := map[string]string{
 		"DATABASE_URL": "postgres://u:p@h/db",
 		"API_KEY":      "sk-live-xxx",
@@ -40,6 +42,62 @@ func TestComputeDeployHash_Deterministic(t *testing.T) {
 
 	if a != b {
 		t.Fatalf("hash not deterministic across map ordering:\n  a=%s\n  b=%s", a, b)
+	}
+}
+
+func TestVersionMutableAssets(t *testing.T) {
+	input := []packaging.S3Asset{
+		{S3Key: "index.html"},
+		{S3Key: "/nested/page.rsc"},
+	}
+	got := versionMutableAssets(input, "version-hash")
+	if got[0].S3Key != "_nextdeploy/releases/version-hash/index.html" {
+		t.Fatalf("first asset key = %q", got[0].S3Key)
+	}
+	if got[1].S3Key != "_nextdeploy/releases/version-hash/nested/page.rsc" {
+		t.Fatalf("second asset key = %q", got[1].S3Key)
+	}
+	if input[0].S3Key != "index.html" {
+		t.Fatal("versionMutableAssets mutated its input")
+	}
+}
+
+func TestAssetVersionForAssets(t *testing.T) {
+	dir := t.TempDir()
+	index := filepath.Join(dir, "index.html")
+	about := filepath.Join(dir, "about.html")
+	if err := os.WriteFile(index, []byte("<h1>Home</h1>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(about, []byte("<h1>About</h1>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	assets := []packaging.S3Asset{
+		{LocalPath: index, S3Key: "index.html"},
+		{LocalPath: about, S3Key: "about.html"},
+	}
+	version, err := assetVersionForAssets(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reversedVersion, err := assetVersionForAssets([]packaging.S3Asset{assets[1], assets[0]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version == "" || version != reversedVersion {
+		t.Fatalf("asset version should be stable regardless of input order: %q, %q", version, reversedVersion)
+	}
+
+	if err := os.WriteFile(index, []byte("<h1>Updated</h1>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	updatedVersion, err := assetVersionForAssets(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedVersion == version {
+		t.Fatal("changed asset content must get a different version")
 	}
 }
 

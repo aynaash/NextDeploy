@@ -91,6 +91,23 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestEncodeDecode_RoundTrip(t *testing.T) {
+	key := testKey(t)
+	want := New()
+	want.Set("d1", "app-db", "uuid-1", "2026-06-14T00:00:00Z")
+	encoded, err := Encode(want, key)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	got, err := Decode(encoded, key)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if record, ok := got.Get("d1", "app-db"); !ok || record.ID != "uuid-1" {
+		t.Fatalf("Decode lost state: %+v, %v", record, ok)
+	}
+}
+
 func TestLoad_MissingFileIsFreshManifest(t *testing.T) {
 	m, err := Load(filepath.Join(t.TempDir(), "nope.enc"), testKey(t))
 	if err != nil {

@@ -1,11 +1,29 @@
 package cicd
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
+
+func TestCLIVersionMatchesReleaseManifest(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", ".release-please-manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var manifest map[string]string
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatalf("parse release manifest: %v", err)
+	}
+	if got, want := CLIVersion, "v"+manifest["."]; manifest["."] == "" || got != want {
+		t.Errorf("CLIVersion = %q, release manifest version = %q; keep them synchronized", got, manifest["."])
+	}
+}
 
 func TestRenderDeployWorkflow_TargetAware(t *testing.T) {
 	yml := RenderDeployWorkflow()
@@ -15,10 +33,12 @@ func TestRenderDeployWorkflow_TargetAware(t *testing.T) {
 		"steps.detect.outputs.type == 'cloudflare'",
 		"steps.detect.outputs.type == 'aws'",
 		"steps.detect.outputs.type == 'vps'",
-		"go install github.com/aynaash/nextdeploy/cli@" + CLIVersion,
+		`CLI_VERSION: "` + CLIVersion + `"`,
+		"checksums.txt",
+		"sha256sum --check --status",
+		"nextdeploy_${VERSION}_linux_amd64.tar.gz",
 		"nextdeploy ship --no-provision --verify", // cloudflare
 		"nextdeploy ship --verify",                // aws / vps
-		"ln -sf",                                  // `cli` binary → `nextdeploy` on PATH
 		"cancel-in-progress: false",
 	} {
 		if !strings.Contains(yml, want) {
@@ -27,10 +47,10 @@ func TestRenderDeployWorkflow_TargetAware(t *testing.T) {
 	}
 
 	if strings.Contains(yml, "@latest") {
-		t.Error("CLI must be pinned, not @latest — @latest recompiles every run and picks up breaking releases")
+		t.Error("CLI release must be pinned, not @latest")
 	}
 	// Each target's creds must be present so the matching branch can run.
-	for _, cred := range []string{"CLOUDFLARE_API_TOKEN", "AWS_ACCESS_KEY_ID", "SSH_PRIVATE_KEY"} {
+	for _, cred := range []string{"CLOUDFLARE_API_TOKEN", "NEXTDEPLOY_CF_STATE_KEY", "AWS_ACCESS_KEY_ID", "SSH_PRIVATE_KEY"} {
 		if !strings.Contains(yml, cred) {
 			t.Errorf("workflow missing %s branch creds", cred)
 		}
@@ -59,9 +79,9 @@ func TestRenderDeployWorkflow_IsValidYAML(t *testing.T) {
 	if !ok {
 		t.Fatalf("steps missing: %T", deploy["steps"])
 	}
-	// checkout, setup-go, setup-node, deps, CLI, detect, + 3 deploy branches.
-	if len(steps) != 9 {
-		t.Errorf("want 9 steps, got %d", len(steps))
+	// checkout, setup-node, deps, CLI, detect, + 3 deploy branches.
+	if len(steps) != 8 {
+		t.Errorf("want 8 steps, got %d", len(steps))
 	}
 	if deploy["timeout-minutes"] != 30 {
 		t.Errorf("timeout-minutes = %v, want 30", deploy["timeout-minutes"])
@@ -90,6 +110,10 @@ func TestRenderDeployWorkflow_ApplyIsCloudflareOnly(t *testing.T) {
 	if !strings.Contains(cf, "nextdeploy apply") {
 		t.Error("`nextdeploy apply` is not in the cloudflare branch")
 	}
+	// apply must pass --yes so the confirmation prompt doesn't hang CI.
+	if !strings.Contains(cf, "apply --yes") {
+		t.Error("cloudflare `apply` is missing --yes — in CI, the prompt reads EOF and aborts")
+	}
 }
 
 func TestRenderPreviewWorkflows(t *testing.T) {
@@ -100,6 +124,7 @@ func TestRenderPreviewWorkflows(t *testing.T) {
 		"pull_request:",
 		"types: [opened, synchronize, reopened]",
 		`--environment "$ENV_NAME"`,
+		`apply --environment "$ENV_NAME" --yes`,
 		"NEXTDEPLOY_WORKER_NAME=",
 		"CLOUDFLARE_WORKERS_SUBDOMAIN",
 		"<!-- nextdeploy-preview -->", // idempotent comment marker
@@ -121,19 +146,17 @@ func TestRenderPreviewWorkflows(t *testing.T) {
 		}
 	}
 
-	// Both must pin the CLI, like the main workflow.
+	// Both must pin the CLI, like the main workflow, and verify its release checksum.
 	for name, yml := range map[string]string{"preview": preview, "cleanup": cleanup} {
-		if !strings.Contains(yml, "cli@"+CLIVersion) {
+		if !strings.Contains(yml, `CLI_VERSION: "`+CLIVersion+`"`) {
 			t.Errorf("%s workflow does not pin the CLI to %s", name, CLIVersion)
 		}
-		if strings.Contains(yml, "cli@latest") {
-			t.Errorf("%s workflow uses @latest", name)
+		if !strings.Contains(yml, "sha256sum --check --status") {
+			t.Errorf("%s workflow does not verify the downloaded CLI checksum", name)
 		}
-		// go install yields a binary named `cli`; without the symlink every
-		// `nextdeploy …` line is "command not found".
-		if !strings.Contains(yml, "ln -sf") {
-			t.Errorf("%s workflow missing the cli→nextdeploy symlink", name)
-		}
+	}
+	if !strings.Contains(preview, "NEXTDEPLOY_CF_STATE_KEY") || !strings.Contains(cleanup, "NEXTDEPLOY_CF_STATE_KEY") {
+		t.Error("preview workflows must pass the optional shared resource-state secret")
 	}
 }
 

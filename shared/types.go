@@ -1,3 +1,4 @@
+// Package shared core sytem logic
 package shared
 
 import (
