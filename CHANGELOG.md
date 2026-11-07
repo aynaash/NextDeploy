@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.0](https://github.com/aynaash/NextDeploy/compare/v0.16.3...v0.17.0) (2026-11-07)
+
+
+### Features
+
+* add debug.log to Caddy logs, assetVersion to manifest, and Cloudflare remote state sync ([029427d](https://github.com/aynaash/NextDeploy/commit/029427df7e6a57cbe638cc273c043eb95fee961d))
+
+
+### Bug Fixes
+
+* **ci:** bump golangci-lint to v2.15.0 for Go 1.26 compatibility ([c1961ee](https://github.com/aynaash/NextDeploy/commit/c1961ee2d8a589bc0c23659ab895cdfd48a2f3f8))
+* **ci:** use stable Go for govulncheck to avoid stdlib CVE failures ([190ae8a](https://github.com/aynaash/NextDeploy/commit/190ae8ad77190e271df22a65c26b24819ace2ce1))
+* **serverless:** adopt Wrangler D1 migrations and handle token rotation in local state ([16484d8](https://github.com/aynaash/NextDeploy/commit/16484d87eb9d53ffb6bd5cbd00e692ef902e5705))
+
 ## [0.16.0](https://github.com/aynaash/NextDeploy/compare/v0.15.1...v0.16.0) (2026-11-02)
 
 ### ⚠ BREAKING CHANGES
