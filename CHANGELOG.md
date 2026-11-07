@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/aynaash/NextDeploy/compare/v0.18.0...v0.19.0) (2026-11-07)
+
+
+### Features
+
+* **scaffold:** fullstack Next.js template scaffolding on init for Cloudflare, VPS, and AWS ([56c0fee](https://github.com/aynaash/NextDeploy/commit/56c0feeeb532de098da1724aa8fbe14313cb897f))
+
 ## [0.18.0](https://github.com/aynaash/NextDeploy/compare/v0.17.0...v0.18.0) (2026-11-07)
 
 
