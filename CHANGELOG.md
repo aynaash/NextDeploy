@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.18.0](https://github.com/aynaash/NextDeploy/compare/v0.17.0...v0.18.0) (2026-11-07)
+
+
+### Features
+
+* **dev:** improve Air live-reloading, strip macOS metadata files, and document local workflow ([5f547dd](https://github.com/aynaash/NextDeploy/commit/5f547dd19b4eae29572ad3767c43ce521783dc34))
+
+
+### Bug Fixes
+
+* **nextcompile:** fallback to project root for RSC vendoring and emit stubs when skipped ([9a5734e](https://github.com/aynaash/NextDeploy/commit/9a5734e099c4f49bba221ff005000fb3f8f91087))
+
 ## [0.17.0](https://github.com/aynaash/NextDeploy/compare/v0.16.3...v0.17.0) (2026-11-07)
 
 
