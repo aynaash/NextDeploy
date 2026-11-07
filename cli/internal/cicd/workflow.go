@@ -15,7 +15,7 @@ const WorkflowPath = ".github/workflows/nextdeploy.yml"
 //
 // The generated workflows download this release's prebuilt binary and verify
 // its checksum. release-please updates this pin from the package manifest.
-const CLIVersion = "v0.19.0" // {x-release-please-version}
+const CLIVersion = "v0.19.1" // {x-release-please-version}
 
 // RenderDeployWorkflow returns the YAML for WorkflowPath.
 //
