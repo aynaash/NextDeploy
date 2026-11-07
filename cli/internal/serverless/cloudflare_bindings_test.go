@@ -108,7 +108,7 @@ func TestBuildScriptMetadata_DefaultsAppliedWhenCloudflareBlockNil(t *testing.T)
 func TestBuildScriptMetadata_UserR2OverridesAutoAssets(t *testing.T) {
 	cf := &config.CloudflareConfig{
 		Bindings: &config.CFBindings{
-			R2: []config.CFR2Binding{{Name: "STATIC", Bucket: "user-bucket"}},
+			R2: []config.CFR2Binding{{Name: "ASSETS", Bucket: "user-bucket"}},
 		},
 	}
 	meta, err := buildScriptMetadata(cf, "auto-bucket", "worker.mjs", noResolver, nil)
@@ -117,11 +117,31 @@ func TestBuildScriptMetadata_UserR2OverridesAutoAssets(t *testing.T) {
 	}
 	rawMeta, _ := json.Marshal(meta)
 	got := string(rawMeta)
-	if strings.Contains(got, `"name":"ASSETS"`) {
-		t.Errorf("user R2 binding declared but auto ASSETS still injected:\n%s", got)
+	if strings.Contains(got, `"bucket_name":"auto-bucket"`) {
+		t.Errorf("user ASSETS binding declared but auto-bucket still injected:\n%s", got)
 	}
-	if !strings.Contains(got, `"name":"STATIC"`) || !strings.Contains(got, `"bucket_name":"user-bucket"`) {
+	if !strings.Contains(got, `"name":"ASSETS"`) || !strings.Contains(got, `"bucket_name":"user-bucket"`) {
 		t.Errorf("user R2 binding missing:\n%s", got)
+	}
+}
+
+func TestBuildScriptMetadata_UserR2PreservesAutoAssetsWhenNameDiffers(t *testing.T) {
+	cf := &config.CloudflareConfig{
+		Bindings: &config.CFBindings{
+			R2: []config.CFR2Binding{{Name: "MEDIA", Bucket: "media-bucket"}},
+		},
+	}
+	meta, err := buildScriptMetadata(cf, "auto-bucket", "worker.mjs", noResolver, nil)
+	if err != nil {
+		t.Fatalf("buildScriptMetadata: %v", err)
+	}
+	rawMeta, _ := json.Marshal(meta)
+	got := string(rawMeta)
+	if !strings.Contains(got, `"name":"ASSETS"`) || !strings.Contains(got, `"bucket_name":"auto-bucket"`) {
+		t.Errorf("auto ASSETS binding missing when user declares non-colliding R2 binding:\n%s", got)
+	}
+	if !strings.Contains(got, `"name":"MEDIA"`) || !strings.Contains(got, `"bucket_name":"media-bucket"`) {
+		t.Errorf("user MEDIA binding missing:\n%s", got)
 	}
 }
 

@@ -29,9 +29,9 @@ func noResolver(string, string) (string, bool) { return "", false }
 // per-app R2 bucket into a workers.ScriptUpdateParamsMetadata ready to upload.
 //
 // `defaultBucket` is the auto-derived R2 asset bucket name. If the user did
-// not declare any R2 bindings in YAML, we add an ASSETS binding pointing at
-// it (preserves existing single-bucket behavior). If they declared their own
-// R2 bindings, we trust them — no auto-injection.
+// not declare an ASSETS R2 binding in YAML, we auto-inject an ASSETS binding
+// pointing at defaultBucket so compiled Next.js assets and SSG/ISR pages can
+// be served. If they declared an explicit ASSETS binding, we trust their custom bucket.
 //
 // `resolveRef` resolves `ref:` shortcuts on bindings (e.g. hyperdrive.ref) to
 // the CF UUID stashed by ProvisionResources. Pass noResolver if no IaC layer
@@ -191,8 +191,16 @@ func buildBindings(cf *config.CloudflareConfig, defaultBucket string, resolveRef
 	}
 	var out []workers.ScriptUpdateParamsMetadataBindingUnion
 
-	hasR2 := cf != nil && cf.Bindings != nil && len(cf.Bindings.R2) > 0
-	if !hasR2 && defaultBucket != "" {
+	hasNamedAssets := false
+	if cf != nil && cf.Bindings != nil {
+		for _, r := range cf.Bindings.R2 {
+			if r.Name == defaultR2AssetsBindingName {
+				hasNamedAssets = true
+				break
+			}
+		}
+	}
+	if !hasNamedAssets && defaultBucket != "" {
 		out = append(out, workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindR2Bucket{
 			Name:       cloudflare.F(defaultR2AssetsBindingName),
 			BucketName: cloudflare.F(defaultBucket),
