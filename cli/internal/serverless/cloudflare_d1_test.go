@@ -167,11 +167,13 @@ func TestBuildScriptMetadata_D1MissingIDAndRefErrors(t *testing.T) {
 // envelopes the D1 endpoints need. appliedNames seeds the SELECT response so we
 // can assert migration idempotency.
 type d1Mock struct {
-	mu           sync.Mutex
-	existingDBs  []map[string]string // {uuid,name} returned by list page 1
-	appliedNames []string            // rows returned for SELECT name FROM tracking table
-	createdNames []string            // names POSTed to the create endpoint
-	querySQLs    []string            // every SQL executed against /query
+	mu            sync.Mutex
+	existingDBs   []map[string]string // {uuid,name} returned by list page 1
+	appliedNames  []string            // rows returned for SELECT name FROM tracking table
+	createdNames  []string            // names POSTed to the create endpoint
+	querySQLs     []string            // every SQL executed against /query
+	hasWrangler   bool                // if true, sqlite_master query reports d1_migrations exists
+	wranglerNames []string            // names seeded in d1_migrations
 }
 
 func (m *d1Mock) handler() http.HandlerFunc {
@@ -209,7 +211,15 @@ func (m *d1Mock) handler() http.HandlerFunc {
 			m.mu.Unlock()
 
 			var rows []map[string]any
-			if strings.Contains(body.Sql, "SELECT name FROM") {
+			if strings.Contains(body.Sql, "sqlite_master") && strings.Contains(body.Sql, "d1_migrations") {
+				if m.hasWrangler {
+					rows = append(rows, map[string]any{"1": 1})
+				}
+			} else if strings.Contains(body.Sql, "INSERT OR IGNORE INTO "+migrationsTable) && strings.Contains(body.Sql, "d1_migrations") {
+				m.mu.Lock()
+				m.appliedNames = append(m.appliedNames, m.wranglerNames...)
+				m.mu.Unlock()
+			} else if strings.Contains(body.Sql, "SELECT name FROM") {
 				for _, n := range m.appliedNames {
 					rows = append(rows, map[string]any{"name": n})
 				}
@@ -357,6 +367,43 @@ func TestApplyD1Migrations_AppliesOnlyPending(t *testing.T) {
 	}
 	if !strings.Contains(recordingQuery, "CREATE TABLE t(id);") {
 		t.Errorf("record INSERT is not batched with the migration DDL:\n%s", recordingQuery)
+	}
+}
+
+func TestApplyD1Migrations_AdoptsWranglerMigrations(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"0000_init.sql", "0001_add_table.sql"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("CREATE TABLE t(id);"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Wrangler previously applied 0000_init.sql.
+	m := &d1Mock{
+		hasWrangler:   true,
+		wranglerNames: []string{"0000_init.sql"},
+	}
+	p := newD1TestProvider(t, m)
+
+	err := p.applyD1Migrations(context.Background(), "db-uuid", config.CFD1Resource{
+		Name: "app-db", MigrationsDir: dir,
+	})
+	if err != nil {
+		t.Fatalf("applyD1Migrations: %v", err)
+	}
+
+	joined := strings.Join(m.querySQLs, "\n")
+	if !strings.Contains(joined, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='d1_migrations'") {
+		t.Errorf("expected check for wrangler migrations table:\n%s", joined)
+	}
+	if !strings.Contains(joined, "INSERT OR IGNORE INTO _nextdeploy_migrations (name, applied_at) SELECT name, COALESCE(applied_at, datetime('now')) FROM d1_migrations") {
+		t.Errorf("expected adoption query from d1_migrations:\n%s", joined)
+	}
+	// 0000_init.sql was adopted, so only 0001_add_table.sql should have been applied.
+	if strings.Contains(joined, "INSERT OR IGNORE INTO _nextdeploy_migrations (name, applied_at) VALUES ('0000_init.sql'") {
+		t.Errorf("0000_init.sql should not have been replayed:\n%s", joined)
+	}
+	if !strings.Contains(joined, "INSERT OR IGNORE INTO _nextdeploy_migrations (name, applied_at) VALUES ('0001_add_table.sql'") {
+		t.Errorf("0001_add_table.sql was not applied:\n%s", joined)
 	}
 }
 

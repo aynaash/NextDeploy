@@ -178,11 +178,37 @@ func (p *CloudflareProvider) refResolverWithFallback() refResolver {
 			return "", false
 		}
 		rec, ok := manifest.Get(kind, name)
-		if !ok {
-			return "", false
+		if ok {
+			p.log.Info("Resolved ref %s:%s from state manifest (id=%s)", kind, name, rec.ID)
+			return rec.ID, true
 		}
-		p.log.Info("Resolved ref %s:%s from state manifest (id=%s)", kind, name, rec.ID)
-		return rec.ID, true
+		// Fallback: if not found in state manifest (e.g. cache was invalidated on token rotation),
+		// query Cloudflare API directly.
+		liveID, liveErr := p.findResourceIDLive(context.Background(), kind, name)
+		if liveErr == nil && liveID != "" {
+			p.log.Info("Resolved ref %s:%s live from Cloudflare (id=%s)", kind, name, liveID)
+			return liveID, true
+		}
+		return "", false
+	}
+}
+
+// findResourceIDLive queries the Cloudflare API directly to find the UUID / ID
+// of an existing resource by name when it is not in the local state manifest.
+func (p *CloudflareProvider) findResourceIDLive(ctx context.Context, kind, name string) (string, error) {
+	switch kind {
+	case "d1":
+		return p.findD1ID(ctx, name)
+	case "kv":
+		return p.findKVNamespaceID(ctx, name)
+	case "hyperdrive":
+		return p.findHyperdriveID(ctx, name)
+	case "queue":
+		return p.findQueueID(ctx, name)
+	case "vectorize", "ai_gateway":
+		return name, nil
+	default:
+		return "", fmt.Errorf("unknown resource kind: %s", kind)
 	}
 }
 

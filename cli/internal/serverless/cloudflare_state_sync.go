@@ -159,7 +159,18 @@ func isMissingRemoteState(err error) bool {
 
 func (p *CloudflareProvider) loadResourceManifest(path string, key []byte) (*cfstate.Manifest, error) {
 	manifest, err := cfstate.Load(path, key)
-	if err == nil || !p.remoteStateEnabled() || p.apiToken == "" {
+	if err == nil {
+		return manifest, nil
+	}
+	if !p.remoteStateEnabled() {
+		// Key was derived from fallback p.apiToken. When token rotation occurs or
+		// local state is encrypted with an older token, decryption fails. Treat
+		// the local cache as stale/invalidated, warn, and refresh state from
+		// Cloudflare API instead of blocking the entire ship process.
+		p.log.Warn("Local Cloudflare state (%s) could not be decrypted with current API token (token rotated or state invalid); invalidating local cache and refreshing from Cloudflare: %v", path, err)
+		return cfstate.New(), nil
+	}
+	if p.apiToken == "" {
 		return manifest, err
 	}
 	legacyKey, keyErr := secrets.DeriveKey(p.apiToken)

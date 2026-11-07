@@ -21,6 +21,11 @@ import (
 // its basename recorded here, and skipped on every subsequent deploy.
 const migrationsTable = "_nextdeploy_migrations"
 
+// wranglerMigrationsTable is the table Wrangler uses to track D1 migrations.
+// When adopting an existing D1 database, NextDeploy reads applied migrations from
+// this table into _nextdeploy_migrations so existing migrations are not replayed.
+const wranglerMigrationsTable = "d1_migrations"
+
 // ensureD1Database creates a D1 database with decl.Name if one doesn't already
 // exist (name is unique per account), then applies any pending migrations from
 // decl.MigrationsDir. Returns the database UUID for binding resolution.
@@ -97,6 +102,10 @@ func (p *CloudflareProvider) applyD1Migrations(ctx context.Context, dbID string,
 		return fmt.Errorf("ensure migrations table: %w", err)
 	}
 
+	if err := p.adoptWranglerMigrations(ctx, dbID, decl.Name); err != nil {
+		return fmt.Errorf("adopt wrangler migrations: %w", err)
+	}
+
 	applied, err := p.queryAppliedMigrations(ctx, dbID)
 	if err != nil {
 		return fmt.Errorf("read applied migrations: %w", err)
@@ -144,6 +153,48 @@ func (p *CloudflareProvider) d1Exec(ctx context.Context, dbID, sql string) error
 		Body:      d1.DatabaseQueryParamsBodyD1SingleQuery{Sql: cloudflare.F(sql)},
 	})
 	return err
+}
+
+// adoptWranglerMigrations backfills applied migrations from Wrangler's tracking
+// table (d1_migrations) into _nextdeploy_migrations when adopting an existing
+// database. This prevents NextDeploy from replaying migrations that Wrangler
+// already executed (e.g. 0000_init.sql) and failing with "table already exists".
+func (p *CloudflareProvider) adoptWranglerMigrations(ctx context.Context, dbID, dbName string) error {
+	exists, err := p.d1TableExists(ctx, dbID, wranglerMigrationsTable)
+	if err != nil {
+		return fmt.Errorf("check for wrangler migrations table: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	sql := fmt.Sprintf(
+		"INSERT OR IGNORE INTO %s (name, applied_at) SELECT name, COALESCE(applied_at, datetime('now')) FROM %s WHERE name IS NOT NULL;",
+		migrationsTable, wranglerMigrationsTable,
+	)
+	if err := p.d1Exec(ctx, dbID, sql); err != nil {
+		return fmt.Errorf("copy wrangler migrations: %w", err)
+	}
+	p.log.Info("D1 %s: adopted existing migrations from Wrangler (%s)", dbName, wranglerMigrationsTable)
+	return nil
+}
+
+// d1TableExists checks if a table exists in the SQLite catalog (sqlite_master).
+func (p *CloudflareProvider) d1TableExists(ctx context.Context, dbID, table string) (bool, error) {
+	page, err := p.cf.D1.Database.Query(ctx, dbID, d1.DatabaseQueryParams{
+		AccountID: cloudflare.F(p.accountID),
+		Body: d1.DatabaseQueryParamsBodyD1SingleQuery{Sql: cloudflare.F(
+			fmt.Sprintf("SELECT 1 FROM sqlite_master WHERE type='table' AND name=%s LIMIT 1;", sqlQuote(table)),
+		)},
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, qr := range page.Result {
+		if len(qr.Results) > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // queryAppliedMigrations returns the set of migration names already recorded.
