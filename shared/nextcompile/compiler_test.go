@@ -342,6 +342,18 @@ func TestCompile_SkipsVendoringWhenRSCNotUsed(t *testing.T) {
 	if bundle.VendoredRSC != nil {
 		t.Errorf("expected VendoredRSC nil, got %+v", bundle.VendoredRSC)
 	}
+
+	// Verify vendor stub files exist so esbuild doesn't fail on relative imports
+	for _, rel := range []string{
+		filepath.Join("_nextdeploy", "runtime", "vendor", "react-server-dom-webpack", "client.edge.mjs"),
+		filepath.Join("_nextdeploy", "runtime", "vendor", "react-server-dom-webpack", "server.edge.mjs"),
+		filepath.Join("_nextdeploy", "runtime", "vendor", "react-dom", "server.edge.mjs"),
+	} {
+		p := filepath.Join(dir, "out", rel)
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("expected vendor stub %s to exist: %v", rel, err)
+		}
+	}
 }
 
 func TestCompile_DeterministicHash(t *testing.T) {

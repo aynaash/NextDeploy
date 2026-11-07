@@ -145,6 +145,20 @@ func locateRSCPackage(standaloneDir string) (string, error) {
 		}
 		current = parent
 	}
+	if wd, err := os.Getwd(); err == nil {
+		current = wd
+		for range 5 {
+			candidate := filepath.Join(current, "node_modules", "react-server-dom-webpack")
+			if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
+				return candidate, nil
+			}
+			parent := filepath.Dir(current)
+			if parent == current {
+				break
+			}
+			current = parent
+		}
+	}
 	return "", ErrRSCPackageNotFound
 }
 
@@ -301,6 +315,20 @@ func locateReactDOMPackage(standaloneDir string) (string, error) {
 			break
 		}
 		current = parent
+	}
+	if wd, err := os.Getwd(); err == nil {
+		current = wd
+		for range 5 {
+			candidate := filepath.Join(current, "node_modules", "react-dom")
+			if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
+				return candidate, nil
+			}
+			parent := filepath.Dir(current)
+			if parent == current {
+				break
+			}
+			current = parent
+		}
 	}
 	return "", ErrReactDOMPackageNotFound
 }

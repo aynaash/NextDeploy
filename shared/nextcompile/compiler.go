@@ -230,9 +230,34 @@ func maybeVendorRSC(opts CompileOpts, features ManifestFeatures, react ReactVers
 				err, react.Raw)
 		}
 		log.Debug("nextcompile: RSC/SSR edge builds not installed; app does not use RSC, skipping vendoring")
+		if err := emitVendorStubs(opts.OutDir); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	}
 	return nil, fmt.Errorf("vendor RSC/SSR: %w", err)
+}
+
+func emitVendorStubs(outDir string) error {
+	rscDir := filepath.Join(outDir, "_nextdeploy", "runtime", "vendor", "react-server-dom-webpack")
+	if err := os.MkdirAll(rscDir, 0o750); err != nil {
+		return err
+	}
+	stubClient := "export function createFromReadableStream() { throw new Error(\"react-server-dom-webpack/client.edge not installed\"); }\n"
+	stubServer := "export function renderToReadableStream() { throw new Error(\"react-server-dom-webpack/server.edge not installed\"); }\n"
+	if err := os.WriteFile(filepath.Join(rscDir, "client.edge.mjs"), []byte(stubClient), 0o640); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(rscDir, "server.edge.mjs"), []byte(stubServer), 0o640); err != nil {
+		return err
+	}
+
+	domDir := filepath.Join(outDir, "_nextdeploy", "runtime", "vendor", "react-dom")
+	if err := os.MkdirAll(domDir, 0o750); err != nil {
+		return err
+	}
+	stubDom := "export function renderToReadableStream() { throw new Error(\"react-dom/server.edge not installed\"); }\n"
+	return os.WriteFile(filepath.Join(domDir, "server.edge.mjs"), []byte(stubDom), 0o640)
 }
 
 // normalizeOpts fills in defensible defaults so the rest of the pipeline
