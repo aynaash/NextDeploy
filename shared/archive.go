@@ -70,6 +70,14 @@ func ExtractTarGz(src, dest string) error {
 		if filepath.IsAbs(hdr.Name) {
 			return fmt.Errorf("unsafe archive entry path: %q", hdr.Name)
 		}
+
+		// Skip macOS AppleDouble metadata files and desktop services files.
+		// These binary metadata forks break esbuild when scanned in server/chunks.
+		base := filepath.Base(hdr.Name)
+		if strings.HasPrefix(base, "._") || base == ".DS_Store" {
+			continue
+		}
+
 		target := filepath.Join(destAbs, hdr.Name)
 		if !withinDir(destAbs, target) {
 			return fmt.Errorf("archive entry escapes destination: %q", hdr.Name)
@@ -176,6 +184,7 @@ func CreateTarGz(srcDir, targetTar string) error {
 	// directory — symmetric with ExtractTarGz.
 	// #nosec G204
 	cmd := exec.Command(tarPath, "-czf", absTarget, "-C", absSrc, ".")
+	cmd.Env = append(os.Environ(), "COPYFILE_DISABLE=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tar creation failed: %w - %s", err, string(out))
 	}

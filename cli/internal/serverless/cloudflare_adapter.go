@@ -302,8 +302,8 @@ var optionalExternalPackages = []string{
 // resolve correctly.
 func runEsbuild(ctx context.Context, entry, out, metaPath, cwd string, log *shared.Logger) error {
 	// Aliases redirect Next's public module specifiers to our runtime
-	// shims. Path is relative to the standalone dir (esbuild's cwd).
-	runtimeRoot := ".nextdeploy-cf/_nextdeploy/runtime"
+	// shims. Use absolute path to ensure esbuild resolves regardless of cwd.
+	runtimeRoot := filepath.Join(cwd, ".nextdeploy-cf", "_nextdeploy", "runtime")
 
 	asyncStorageShim := filepath.Join(runtimeRoot, "next_shims", "async_storages.mjs")
 	alias := map[string]string{

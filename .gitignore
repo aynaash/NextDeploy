@@ -64,6 +64,7 @@ test_src_dir/
 !**/README.md
 !CLOUDFLARE_PARITY.md
 !docs/deploy-nextjs-vps-go-sidecar.md
+!docs/local-development-air.md
 
 # ── Misc ─────────────────────────────────────────────────────────
 /daemon.md

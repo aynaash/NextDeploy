@@ -159,21 +159,27 @@ func ensureTool(name, installSpec string) error {
 	return nil
 }
 
-// ensureDevBinOnPath appends ~/.nextdeploy/bin to the user's ~/.bashrc if not
-// already present. Idempotent. Skips silently if .bashrc can't be opened.
+// ensureDevBinOnPath appends ~/.nextdeploy/bin to the user's ~/.bashrc or ~/.zshrc
+// if not already present. Idempotent. Skips silently if the rc file can't be opened.
 func ensureDevBinOnPath() {
-	bashrc := filepath.Join(home(), ".bashrc")
-	data, err := os.ReadFile(bashrc)
-	if err == nil && strings.Contains(string(data), devBinDir()) {
-		return
+	rcNames := []string{".bashrc"}
+	if shell := os.Getenv("SHELL"); strings.Contains(shell, "zsh") {
+		rcNames = []string{".zshrc", ".bashrc"}
 	}
-	f, err := os.OpenFile(bashrc, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
+	for _, rcName := range rcNames {
+		rcFile := filepath.Join(home(), rcName)
+		data, err := os.ReadFile(rcFile)
+		if err == nil && strings.Contains(string(data), devBinDir()) {
+			continue
+		}
+		f, err := os.OpenFile(rcFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			continue
+		}
+		defer f.Close()
+		fmt.Fprintln(f, `export PATH="$HOME/.nextdeploy/bin:$PATH"`)
+		fmt.Printf("Added ~/.nextdeploy/bin to ~/%s — run 'source ~/%s' in other shells to pick it up.\n", rcName, rcName)
 	}
-	defer f.Close()
-	fmt.Fprintln(f, `export PATH="$HOME/.nextdeploy/bin:$PATH"`)
-	fmt.Println("Added ~/.nextdeploy/bin to ~/.bashrc — run 'source ~/.bashrc' in other shells to pick it up.")
 }
 
 // ── build targets ────────────────────────────────────────────────────────────

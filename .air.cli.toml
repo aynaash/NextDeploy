@@ -2,7 +2,7 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  cmd = "go build -o tmp/nextdeploy ./cli"
+  cmd = "go build -o tmp/nextdeploy ./cli && mkdir -p $HOME/.nextdeploy/bin && cp tmp/nextdeploy $HOME/.nextdeploy/bin/nextdeploy"
   bin = "tmp/nextdeploy"
   full_bin = ""
   include_ext = ["go", "toml"]

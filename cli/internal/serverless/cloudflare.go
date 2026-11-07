@@ -939,6 +939,12 @@ func resolveStandaloneDir(pkg *packaging.PackageResult, meta *nextcore.NextCoreP
 			_ = os.RemoveAll(tmp)
 			return "", noop, fmt.Errorf("extract %s: %w", pkg.StandaloneTarPath, err)
 		}
+		_ = filepath.WalkDir(tmp, func(path string, d os.DirEntry, err error) error {
+			if err == nil && !d.IsDir() && (strings.HasPrefix(d.Name(), "._") || d.Name() == ".DS_Store") {
+				_ = os.Remove(path)
+			}
+			return nil
+		})
 		log.Debug("Extracted standalone tarball to %s (%d bytes)", tmp, pkg.StandaloneTarSize)
 		return tmp, func() { _ = os.RemoveAll(tmp) }, nil
 	}

@@ -52,6 +52,9 @@ cd NextDeploy
 go build -o nextdeploy ./cli
 ```
 
+### Live reloading with Air
+For rapid local iteration, run `mage dev` (or `air -c .air.cli.toml`) to automatically recompile `nextdeploy` to `~/.nextdeploy/bin/nextdeploy` on every code change. See [`docs/local-development-air.md`](./docs/local-development-air.md).
+
 Requires Go 1.25+. The release binaries on GitHub are built with
 GoReleaser; see `.goreleaser.yml`.
 
