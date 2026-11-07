@@ -361,6 +361,11 @@ func TestCompile_DeterministicHash(t *testing.T) {
 	// This is the reproducible-build guarantee.
 	makeTree := func() (string, Payload) {
 		dir := t.TempDir()
+		writeRSCFixture(t, dir, "18.3.1")
+		writeFile(t, filepath.Join(dir, "node_modules", "react-server-dom-webpack", "esm",
+			"react-server-dom-webpack-server.edge.production.js"),
+			`// vendored stub for test
+export function renderToReadableStream(){ return new ReadableStream() }`)
 		writeFile(t, filepath.Join(dir, "package.json"),
 			`{"name":"x","dependencies":{"next":"14.2.3","react":"18.3.1"}}`)
 		writeFile(t, filepath.Join(dir, ".next", "server", "app", "page.js"),

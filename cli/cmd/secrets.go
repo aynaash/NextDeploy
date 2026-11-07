@@ -59,7 +59,7 @@ var secretsUnsetCmd = &cobra.Command{
 var secretsLoadCmd = &cobra.Command{
 	Use:   "load [FILENAME]",
 	Short: "Load secrets from a .env file",
-	Long:  "Reads a local .env file and uploads all key-value pairs to the daemon. Defaults to '.env' if no filename is provided.",
+	Long:  "Reads a local .env file and uploads all key-value pairs to the daemon or cloud provider. Defaults to '.env' if no filename is provided.",
 	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		filename := ".env"
@@ -67,6 +67,16 @@ var secretsLoadCmd = &cobra.Command{
 			filename = args[0]
 		}
 		runSecretsLoad(filename)
+	},
+}
+
+var secretsSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Sync secrets from local sources (including Doppler) to remote",
+	Long: `Reads secrets from local allowlisted sources (Doppler if active via doppler run,
+.env, and secrets.files[]) and updates the remote target (Cloudflare Worker secrets or AWS Secrets Manager).`,
+	Run: func(cmd *cobra.Command, args []string) {
+		runSecretsSync()
 	},
 }
 
@@ -113,7 +123,7 @@ func runSecretsPrune(apply bool) {
 		os.Exit(1)
 	}
 
-	target := strings.ToLower(cfg.TargetType)
+	target := strings.ToLower(cfg.ResolveTargetType(""))
 	if target != "serverless" {
 		log.Error("`secrets prune` is only supported for serverless targets (got: %s)", target)
 		os.Exit(1)
@@ -210,7 +220,7 @@ func runSecretAction(action string, args []string) {
 	}
 
 	appName := cfg.App.Name
-	target := strings.ToLower(cfg.TargetType)
+	target := strings.ToLower(cfg.ResolveTargetType(""))
 
 	if target == "" {
 		log.Warn("No target_type specified in nextdeploy.yml, defaulting to VPS")
@@ -390,6 +400,10 @@ func runSecretsLoad(filename string) {
 
 		// Handle basic KEY=VALUE parsing
 		if strings.Contains(line, "=") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 && strings.HasPrefix(strings.TrimSpace(parts[0]), "DOPPLER_") {
+				continue
+			}
 			secrets = append(secrets, line)
 		}
 	}
@@ -403,12 +417,65 @@ func runSecretsLoad(filename string) {
 	runSecretAction("set", secrets)
 }
 
+func runSecretsSync() {
+	log := shared.PackageLogger("secrets", "🔐 SECRETS")
+	cfg, err := config.Load()
+	if err != nil {
+		log.Error("Failed to load config: %v", err)
+		os.Exit(1)
+	}
+
+	target := strings.ToLower(cfg.ResolveTargetType(""))
+	if target != "serverless" {
+		log.Error("`secrets sync` is currently supported for serverless targets (got: %s)", target)
+		os.Exit(1)
+	}
+
+	providerName := "aws"
+	if cfg.Serverless != nil && cfg.Serverless.Provider != "" {
+		providerName = strings.ToLower(cfg.Serverless.Provider)
+	}
+
+	p, err := serverless.New(providerName, false)
+	if err != nil {
+		log.Error("Failed to initialize serverless provider: %v", err)
+		os.Exit(1)
+	}
+	ctx := context.Background()
+	if err := p.Initialize(ctx, cfg); err != nil {
+		log.Error("Failed to initialize provider: %v", err)
+		os.Exit(1)
+	}
+
+	local, err := serverless.LoadLocalSecrets(cfg)
+	if err != nil {
+		log.Error("Failed to load local secrets: %v", err)
+		os.Exit(1)
+	}
+	if len(local) == 0 {
+		log.Warn("No secrets found to sync from local sources or Doppler")
+		return
+	}
+
+	log.Info("Syncing %d secret(s) to %s...", len(local), providerName)
+	appName := cfg.App.Name
+	for k, v := range local {
+		if err := p.SetSecret(ctx, appName, k, v); err != nil {
+			log.Error("Failed to set secret %s: %v", k, err)
+		} else {
+			log.Success("Secret %s synced", k)
+		}
+	}
+	log.Success("All secrets synced successfully")
+}
+
 func init() {
 	secretsCmd.AddCommand(secretsSetCmd)
 	secretsCmd.AddCommand(secretsGetCmd)
 	secretsCmd.AddCommand(secretsListCmd)
 	secretsCmd.AddCommand(secretsUnsetCmd)
 	secretsCmd.AddCommand(secretsLoadCmd)
+	secretsCmd.AddCommand(secretsSyncCmd)
 
 	secretsPruneCmd.Flags().BoolVar(&secretsPruneApply, "apply", false, "Actually delete the candidates (default is dry-run)")
 	secretsCmd.AddCommand(secretsPruneCmd)

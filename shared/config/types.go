@@ -453,7 +453,6 @@ func (g *GoSidecarConfig) ImageOptEnabled() bool {
 }
 
 func (g *GoSidecarConfig) Workers() int {
-
 	if g == nil || g.MaxImageWorkers <= 0 {
 		return 4
 	}
@@ -462,7 +461,6 @@ func (g *GoSidecarConfig) Workers() int {
 		return 64
 	}
 	return g.MaxImageWorkers
-
 }
 
 func (cfg *NextDeployConfig) ResolveGoSidecar() *GoSidecarConfig {
@@ -474,7 +472,6 @@ func (cfg *NextDeployConfig) ResolveGoSidecar() *GoSidecarConfig {
 		return cfg.App.GoSidecar
 	}
 	return cfg.GoSidecar
-
 }
 
 // DomainConfig describes the app's custom domain and where its DNS lives. In

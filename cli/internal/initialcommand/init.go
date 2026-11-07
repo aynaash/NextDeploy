@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/aynaash/nextdeploy/cli/internal/infrasniff"
@@ -21,12 +22,17 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 
 	log.Info("NextDeploy Initialization")
 	log.Info("----------------------------------------")
-	log.Info("Analysing your Next.js project...")
+	log.Info("Analysing project directory...")
 
 	// Non-interactive flags (skip survey.AskOne when provided).
 	flagTarget, err := cmd.Flags().GetString("target")
 	if err != nil {
 		return fmt.Errorf("read --target: %w", err)
+	}
+	if flagTarget == "" {
+		if p, err := cmd.Flags().GetString("platform"); err == nil && p != "" {
+			flagTarget = p
+		}
 	}
 	flagMode, err := cmd.Flags().GetString("mode")
 	if err != nil {
@@ -47,7 +53,14 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Basic analysis without requiring nextdeploy.yml
-	appName := "myapp"
+	appName := "my-app"
+	cwd, _ := os.Getwd()
+	if cwd != "" {
+		base := filepath.Base(cwd)
+		if base != "" && base != "." && base != "/" {
+			appName = cleanAppName(base)
+		}
+	}
 	if data, err := os.ReadFile("package.json"); err == nil {
 		var pkg struct {
 			Name string `json:"name"`
@@ -58,11 +71,15 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	nextVersion, _ := nextcore.GetNextJsVersion("package.json")
-	if nextVersion != "" {
-		log.Info("  ✓ Next.js %s detected", nextVersion)
+	if nextVersion == "" {
+		// No existing Next.js project detected in current directory.
+		log.Warn("No Next.js project detected in current directory.")
+		log.Info("NextDeploy will generate a complete fullstack Next.js 15 starter for you.\n")
+		return runNewProjectInit(cmd, log, appName, flagTarget, flagDB)
 	}
 
-	cwd, _ := os.Getwd()
+	log.Info("  ✓ Next.js %s detected", nextVersion)
+
 	pkgManager, _ := nextcore.DetectPackageManager(cwd)
 	if pkgManager != nextcore.Unknown {
 		log.Info("  ✓ Package manager: %s\n", pkgManager.String())
@@ -139,6 +156,114 @@ func RunInitCommand(cmd *cobra.Command, args []string) error {
 	log.Info("- Run 'nextdeploy prepare' to prepare a target server")
 
 	return nil
+}
+
+func runNewProjectInit(cmd *cobra.Command, log *shared.Logger, appName, flagTarget, flagDB string) error {
+	targetType := ""
+	if flagTarget != "" {
+		targetType = normalizeInitTarget(flagTarget)
+		if targetType == "" {
+			return fmt.Errorf("--target/--platform must be one of: vps, aws, cloudflare (got %q)", flagTarget)
+		}
+		log.Info("Platform: %s (from flag)", targetType)
+	} else {
+		prompt := &survey.Select{
+			Message: "Which platform would you like to build for?",
+			Options: []string{
+				"Cloudflare Workers (Edge Serverless + D1 SQLite / Hyperdrive + R2)",
+				"VPS / Self-Hosted (Fullstack Node.js + Go Sidecar + Caddy)",
+				"AWS Serverless (Lambda + CloudFront + S3)",
+			},
+		}
+		var targetChoice string
+		if err := survey.AskOne(prompt, &targetChoice); err != nil {
+			return fmt.Errorf("prompt failed: %w", err)
+		}
+		switch {
+		case strings.Contains(targetChoice, "Cloudflare"):
+			targetType = "cloudflare"
+		case strings.Contains(targetChoice, "VPS"):
+			targetType = "vps"
+		default:
+			targetType = "serverless"
+		}
+	}
+
+	switch targetType {
+	case "cloudflare":
+		return runScaffold(log, appName, flagDB)
+
+	case "vps":
+		enableGoSidecar := true
+		if flagTarget == "" {
+			_ = survey.AskOne(&survey.Confirm{
+				Message: "Enable the Go sidecar for sub-millisecond static page and asset caching?",
+				Default: true,
+			}, &enableGoSidecar)
+		}
+
+		written, skipped, err := scaffold.Scaffold(scaffold.Options{
+			AppName:         appName,
+			Platform:        scaffold.PlatformVPS,
+			EnableGoSidecar: enableGoSidecar,
+			Dir:             ".",
+		})
+		if err != nil {
+			return fmt.Errorf("scaffold VPS project: %w", err)
+		}
+		log.Info("\n🎉 Scaffolded fullstack Next.js project for VPS (conventions by aynaash/Hersi).")
+		log.Info("  Wrote %d files.", len(written))
+		for _, s := range skipped {
+			log.Warn("  Kept existing file (not overwritten): %s", s)
+		}
+		log.Info("\nNext steps:")
+		log.Info("  1. npm install")
+		log.Info("  2. npm run dev       (run locally at http://localhost:3000)")
+		log.Info("  3. nextdeploy prepare (configure your VPS target server)")
+		log.Info("  4. nextdeploy ship   (build and deploy)")
+		return nil
+
+	case "serverless", "aws":
+		written, skipped, err := scaffold.Scaffold(scaffold.Options{
+			AppName:  appName,
+			Platform: scaffold.PlatformAWS,
+			Dir:      ".",
+		})
+		if err != nil {
+			return fmt.Errorf("scaffold AWS project: %w", err)
+		}
+		log.Info("\n🎉 Scaffolded fullstack Next.js project for AWS Serverless (conventions by aynaash/Hersi).")
+		log.Info("  Wrote %d files.", len(written))
+		for _, s := range skipped {
+			log.Warn("  Kept existing file (not overwritten): %s", s)
+		}
+		log.Info("\nNext steps:")
+		log.Info("  1. npm install")
+		log.Info("  2. npm run dev       (run locally at http://localhost:3000)")
+		log.Info("  3. nextdeploy plan   (dry-run preview)")
+		log.Info("  4. nextdeploy ship   (deploy to AWS Lambda & CloudFront)")
+		return nil
+
+	default:
+		return fmt.Errorf("unsupported platform %q", targetType)
+	}
+}
+
+func cleanAppName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	var sb strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			sb.WriteRune(r)
+		} else if r == '_' || r == ' ' || r == '.' {
+			sb.WriteRune('-')
+		}
+	}
+	res := strings.Trim(sb.String(), "-")
+	if res == "" {
+		return "my-app"
+	}
+	return res
 }
 
 func normalizeInitTarget(target string) string {
@@ -230,22 +355,26 @@ func runScaffold(log *shared.Logger, appName string, flagDB string) error {
 	}
 
 	written, skipped, err := scaffold.Scaffold(scaffold.Options{
-		AppName: appName, DBVariant: variant, Dir: ".",
+		AppName:   appName,
+		Platform:  scaffold.PlatformCloudflare,
+		DBVariant: variant,
+		Dir:       ".",
 	})
 	if err != nil {
 		return fmt.Errorf("scaffold: %w", err)
 	}
 
-	log.Info("\n🎉 Scaffolded Cloudflare deployment infra (conventions by aynaash/Hersi).")
-	log.Info("  Wrote %d files (db=%s). This is a deploy pipeline, not your app — build that yourself.", len(written), variant)
+	log.Info("\n🎉 Scaffolded Cloudflare fullstack Next.js project (conventions by aynaash/Hersi).")
+	log.Info("  Wrote %d files (db=%s).", len(written), variant)
 	for _, s := range skipped {
 		log.Warn("  Kept existing file (not overwritten): %s", s)
 	}
 	log.Info("\nNext steps:")
-	log.Info("  1. npm install  &  build your app in app/")
-	log.Info("  2. nextdeploy secrets set AUTH_SECRET \"$(openssl rand -hex 32)\"")
-	log.Info("  3. nextdeploy apply  (provision D1/KV/R2/Hyperdrive from nextdeploy.yml)")
-	log.Info("  4. nextdeploy ship")
+	log.Info("  1. npm install")
+	log.Info("  2. npm run dev       (run locally at http://localhost:3000)")
+	log.Info("  3. nextdeploy secrets set AUTH_SECRET \"$(openssl rand -hex 32)\"")
+	log.Info("  4. nextdeploy apply  (provision D1/KV/R2/Hyperdrive from nextdeploy.yml)")
+	log.Info("  5. nextdeploy ship")
 	return nil
 }
 

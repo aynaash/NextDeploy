@@ -185,3 +185,80 @@ func TestTemplateFiles_BothVariants(t *testing.T) {
 func containsPath(ss []string, want string) bool {
 	return slices.Contains(ss, want)
 }
+
+func TestScaffold_VPSPlatform(t *testing.T) {
+	dir := t.TempDir()
+	written, skipped, err := Scaffold(Options{
+		AppName:         "vps-app",
+		Platform:        PlatformVPS,
+		EnableGoSidecar: true,
+		Dir:             dir,
+	})
+	if err != nil {
+		t.Fatalf("Scaffold VPS: %v", err)
+	}
+	if len(skipped) != 0 {
+		t.Errorf("fresh VPS scaffold should skip nothing, got %v", skipped)
+	}
+
+	for _, rel := range []string{
+		"nextdeploy.yml", "package.json", "next.config.mjs", "tsconfig.json",
+		"Dockerfile", ".dockerignore", "README.md",
+		"app/globals.css", "app/layout.tsx", "app/page.tsx", "app/api/health/route.ts",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+			t.Errorf("expected VPS file %s: %v", rel, err)
+		}
+	}
+
+	// Should NOT include Cloudflare-specific files.
+	if _, err := os.Stat(filepath.Join(dir, "proxy.ts")); err == nil {
+		t.Error("VPS scaffold should not include proxy.ts")
+	}
+
+	// Check nextdeploy.yml content
+	yml := read(t, filepath.Join(dir, "nextdeploy.yml"))
+	if !strings.Contains(yml, "target: vps") {
+		t.Errorf("VPS config missing 'target: vps':\n%s", yml)
+	}
+	if !strings.Contains(yml, "enabled: true") {
+		t.Errorf("VPS config should have sidecar enabled:\n%s", yml)
+	}
+	if len(written) < 6 {
+		t.Errorf("expected several files written, got %d", len(written))
+	}
+}
+
+func TestScaffold_AWSPlatform(t *testing.T) {
+	dir := t.TempDir()
+	written, skipped, err := Scaffold(Options{
+		AppName:  "aws-app",
+		Platform: PlatformAWS,
+		Dir:      dir,
+	})
+	if err != nil {
+		t.Fatalf("Scaffold AWS: %v", err)
+	}
+	if len(skipped) != 0 {
+		t.Errorf("fresh AWS scaffold should skip nothing, got %v", skipped)
+	}
+
+	for _, rel := range []string{
+		"nextdeploy.yml", "package.json", "next.config.mjs", "tsconfig.json",
+		"README.md", "app/globals.css", "app/layout.tsx", "app/page.tsx",
+		"app/api/health/route.ts",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+			t.Errorf("expected AWS file %s: %v", rel, err)
+		}
+	}
+
+	// Check nextdeploy.yml content
+	yml := read(t, filepath.Join(dir, "nextdeploy.yml"))
+	if !strings.Contains(yml, "target: serverless") || !strings.Contains(yml, "provider: aws") {
+		t.Errorf("AWS config missing serverless provider aws:\n%s", yml)
+	}
+	if len(written) < 6 {
+		t.Errorf("expected several files written, got %d", len(written))
+	}
+}

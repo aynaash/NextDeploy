@@ -1,0 +1,13 @@
+# NextDeploy AWS Serverless Configuration
+version: "1.0"
+target: serverless
+
+app:
+  name: __APP_NAME__
+  domain: "" # Optional custom domain via Route53 + ACM
+
+serverless:
+  provider: aws
+  region: us-east-1
+  architecture: arm64
+  memory: 1024

@@ -32,6 +32,7 @@ import {
   bootstrapScriptURLs,
   stylesheetLinkTags,
   ssrLoadFailure,
+  htmlEscapeJsonString,
 } from "./ssr.mjs";
 import { resolveMetadata, renderMetadataTags } from "./metadata.mjs";
 
@@ -88,7 +89,7 @@ export async function renderRSC(entry, request, env, ctx, routeCtx, manifest) {
       ...loadLayouts.map((fn) => fn()),
     ]);
 
-    const PageComponent = resolveComponent(pageModule);
+    const PageComponent = await resolveComponent(pageModule);
     if (typeof PageComponent !== "function") {
       return new Response(describeMissingComponent(pageModule, entry), {
         status: 500,
@@ -96,15 +97,48 @@ export async function renderRSC(entry, request, env, ctx, routeCtx, manifest) {
       });
     }
 
+    const rawParams = reqCtx.params || {};
+    const params = Promise.resolve(rawParams);
+    Object.assign(params, rawParams);
+
+    const rawSearchParams = Object.fromEntries(url.searchParams);
+    const searchParams = Promise.resolve(rawSearchParams);
+    Object.assign(searchParams, rawSearchParams);
+
     // Build the rendering tree — layouts wrap the page, root-first.
     const treeProps = {
-      params: reqCtx.params,
-      searchParams: Object.fromEntries(url.searchParams),
+      params,
+      searchParams,
     };
     let tree;
     try {
-      tree = await buildLayoutTree(layoutModules, PageComponent, treeProps);
+      let layouts = [];
+      if (layoutModules.length > 0) {
+        for (const m of layoutModules) {
+          const comp = await resolveComponent(m);
+          if (typeof comp === "function") layouts.push(comp);
+        }
+      } else {
+        const rootTree = pageModule.tree || pageModule.routeModule?.userland?.loaderTree;
+        if (rootTree) {
+          layouts = await extractLayoutsFromTree(rootTree);
+        }
+      }
+      tree = await buildLayoutTree(layouts, PageComponent, treeProps);
     } catch (err) {
+      const msg = err?.digest || err?.message || String(err);
+      if (msg.includes("NEXT_HTTP_ERROR_FALLBACK;404")) {
+        return new Response("<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1></body></html>", {
+          status: 404,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+      }
+      if (typeof msg === "string" && msg.startsWith("NEXT_REDIRECT")) {
+        const parts = msg.split(";");
+        const redirectUrl = parts[2] || "/";
+        const redirectStatus = parseInt(parts[3], 10) || 307;
+        return Response.redirect(new URL(redirectUrl, request.url).toString(), redirectStatus);
+      }
       return new Response(
         "nextcompile: layout composition failed:\n" + (err?.stack || String(err)),
         { status: 500 },
@@ -173,7 +207,7 @@ export async function renderRSC(entry, request, env, ctx, routeCtx, manifest) {
  * commonly puts it on default; some legacy emits use `Page`. Production
  * route modules put it on routeModule.userland.default or inside tree.
  */
-export function resolveComponent(mod) {
+export async function resolveComponent(mod) {
   if (!mod) return undefined;
   if (typeof mod === "function") return mod;
   if (typeof mod.default === "function") return mod.default;
@@ -193,22 +227,26 @@ export function resolveComponent(mod) {
   }
 
   // Next's recursive App Router tree layout representation.
-  if (mod.tree) {
-    const fromTree = extractComponentFromTree(mod.tree);
+  const tree = mod.tree || mod.routeModule?.userland?.loaderTree;
+  if (tree) {
+    const fromTree = await extractComponentFromTree(tree);
     if (typeof fromTree === "function") return fromTree;
   }
 
   return undefined;
 }
 
-function extractComponentFromTree(tree) {
+async function extractComponentFromTree(tree) {
   if (!tree || !Array.isArray(tree)) return undefined;
   const components = tree[2];
   if (components && components.page) {
     const pageLoader = Array.isArray(components.page) ? components.page[0] : components.page;
     if (typeof pageLoader === "function") {
       try {
-        const res = pageLoader();
+        let res = pageLoader();
+        if (res && typeof res.then === "function") {
+          res = await res;
+        }
         if (typeof res === "function") return res;
         if (res && typeof res.default === "function") return res.default;
         if (res && typeof res.Page === "function") return res.Page;
@@ -218,11 +256,38 @@ function extractComponentFromTree(tree) {
   const parallelRoutes = tree[1];
   if (parallelRoutes && typeof parallelRoutes === "object") {
     for (const sub of Object.values(parallelRoutes)) {
-      const found = extractComponentFromTree(sub);
+      const found = await extractComponentFromTree(sub);
       if (found) return found;
     }
   }
   return undefined;
+}
+
+async function extractLayoutsFromTree(t) {
+  const layouts = [];
+  async function walk(node) {
+    if (!node || !Array.isArray(node)) return;
+    const comps = node[2];
+    if (comps && comps.layout) {
+      const loader = Array.isArray(comps.layout) ? comps.layout[0] : comps.layout;
+      if (typeof loader === "function") {
+        try {
+          let res = loader();
+          if (res && typeof res.then === "function") res = await res;
+          const comp = typeof res === "function" ? res : res?.default;
+          if (typeof comp === "function") layouts.push(comp);
+        } catch {}
+      }
+    }
+    const parallel = node[1];
+    if (parallel && typeof parallel === "object") {
+      for (const sub of Object.values(parallel)) {
+        await walk(sub);
+      }
+    }
+  }
+  await walk(t);
+  return layouts;
 }
 
 /**
@@ -272,15 +337,14 @@ export function describeMissingComponent(mod, entry) {
  * invoke them as functions (not JSX) because this runtime doesn't depend
  * on JSX syntax at module top level.
  */
-async function buildLayoutTree(layoutModules, PageComponent, props) {
-  let node = PageComponent(props);
-  // Apply layouts innermost first — because our `layoutModules` array is
+async function buildLayoutTree(layouts, PageComponent, props) {
+  let node = await PageComponent(props);
+  // Apply layouts innermost first — because our layouts array is
   // root → leaf, we iterate in reverse so the root wraps everything.
-  for (let i = layoutModules.length - 1; i >= 0; i--) {
-    const LayoutComponent = resolveComponent(layoutModules[i]);
+  for (let i = layouts.length - 1; i >= 0; i--) {
+    const LayoutComponent = layouts[i];
     if (typeof LayoutComponent !== "function") continue;
-    const wrapped = LayoutComponent({ ...props, children: node });
-    node = wrapped;
+    node = await LayoutComponent({ ...props, children: node });
   }
   return node;
 }
@@ -309,7 +373,28 @@ async function renderHtmlOrShell(
     assetPrefix: manifest?.assetPrefix,
     basePath: manifest?.basePath,
   };
-  const scripts = bootstrapScriptURLs(entry.bootstrap, assetOpts);
+  let bootstrapChunks = entry.bootstrap;
+  if (!bootstrapChunks || bootstrapChunks.length === 0) {
+    const rawChunks = [];
+    if (Array.isArray(manifest?.rootMainFiles)) {
+      rawChunks.push(...manifest.rootMainFiles);
+    }
+    const cm = clientManifest?.default || clientManifest || {};
+    const clientModules = cm.clientModules || {};
+    for (const mod of Object.values(clientModules)) {
+      if (Array.isArray(mod?.chunks)) {
+        for (const c of mod.chunks) {
+          if (typeof c === "string" && c.endsWith(".js") && !rawChunks.includes(c)) {
+            rawChunks.push(c);
+          }
+        }
+      }
+    }
+    if (rawChunks.length > 0) {
+      bootstrapChunks = rawChunks;
+    }
+  }
+  const scripts = bootstrapScriptURLs(bootstrapChunks, assetOpts);
   // Metadata before stylesheets: <title>/<meta> are what a crawler or preview
   // bot reads out of a truncated head, so they should never sit behind a
   // stylesheet list.
@@ -345,7 +430,7 @@ async function renderHtmlOrShell(
   }
 
   safeCancel(primary);
-  return wrapFlightInHtmlShell(fallback, reqCtx, headMarkup);
+  return wrapFlightInHtmlShell(fallback, reqCtx, headMarkup, scripts);
 }
 
 // Cancelling a stream that renderToHtml already locked throws synchronously;
@@ -360,24 +445,30 @@ function safeCancel(stream) {
 }
 
 /**
- * Minimal HTML shell around the Flight stream. Enough to give a browser
- * something to render. The shell does three things:
- *   1. Sets the doctype + charset so encoding is unambiguous.
- *   2. Emits a placeholder <div id="__next"> for hydration targets.
- *   3. Inlines the Flight payload inside <script id="__FLIGHT_DATA__">
- *      so a future hydration bootstrap can consume it.
+ * HTML shell around the Flight stream that enables client-side hydration.
  *
- * Real Next clients hydrate from RSC payloads + chunk preloads that match
- * the shipped webpack chunks; we don't emit those yet. This shell at
- * least shows "the server is alive" and puts the Flight data where a
- * follow-up client bootstrap can find it.
+ * Emits:
+ *   1. Sets doctype + charset + stylesheets + resolved metadata tags.
+ *   2. Emits placeholder <div id="__next"> for hydration targets.
+ *   3. Frames Flight chunks into (self.__next_f=self.__next_f||[]).push(...)
+ *      scripts so Next's client hydrator receives the component payload.
+ *   4. Emits bootstrap <script src="..." async> tags for webpack, main-app,
+ *      and page chunks so the browser executes Next.js hydration.
  */
-function wrapFlightInHtmlShell(flightStream, reqCtx, headMarkup = "") {
+function wrapFlightInHtmlShell(flightStream, reqCtx, headMarkup = "", scripts = []) {
   const encoder = new TextEncoder();
+  const decoder = new TextDecoder("utf-8");
+  const nonce = reqCtx?.nonce;
+  const nonceAttr = nonce ? ` nonce="${nonce}"` : "";
+
   const shellPrefix = encoder.encode(
-    `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${headMarkup}</head><body><div id="__next"></div><script id="__NEXTCOMPILE_FLIGHT__" type="application/x-nextcompile-flight">`,
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${headMarkup}</head><body><div id="__next"></div><script${nonceAttr}>(self.__next_f=self.__next_f||[]).push([0])</script>`,
   );
-  const shellSuffix = encoder.encode(`</script></body></html>`);
+
+  const scriptTags = (scripts || [])
+    .map((src) => `<script src="${src}" async${nonceAttr}></script>`)
+    .join("");
+  const shellSuffix = encoder.encode(`${scriptTags}</body></html>`);
 
   return new ReadableStream({
     async start(controller) {
@@ -386,7 +477,20 @@ function wrapFlightInHtmlShell(flightStream, reqCtx, headMarkup = "") {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        controller.enqueue(value);
+        const text = decoder.decode(value, { stream: true });
+        if (text) {
+          const chunkScript = `<script${nonceAttr}>(self.__next_f=self.__next_f||[]).push([1,${htmlEscapeJsonString(
+            JSON.stringify(text),
+          )}])</script>`;
+          controller.enqueue(encoder.encode(chunkScript));
+        }
+      }
+      const tail = decoder.decode();
+      if (tail) {
+        const chunkScript = `<script${nonceAttr}>(self.__next_f=self.__next_f||[]).push([1,${htmlEscapeJsonString(
+          JSON.stringify(tail),
+        )}])</script>`;
+        controller.enqueue(encoder.encode(chunkScript));
       }
       controller.enqueue(shellSuffix);
       controller.close();

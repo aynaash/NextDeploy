@@ -84,7 +84,7 @@ func ScanCompiledServer(ctx context.Context, standaloneDir string, payload Paylo
 	// only walk up the tree for confirmed page kinds.
 	refs = attachClientManifests(refs, standaloneDir, classifyRoot)
 	refs = attachLayoutChains(refs, standaloneDir, classifyRoot)
-	refs = attachBootstrapChunks(refs, classifyRoot)
+	refs = attachBootstrapChunks(refs, classifyRoot, standaloneDir)
 	refs = attachStylesheets(refs, standaloneDir)
 
 	sort.Slice(refs, func(i, j int) bool {
@@ -420,14 +420,15 @@ func analyzeModule(standaloneDir, classifyRoot, absPath string) (ModuleRef, erro
 	src := string(data)
 
 	classifySlash := filepath.ToSlash(classifyRel)
+	kind := kindFromCompiled(classifySlash)
 	ref := ModuleRef{
 		CompiledPath: filepath.ToSlash(displayRel),
 		RoutePath:    routePathFromCompiled(classifySlash),
-		Kind:         kindFromCompiled(classifySlash),
+		Kind:         kind,
 		ByteSize:     info.Size(),
 		EnvRefs:      uniqueStrings(envRefPattern.FindAllStringSubmatch(src, -1), 1),
 		FetchTargets: uniqueStrings(fetchURLPattern.FindAllStringSubmatch(src, -1), 1),
-		UsesRSC:      usesRSCPattern.MatchString(src),
+		UsesRSC:      ((kind == RouteKindPage || kind == RouteKindLayout) && strings.HasPrefix(strings.TrimPrefix(classifySlash, "server/"), "app/")) || usesRSCPattern.MatchString(src),
 		HasActions:   hasActionsPattern.MatchString(src),
 		PPREnabled:   pprPattern.MatchString(src),
 		UsesAfter:    afterPattern.MatchString(src),
@@ -454,10 +455,11 @@ var (
 	// not matched here; they'd produce too many false positives.
 	fetchURLPattern = regexp.MustCompile(`\bfetch\(\s*['"]([a-z][a-z0-9+.-]*://[^'"]+)['"]`)
 
-	// Flight / RSC markers. Two tells:
+	// Flight / RSC markers. Tells:
 	//   - "use client" pragma preserved in compiled output
 	//   - imports from react-server-dom-* runtime modules
-	usesRSCPattern = regexp.MustCompile(`"use client"|react-server-dom-`)
+	//   - client/server reference registrations in Next 15/16 App Router
+	usesRSCPattern = regexp.MustCompile(`"use client"|react-server-dom-|registerClientReference|AppPageRouteModule`)
 
 	// Server Actions: compiled modules tag their action exports with a
 	// specific comment marker plus a $$typeof reference. We look for either.
@@ -652,21 +654,63 @@ type appBuildManifest struct {
 	Pages map[string][]string `json:"pages"`
 }
 
+// buildManifestData is used as a fallback when app-build-manifest.json is absent (e.g. Next.js 16+ standalone).
+type buildManifestData struct {
+	RootMainFiles []string `json:"rootMainFiles"`
+}
+
+type clientRefManifestData struct {
+	ClientModules map[string]struct {
+		Chunks []interface{} `json:"chunks"`
+	} `json:"clientModules"`
+}
+
 // attachBootstrapChunks fills ModuleRef.BootstrapChunks for every page ref from
 // app-build-manifest.json. classifyRoot is the .next dir (parent of server/).
 //
-// An absent or unreadable manifest is non-fatal, matching its sibling passes: a
-// production build always emits one, but a partial or exotic build should
-// degrade to the current no-bootstrap shell rather than fail the compile.
-func attachBootstrapChunks(refs []ModuleRef, classifyRoot string) []ModuleRef {
+// An absent or unreadable manifest is non-fatal: Next.js 16+ standalone builds
+// omit app-build-manifest.json, in which case we synthesize BootstrapChunks
+// from build-manifest.json (rootMainFiles) and each route's page_client-reference-manifest.
+func attachBootstrapChunks(refs []ModuleRef, classifyRoot string, standaloneDirs ...string) []ModuleRef {
 	manifestPath := filepath.Join(classifyRoot, "app-build-manifest.json")
-	data, err := os.ReadFile(manifestPath) // #nosec G304 — reading our own build output
-	if err != nil {
-		return refs
+	if data, err := os.ReadFile(manifestPath); err == nil {
+		var m appBuildManifest
+		if err := json.Unmarshal(data, &m); err == nil && len(m.Pages) > 0 {
+			for i := range refs {
+				r := &refs[i]
+				if r.Kind != RouteKindPage {
+					continue
+				}
+				r.BootstrapChunks = bootstrapChunksForRoute(r.CompiledPath, m.Pages)
+			}
+			return refs
+		}
 	}
-	var m appBuildManifest
-	if err := json.Unmarshal(data, &m); err != nil || m.Pages == nil {
-		return refs
+
+	// Fallback for Next.js 16+ standalone builds lacking app-build-manifest.json.
+	var standaloneDir string
+	if len(standaloneDirs) > 0 {
+		standaloneDir = standaloneDirs[0]
+	}
+	buildManifestCandidates := []string{
+		filepath.Join(classifyRoot, "build-manifest.json"),
+	}
+	if standaloneDir != "" {
+		buildManifestCandidates = append(buildManifestCandidates,
+			filepath.Join(standaloneDir, ".next", "build-manifest.json"),
+			filepath.Join(standaloneDir, "build-manifest.json"),
+		)
+	}
+
+	var rootMainFiles []string
+	for _, cand := range buildManifestCandidates {
+		if data, err := os.ReadFile(cand); err == nil {
+			var bm buildManifestData
+			if err := json.Unmarshal(data, &bm); err == nil && len(bm.RootMainFiles) > 0 {
+				rootMainFiles = bm.RootMainFiles
+				break
+			}
+		}
 	}
 
 	for i := range refs {
@@ -674,8 +718,65 @@ func attachBootstrapChunks(refs []ModuleRef, classifyRoot string) []ModuleRef {
 		if r.Kind != RouteKindPage {
 			continue
 		}
-		r.BootstrapChunks = bootstrapChunksForRoute(r.CompiledPath, m.Pages)
+		if len(r.BootstrapChunks) > 0 {
+			continue
+		}
+
+		var clientManifestCandidates []string
+		if r.ClientManifestPath != "" && standaloneDir != "" {
+			clientManifestCandidates = append(clientManifestCandidates, filepath.Join(standaloneDir, r.ClientManifestPath))
+		}
+		if standaloneDir != "" {
+			abs := filepath.Join(standaloneDir, r.CompiledPath)
+			dir := filepath.Dir(abs)
+			base := filepath.Base(abs)
+			stem := strings.TrimSuffix(base, filepath.Ext(base))
+			clientManifestCandidates = append(clientManifestCandidates,
+				filepath.Join(dir, stem+"_client-reference-manifest.json"),
+				filepath.Join(dir, stem+"_client-reference-manifest.js"),
+			)
+		}
+
+		seen := make(map[string]struct{})
+		var chunks []string
+		for _, f := range rootMainFiles {
+			if _, dup := seen[f]; !dup {
+				seen[f] = struct{}{}
+				chunks = append(chunks, f)
+			}
+		}
+
+		for _, cand := range clientManifestCandidates {
+			data, err := os.ReadFile(cand)
+			if err != nil {
+				continue
+			}
+			if strings.HasSuffix(cand, ".js") {
+				if extracted, ok := extractRSCManifestJSON(data); ok {
+					data = extracted
+				}
+			}
+			var cm clientRefManifestData
+			if err := json.Unmarshal(data, &cm); err == nil && len(cm.ClientModules) > 0 {
+				for _, mod := range cm.ClientModules {
+					for _, c := range mod.Chunks {
+						if str, ok := c.(string); ok && strings.HasSuffix(str, ".js") {
+							if _, dup := seen[str]; !dup {
+								seen[str] = struct{}{}
+								chunks = append(chunks, str)
+							}
+						}
+					}
+				}
+				break
+			}
+		}
+
+		if len(chunks) > 0 {
+			r.BootstrapChunks = chunks
+		}
 	}
+
 	return refs
 }
 

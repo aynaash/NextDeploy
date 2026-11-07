@@ -59,6 +59,7 @@ export async function dispatch(request, env, ctx, tables) {
   // app code that can't import runtime internals at next-build time. Read it
   // via globalThis.__nextdeployEnv (the scaffold ships a typed getEnv() helper).
   globalThis.__nextdeployEnv = env;
+  pushEnvIntoProcess(env);
 
   try {
     // Protection guard runs before everything else (IP / rate-limit / auth),
@@ -234,7 +235,14 @@ async function invokeCompiled(entry, request, env, ctx, routeCtx, url, manifest)
  */
 async function invokeAPI(mod, request, env, ctx, routeCtx, url) {
   const method = request.method.toUpperCase();
-  const handler = mod[method] || mod.default;
+  const handlers = mod.routeModule?.userland || mod.routeModule?.methods || mod;
+  let handler = handlers[method] || mod[method] || mod.default;
+
+  // Next.js auto-implements HEAD via GET if GET exists
+  if (!handler && method === "HEAD" && (handlers.GET || mod.GET)) {
+    handler = handlers.GET || mod.GET;
+  }
+
   if (typeof handler !== "function") {
     return new Response("Method Not Allowed", { status: 405 });
   }
@@ -242,8 +250,12 @@ async function invokeAPI(mod, request, env, ctx, routeCtx, url) {
   pushEnvIntoProcess(env);
   const reqCtx = createRequestContext(request, env, url, routeCtx.params, ctx);
 
+  const rawParams = routeCtx.params || {};
+  const params = Promise.resolve(rawParams);
+  Object.assign(params, rawParams);
+
   return runWithContext(reqCtx, async () => {
-    const result = await handler(request, { params: routeCtx.params || {} });
+    const result = await handler(request, { params });
     return coerceToResponse(result, reqCtx);
   });
 }
@@ -338,9 +350,12 @@ function pushEnvIntoProcess(env) {
   if (typeof globalThis.process === "undefined") {
     globalThis.process = { env: {} };
   }
+  if (!globalThis.process.env) {
+    globalThis.process.env = {};
+  }
   for (const key of Object.keys(env)) {
     const val = env[key];
-    if (typeof val === "string" && globalThis.process.env[key] === undefined) {
+    if (typeof val === "string") {
       globalThis.process.env[key] = val;
     }
   }

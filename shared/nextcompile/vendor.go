@@ -130,34 +130,51 @@ func VendorRSC(standaloneDir, bundleDir string) (*VendoredPackage, error) {
 // workspace or monorepo. Cap the walk at 5 levels to avoid unbounded
 // upward search in pathological filesystems.
 //
+// Standalone file tracing frequently strips edge builds from node_modules,
+// leaving behind only Node-targeted builds in .next/standalone. When multiple
+// copies exist (e.g. stripped copy in standaloneDir, full copy in the project
+// root), we prioritize a copy that actually contains the required edge build.
+//
 // Symlink-transparent by design — pnpm's flat .pnpm store resolves
 // because os.Stat follows symlinks.
 func locateRSCPackage(standaloneDir string) (string, error) {
-	current := standaloneDir
-	for range 5 {
-		candidate := filepath.Join(current, "node_modules", "react-server-dom-webpack")
-		if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
-			return candidate, nil
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			break // hit root
-		}
-		current = parent
-	}
-	if wd, err := os.Getwd(); err == nil {
-		current = wd
+	var firstPkg string
+	check := func(dir string) (string, bool) {
+		current := dir
 		for range 5 {
-			candidate := filepath.Join(current, "node_modules", "react-server-dom-webpack")
-			if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
-				return candidate, nil
+			candidates := []string{
+				filepath.Join(current, "node_modules", "react-server-dom-webpack"),
+				filepath.Join(current, "node_modules", "next", "dist", "compiled", "react-server-dom-webpack"),
+			}
+			for _, candidate := range candidates {
+				if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
+					if _, _, err := findEdgeBuild(candidate, "react-server-dom-webpack", "server.edge"); err == nil {
+						return candidate, true
+					}
+					if firstPkg == "" {
+						firstPkg = candidate
+					}
+				}
 			}
 			parent := filepath.Dir(current)
 			if parent == current {
-				break
+				break // hit root
 			}
 			current = parent
 		}
+		return "", false
+	}
+
+	if match, ok := check(standaloneDir); ok {
+		return match, nil
+	}
+	if wd, err := os.Getwd(); err == nil {
+		if match, ok := check(wd); ok {
+			return match, nil
+		}
+	}
+	if firstPkg != "" {
+		return firstPkg, nil
 	}
 	return "", ErrRSCPackageNotFound
 }
@@ -304,24 +321,23 @@ func detectModuleFormat(path string) (string, error) {
 
 // locateReactDOMPackage mirrors locateRSCPackage for the react-dom package.
 func locateReactDOMPackage(standaloneDir string) (string, error) {
-	current := standaloneDir
-	for range 5 {
-		candidate := filepath.Join(current, "node_modules", "react-dom")
-		if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
-			return candidate, nil
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			break
-		}
-		current = parent
-	}
-	if wd, err := os.Getwd(); err == nil {
-		current = wd
+	var firstPkg string
+	check := func(dir string) (string, bool) {
+		current := dir
 		for range 5 {
-			candidate := filepath.Join(current, "node_modules", "react-dom")
-			if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
-				return candidate, nil
+			candidates := []string{
+				filepath.Join(current, "node_modules", "react-dom"),
+				filepath.Join(current, "node_modules", "next", "dist", "compiled", "react-dom"),
+			}
+			for _, candidate := range candidates {
+				if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
+					if _, _, err := findEdgeBuild(candidate, "react-dom", "server.edge"); err == nil {
+						return candidate, true
+					}
+					if firstPkg == "" {
+						firstPkg = candidate
+					}
+				}
 			}
 			parent := filepath.Dir(current)
 			if parent == current {
@@ -329,6 +345,19 @@ func locateReactDOMPackage(standaloneDir string) (string, error) {
 			}
 			current = parent
 		}
+		return "", false
+	}
+
+	if match, ok := check(standaloneDir); ok {
+		return match, nil
+	}
+	if wd, err := os.Getwd(); err == nil {
+		if match, ok := check(wd); ok {
+			return match, nil
+		}
+	}
+	if firstPkg != "" {
+		return firstPkg, nil
 	}
 	return "", ErrReactDOMPackageNotFound
 }

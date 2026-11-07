@@ -8,36 +8,36 @@ import assert from "node:assert";
 
 import { resolveComponent, describeMissingComponent } from "./rsc.mjs";
 
-test("resolveComponent finds the component on default/Page/Component", () => {
+test("resolveComponent finds the component on default/Page/Component", async () => {
   const fn = () => null;
-  assert.strictEqual(resolveComponent({ default: fn }), fn);
-  assert.strictEqual(resolveComponent({ Page: fn }), fn);
-  assert.strictEqual(resolveComponent({ Component: fn }), fn);
-  assert.strictEqual(resolveComponent({ default: fn, Page: () => 1 }), fn, "default wins");
+  assert.strictEqual(await resolveComponent({ default: fn }), fn);
+  assert.strictEqual(await resolveComponent({ Page: fn }), fn);
+  assert.strictEqual(await resolveComponent({ Component: fn }), fn);
+  assert.strictEqual(await resolveComponent({ default: fn, Page: () => 1 }), fn, "default wins");
 });
 
-test("resolveComponent extracts component from routeModule userland and tree", () => {
+test("resolveComponent extracts component from routeModule userland and tree", async () => {
   const fn = () => null;
-  assert.strictEqual(resolveComponent({ routeModule: { userland: { default: fn } } }), fn);
-  assert.strictEqual(resolveComponent({ userland: { Page: fn } }), fn);
+  assert.strictEqual(await resolveComponent({ routeModule: { userland: { default: fn } } }), fn);
+  assert.strictEqual(await resolveComponent({ userland: { Page: fn } }), fn);
   assert.strictEqual(
-    resolveComponent({
+    await resolveComponent({
       tree: ["", {}, { page: [() => ({ default: fn })] }],
     }),
     fn,
   );
   assert.strictEqual(
-    resolveComponent({
+    await resolveComponent({
       tree: ["", { children: ["dashboard", {}, { page: [() => fn] }] }],
     }),
     fn,
   );
 });
 
-test("resolveComponent is undefined for modules with none of them", () => {
-  assert.strictEqual(resolveComponent({}), undefined);
-  assert.strictEqual(resolveComponent(null), undefined);
-  assert.strictEqual(resolveComponent(undefined), undefined);
+test("resolveComponent is undefined for modules with none of them", async () => {
+  assert.strictEqual(await resolveComponent({}), undefined);
+  assert.strictEqual(await resolveComponent(null), undefined);
+  assert.strictEqual(await resolveComponent(undefined), undefined);
 });
 
 // The highest-probability first failure of the whole RSC path: a production

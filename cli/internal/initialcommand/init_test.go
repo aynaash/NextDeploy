@@ -83,3 +83,67 @@ func TestRunInitCommandCloudflareScaffoldFlagsAreNonInteractive(t *testing.T) {
 		t.Fatal("generated config does not target Cloudflare")
 	}
 }
+
+func TestRunInitCommand_NoNextProject_ScaffoldsVPS(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("target", "vps", "")
+	cmd.Flags().String("platform", "", "")
+	cmd.Flags().String("mode", "", "")
+	cmd.Flags().String("db", "", "")
+
+	if err := RunInitCommand(cmd, nil); err != nil {
+		t.Fatalf("RunInitCommand VPS: %v", err)
+	}
+
+	for _, expectedFile := range []string{
+		"package.json", "next.config.mjs", "tsconfig.json", "Dockerfile",
+		"nextdeploy.yml", "app/globals.css", "app/page.tsx", "app/api/health/route.ts",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, expectedFile)); err != nil {
+			t.Errorf("expected scaffolded file %s: %v", expectedFile, err)
+		}
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "nextdeploy.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "target: vps") {
+		t.Errorf("expected target: vps in nextdeploy.yml:\n%s", string(content))
+	}
+}
+
+func TestRunInitCommand_NoNextProject_ScaffoldsAWS(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("target", "aws", "")
+	cmd.Flags().String("platform", "", "")
+	cmd.Flags().String("mode", "", "")
+	cmd.Flags().String("db", "", "")
+
+	if err := RunInitCommand(cmd, nil); err != nil {
+		t.Fatalf("RunInitCommand AWS: %v", err)
+	}
+
+	for _, expectedFile := range []string{
+		"package.json", "next.config.mjs", "tsconfig.json",
+		"nextdeploy.yml", "app/globals.css", "app/page.tsx", "app/api/health/route.ts",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, expectedFile)); err != nil {
+			t.Errorf("expected scaffolded file %s: %v", expectedFile, err)
+		}
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "nextdeploy.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "target: serverless") || !strings.Contains(string(content), "provider: aws") {
+		t.Errorf("expected AWS serverless in nextdeploy.yml:\n%s", string(content))
+	}
+}

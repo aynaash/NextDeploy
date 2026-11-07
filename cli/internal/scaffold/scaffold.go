@@ -31,39 +31,73 @@ const (
 	DBBYO DBVariant = "byo" // bring-your-own Postgres via Hyperdrive
 )
 
+// Platform selects the deployment target platform.
+type Platform string
+
+const (
+	PlatformCloudflare Platform = "cloudflare"
+	PlatformVPS        Platform = "vps"
+	PlatformAWS        Platform = "aws"
+)
+
 // Options configures a scaffold run.
 type Options struct {
-	AppName   string
-	DBVariant DBVariant
-	Dir       string // target directory (created if missing)
+	AppName         string
+	Platform        Platform
+	DBVariant       DBVariant
+	EnableGoSidecar bool
+	Dir             string // target directory (created if missing)
 }
 
 // placeholder tokens replaced in every template file.
 const appNameToken = "__APP_NAME__"
 
-// Scaffold writes the base template plus the db-<variant> overlay into opts.Dir,
-// substituting the app name. Existing files are never overwritten — their paths
-// are returned in `skipped` so the caller can report them. Returns the written
-// (created) paths and the skipped (pre-existing) paths, both sorted.
+// Scaffold writes the base template plus platform overlays into opts.Dir,
+// substituting the app name and platform details. Existing files are never
+// overwritten — their paths are returned in `skipped` so the caller can report
+// them. Returns the written (created) paths and the skipped (pre-existing) paths,
+// both sorted.
 func Scaffold(opts Options) (written, skipped []string, err error) {
 	if opts.AppName == "" {
 		return nil, nil, fmt.Errorf("app name is required")
-	}
-	variant := opts.DBVariant
-	if variant == "" {
-		variant = DBD1
-	}
-	if variant != DBD1 && variant != DBBYO {
-		return nil, nil, fmt.Errorf("unknown db variant %q (want d1 or byo)", variant)
 	}
 	if opts.Dir == "" {
 		return nil, nil, fmt.Errorf("target dir is required")
 	}
 
-	// Overlays applied in order; later sources may add files but never clobber.
-	roots := []string{"templates/base", "templates/db-" + string(variant)}
+	platform := opts.Platform
+	if platform == "" {
+		platform = PlatformCloudflare
+	}
+
+	var roots []string
+	platformName := "Cloudflare Workers"
+	platformSlug := "cloudflare"
+
+	switch platform {
+	case PlatformVPS:
+		platformName = "VPS (Self-Hosted)"
+		platformSlug = "vps"
+		roots = []string{"templates/base", "templates/platform-vps"}
+	case PlatformAWS:
+		platformName = "AWS Serverless"
+		platformSlug = "aws"
+		roots = []string{"templates/base", "templates/platform-aws"}
+	case PlatformCloudflare:
+		variant := opts.DBVariant
+		if variant == "" {
+			variant = DBD1
+		}
+		if variant != DBD1 && variant != DBBYO {
+			return nil, nil, fmt.Errorf("unknown db variant %q (want d1 or byo)", variant)
+		}
+		roots = []string{"templates/base", "templates/platform-cloudflare", "templates/db-" + string(variant)}
+	default:
+		return nil, nil, fmt.Errorf("unknown platform %q (want cloudflare, vps, or aws)", platform)
+	}
+
 	for _, root := range roots {
-		w, s, err := copyTree(root, opts.Dir, opts.AppName)
+		w, s, err := copyTree(root, opts.Dir, opts.AppName, platformName, platformSlug)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -71,11 +105,16 @@ func Scaffold(opts Options) (written, skipped []string, err error) {
 		skipped = append(skipped, s...)
 	}
 
-	// The deploy workflow is rendered, not templated. It used to be a static
-	// file here that had drifted from `generate-ci`'s output — different
-	// package manager, different secrets, unpinned CLI — so scaffolding and
-	// then running generate-ci produced two workflows and two deploys per
-	// push. Both now come from cicd.RenderDeployWorkflow.
+	// For VPS, adjust sidecar setting if explicitly disabled.
+	if platform == PlatformVPS && !opts.EnableGoSidecar {
+		cfgPath := filepath.Join(opts.Dir, "nextdeploy.yml")
+		if data, err := os.ReadFile(cfgPath); err == nil {
+			modified := strings.Replace(string(data), "enabled: true # High-performance Go sidecar", "enabled: false # High-performance Go sidecar", 1)
+			_ = os.WriteFile(cfgPath, []byte(modified), 0o640)
+		}
+	}
+
+	// The deploy workflow is rendered, not templated.
 	wfPath := filepath.Join(opts.Dir, filepath.FromSlash(cicd.WorkflowPath))
 	if _, statErr := os.Stat(wfPath); statErr == nil {
 		skipped = append(skipped, wfPath)
@@ -94,7 +133,7 @@ func Scaffold(opts Options) (written, skipped []string, err error) {
 	return written, skipped, nil
 }
 
-func copyTree(root, destDir, appName string) (written, skipped []string, err error) {
+func copyTree(root, destDir, appName, platformName, platformSlug string) (written, skipped []string, err error) {
 	walkErr := fs.WalkDir(tmplFS, root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -118,6 +157,8 @@ func copyTree(root, destDir, appName string) (written, skipped []string, err err
 			return fmt.Errorf("read template %s: %w", p, err)
 		}
 		out := strings.ReplaceAll(string(data), appNameToken, appName)
+		out = strings.ReplaceAll(out, "__PLATFORM_NAME__", platformName)
+		out = strings.ReplaceAll(out, "__PLATFORM_SLUG__", platformSlug)
 
 		if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 			return err
@@ -138,7 +179,7 @@ func TemplateFiles(variant DBVariant) ([]string, error) {
 		variant = DBD1
 	}
 	seen := map[string]bool{}
-	for _, root := range []string{"templates/base", "templates/db-" + string(variant)} {
+	for _, root := range []string{"templates/base", "templates/platform-cloudflare", "templates/db-" + string(variant)} {
 		err := fs.WalkDir(tmplFS, root, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err

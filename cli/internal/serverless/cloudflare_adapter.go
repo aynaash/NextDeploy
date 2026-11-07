@@ -260,8 +260,7 @@ func shortenInputPath(p string) string {
 // actually work, the fix is to install it as a real dependency, not
 // remove it from this list.
 var optionalExternalPackages = []string{
-	"@opentelemetry/api", // Next's tracer fallback when tracing isn't enabled
-	"critters",           // CSS inlining; only required when experimental.optimizeCss is on
+	"critters", // CSS inlining; only required when experimental.optimizeCss is on
 	"next/dist/compiled/@ampproject/toolbox-optimizer", // AMP optimizer; only for AMP pages
 	// Required inside Next's *pages* runtime (pages.runtime.prod.js) and its
 	// externalized app-page runtime, neither of which executes on Workers.
@@ -306,16 +305,67 @@ func runEsbuild(ctx context.Context, entry, out, metaPath, cwd string, log *shar
 	runtimeRoot := filepath.Join(cwd, ".nextdeploy-cf", "_nextdeploy", "runtime")
 
 	asyncStorageShim := filepath.Join(runtimeRoot, "next_shims", "async_storages.mjs")
+	fastSetImmediateShim := filepath.Join(runtimeRoot, "next_shims", "fast_set_immediate.mjs")
 	alias := map[string]string{
 		"next/cache":   filepath.Join(runtimeRoot, "next_shims", "cache.mjs"),
 		"next/headers": filepath.Join(runtimeRoot, "next_shims", "headers.mjs"),
 		"next/server":  filepath.Join(runtimeRoot, "next_shims", "server.mjs"),
-		"next/dist/server/app-render/work-async-storage.external.js":       asyncStorageShim,
-		"next/dist/server/app-render/work-async-storage.external":          asyncStorageShim,
-		"next/dist/server/app-render/action-async-storage.external.js":     asyncStorageShim,
-		"next/dist/server/app-render/action-async-storage.external":        asyncStorageShim,
-		"next/dist/server/app-render/after-task-async-storage.external.js": asyncStorageShim,
-		"next/dist/server/app-render/after-task-async-storage.external":    asyncStorageShim,
+		"next/dist/server/app-render/work-async-storage.external.js":                  asyncStorageShim,
+		"next/dist/server/app-render/work-async-storage.external":                     asyncStorageShim,
+		"next/dist/server/app-render/action-async-storage.external.js":                asyncStorageShim,
+		"next/dist/server/app-render/action-async-storage.external":                   asyncStorageShim,
+		"next/dist/server/app-render/after-task-async-storage.external.js":            asyncStorageShim,
+		"next/dist/server/app-render/after-task-async-storage.external":               asyncStorageShim,
+		"next/dist/server/node-environment-extensions/fast-set-immediate.external.js": fastSetImmediateShim,
+		"next/dist/server/node-environment-extensions/fast-set-immediate.external":    fastSetImmediateShim,
+	}
+
+	var nodePaths []string
+	if nm := filepath.Join(cwd, "node_modules"); nm != "" {
+		if info, err := os.Stat(nm); err == nil && info.IsDir() {
+			nodePaths = append(nodePaths, nm)
+		}
+	}
+	if wd, err := os.Getwd(); err == nil {
+		curr := wd
+		for range 5 {
+			nm := filepath.Join(curr, "node_modules")
+			if info, err := os.Stat(nm); err == nil && info.IsDir() {
+				nodePaths = append(nodePaths, nm)
+			}
+			parent := filepath.Dir(curr)
+			if parent == curr {
+				break
+			}
+			curr = parent
+		}
+	}
+
+	for _, np := range nodePaths {
+		if _, ok := alias["react"]; !ok {
+			candidateServer := filepath.Join(np, "react", "react.react-server.js")
+			candidate := filepath.Join(np, "react")
+			if _, err := os.Stat(candidateServer); err == nil {
+				alias["react"] = candidateServer
+			} else if _, err := os.Stat(candidate); err == nil {
+				alias["react"] = candidate
+			}
+		}
+		if _, ok := alias["react-dom"]; !ok {
+			candidate := filepath.Join(np, "react-dom")
+			if _, err := os.Stat(candidate); err == nil {
+				alias["react-dom"] = candidate
+			}
+		}
+		if _, ok := alias["@opentelemetry/api"]; !ok {
+			candidate := filepath.Join(np, "@opentelemetry", "api")
+			if _, err := os.Stat(candidate); err == nil {
+				alias["@opentelemetry/api"] = candidate
+			}
+		}
+	}
+	if _, ok := alias["@opentelemetry/api"]; !ok {
+		alias["@opentelemetry/api"] = "next/dist/compiled/@opentelemetry/api"
 	}
 
 	externals := append([]string{"node:*", "cloudflare:*"}, optionalExternalPackages...)
@@ -329,8 +379,9 @@ func runEsbuild(ctx context.Context, entry, out, metaPath, cwd string, log *shar
 		Format:      api.FormatESModule,
 		Target:      api.ESNext,
 		MainFields:  []string{"module", "main"},
-		Conditions:  []string{"workerd", "worker", "node"},
+		Conditions:  []string{"react-server", "workerd", "worker", "node"},
 		External:    externals,
+		NodePaths:   nodePaths,
 		Loader: map[string]api.Loader{
 			".node": api.LoaderCopy,
 			".json": api.LoaderJSON,
@@ -340,9 +391,15 @@ func runEsbuild(ctx context.Context, entry, out, metaPath, cwd string, log *shar
 		LegalComments:    api.LegalCommentsNone,
 		Metafile:         true,
 		Alias:            alias,
-		AbsWorkingDir:    cwd,
-		Outfile:          out,
-		Write:            true,
+		Banner: map[string]string{
+			"js": "var __dirname = \"/\"; var __filename = \"/worker.mjs\"; globalThis.__dirname = \"/\"; globalThis.__filename = \"/worker.mjs\"; process.env.NEXT_RUNTIME = process.env.NEXT_RUNTIME || \"edge\";",
+		},
+		Plugins: []api.Plugin{
+			nodeBuiltinsPlugin(),
+		},
+		AbsWorkingDir: cwd,
+		Outfile:       out,
+		Write:         true,
 	})
 
 	if len(result.Errors) > 0 {
@@ -361,4 +418,135 @@ func runEsbuild(ctx context.Context, entry, out, metaPath, cwd string, log *shar
 	}
 
 	return nil
+}
+
+var nativeNodeModules = map[string]bool{
+	"_stream_duplex":      true,
+	"_stream_passthrough": true,
+	"_stream_readable":    true,
+	"_stream_transform":   true,
+	"_stream_writable":    true,
+	"_tls_common":         true,
+	"_tls_wrap":           true,
+	"assert":              true,
+	"assert/strict":       true,
+	"async_hooks":         true,
+	"buffer":              true,
+	"constants":           true,
+	"crypto":              true,
+	"diagnostics_channel": true,
+	"dns":                 true,
+	"dns/promises":        true,
+	"events":              true,
+	"net":                 true,
+	"path":                true,
+	"path/posix":          true,
+	"path/win32":          true,
+	"querystring":         true,
+	"module":              true,
+	"stream":              true,
+	"stream/consumers":    true,
+	"stream/promises":     true,
+	"stream/web":          true,
+	"string_decoder":      true,
+	"sys":                 true,
+	"timers":              true,
+	"timers/promises":     true,
+	"tls":                 true,
+	"url":                 true,
+	"util":                true,
+	"util/types":          true,
+	"zlib":                true,
+}
+
+var stubNodeModules = map[string]bool{
+	"child_process":      true,
+	"cluster":            true,
+	"console":            true,
+	"dgram":              true,
+	"domain":             true,
+	"fs":                 true,
+	"fs/promises":        true,
+	"http":               true,
+	"http2":              true,
+	"https":              true,
+	"inspector":          true,
+	"inspector/promises": true,
+	"os":                 true,
+	"perf_hooks":         true,
+	"punycode":           true,
+	"readline":           true,
+	"readline/promises":  true,
+	"repl":               true,
+	"trace_events":       true,
+	"tty":                true,
+	"v8":                 true,
+	"vm":                 true,
+	"wasi":               true,
+	"worker_threads":     true,
+}
+
+// nodeBuiltinsPlugin handles Node.js built-ins in the Worker bundle:
+//  1. Modules natively supported by Cloudflare Workers (workerd) via nodejs_compat
+//     (like util, path, crypto, buffer, http) are mapped to ESM bridge modules importing "node:<mod>".
+//  2. Modules not available in workerd (like fs, child_process) are stubbed with empty modules
+//     so require() calls inside dead code / try-catch do not break Cloudflare's upload validation.
+func nodeBuiltinsPlugin() api.Plugin {
+	return api.Plugin{
+		Name: "node-builtins",
+		Setup: func(build api.PluginBuild) {
+			build.OnResolve(api.OnResolveOptions{Filter: `^(node:|[a-z0-9_/-]+$)`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				specifier := strings.TrimPrefix(args.Path, "node:")
+				if nativeNodeModules[specifier] {
+					prefixed := "node:" + specifier
+					if args.Kind == api.ResolveJSRequireCall {
+						return api.OnResolveResult{
+							Path:      prefixed,
+							Namespace: "node-native",
+						}, nil
+					}
+					return api.OnResolveResult{
+						Path:     prefixed,
+						External: true,
+					}, nil
+				}
+				if stubNodeModules[specifier] {
+					return api.OnResolveResult{
+						Path:      specifier,
+						Namespace: "node-stub",
+					}, nil
+				}
+				return api.OnResolveResult{}, nil
+			})
+
+			build.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "node-native"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				contents := fmt.Sprintf("import * as mod from %q;\nexport default (mod.default ?? mod);\nexport * from %q;\n", args.Path, args.Path)
+				return api.OnLoadResult{
+					Contents: &contents,
+					Loader:   api.LoaderJS,
+				}, nil
+			})
+
+			build.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "node-stub"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				contents := `
+const stub = new Proxy(() => {}, {
+	get: (_target, prop) => {
+		if (prop === '__esModule') return true;
+		if (prop === 'default') return stub;
+		if (prop === 'STATUS_CODES') return {};
+		if (prop === 'METHODS') return [];
+		return stub;
+	},
+	apply: () => stub,
+	construct: () => stub,
+});
+export default stub;
+`
+				return api.OnLoadResult{
+					Contents: &contents,
+					Loader:   api.LoaderJS,
+				}, nil
+			})
+		},
+	}
 }

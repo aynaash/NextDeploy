@@ -1,0 +1,14 @@
+# NextDeploy VPS Configuration
+version: "1.0"
+target: vps
+
+app:
+  name: __APP_NAME__
+  port: 3000
+  go_sidecar:
+    enabled: true # High-performance Go sidecar for prerendered pages and asset caching
+
+server:
+  host: 203.0.113.195 # Replace with your VPS IP address
+  user: root
+  domain: "" # Optional custom domain (e.g. app.example.com) - automatic SSL via Caddy
