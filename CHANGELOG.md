@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/aynaash/NextDeploy/compare/v0.19.0...v0.19.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **cloudflare:** preserve ASSETS binding when user declares non-colliding R2 buckets ([60b82b4](https://github.com/aynaash/NextDeploy/commit/60b82b4468a035ed16bf3d927bd107dfec4b7d36))
+
 ## [0.19.0](https://github.com/aynaash/NextDeploy/compare/v0.18.0...v0.19.0) (2026-11-07)
 
 
