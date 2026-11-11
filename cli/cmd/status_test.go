@@ -57,8 +57,8 @@ func TestStatusTargetResolution(t *testing.T) {
 			want: "vps",
 		},
 		{
-			name: "fallback to metaTarget",
-			cfg:  config.NextDeployConfig{},
+			name:       "fallback to metaTarget",
+			cfg:        config.NextDeployConfig{},
 			metaTarget: "serverless",
 			want:       "serverless",
 		},

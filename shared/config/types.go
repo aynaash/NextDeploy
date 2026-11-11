@@ -10,7 +10,7 @@ import (
 
 type NextDeployConfig struct {
 	Version       string               `yaml:"version"`
-	TargetType    string               `yaml:"target_type"` // e.g., "vps", "serverless"
+	TargetType    string               `yaml:"target_type"`      // e.g., "vps", "serverless"
 	Target        string               `yaml:"target,omitempty"` // alias for target_type
 	App           AppConfig            `yaml:"app"`
 	GoSidecar     *GoSidecarConfig     `yaml:"gosidecar,omitempty"`

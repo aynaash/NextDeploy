@@ -18,9 +18,9 @@ import (
 // Opts configures a single Run invocation.
 type Opts struct {
 	ProjectDir string
-	Cfg *config.NextDeployConfig
-	Force bool
-	Log *shared.Logger
+	Cfg        *config.NextDeployConfig
+	Force      bool
+	Log        *shared.Logger
 }
 
 // Result is the artifact set produced by a Run.
@@ -28,7 +28,7 @@ type Result struct {
 	Payload nextcore.NextCorePayload
 	// "serverless" or "vps". Resolved from Cfg + payload.
 	EffectiveTarget string
-	StandaloneDir string
+	StandaloneDir   string
 
 	// ReleaseDir / TarballPath are populated only on the VPS path —
 	// the artifact `nextdeploy ship` uploads to the remote daemon.
