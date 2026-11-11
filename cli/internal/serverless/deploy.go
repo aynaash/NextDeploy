@@ -122,7 +122,13 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	defer packager.Cleanup()
 
 	log.Info("Splitting assets for optimized Serverless deployment...")
-	pkgResult, err := packager.Package()
+	// find deployment target and skip size checks for Cloudflare (no Lambda ZIP, no size limits)
+
+	target := cfg.Serverless.Provider
+	if target == "" {
+		log.Warn("serverless.provider is required for target_type: serverless (one of: aws, cloudflare)")
+	}
+	pkgResult, err := packager.Package(target)
 	if err != nil {
 		return fmt.Errorf("packaging failed: %w", err)
 	}
@@ -186,7 +192,7 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 		return fmt.Errorf("failed to deploy compute layer: %w", err)
 	}
 	if verbose {
-		log.Info("  Lambda deployment completed in %s", time.Since(t0).Round(time.Millisecond))
+		log.Info("  deployment completed in %s", time.Since(t0).Round(time.Millisecond))
 	}
 
 	// ── 6. Invalidate CDN cache ──────────────────────────────────────────────

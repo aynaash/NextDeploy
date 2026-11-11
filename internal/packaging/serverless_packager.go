@@ -85,7 +85,8 @@ func NewPackager(projectRoot string, payload *nextcore.NextCorePayload) (*Packag
 
 func (p *Packager) Cleanup() { os.RemoveAll(p.tmpDir) }
 
-func (p *Packager) Package() (*PackageResult, error) {
+func (p *Packager) Package(target string) (*PackageResult, error) {
+
 	result := &PackageResult{}
 
 	s3Assets, err := p.collectS3Assets()
@@ -94,20 +95,23 @@ func (p *Packager) Package() (*PackageResult, error) {
 	}
 	result.S3Assets = s3Assets
 
+
 	zipPath := filepath.Join(p.tmpDir, "lambda.zip")
 	size, err := p.buildLambdaZip(zipPath)
-	if err != nil {
-		return nil, err
-	}
+	if target == "cloudflare" {
+		if err != nil {
+			return nil, err
+		}
 
-	result.LambdaZipPath = zipPath
-	result.LambdaZipSize = size
+		result.LambdaZipPath = zipPath
+		result.LambdaZipSize = size
 
-	if size > lambdaZipHardLimitBytes {
-		return nil, fmt.Errorf("lambda zip is %.1fMB — exceeds Lambda's 250MB unzipped limit", float64(size)/(1024*1024))
-	}
-	if size > lambdaZipWarnThresholdBytes {
-		result.SizeWarning = fmt.Sprintf("lambda zip is %.1fMB — approaching Lambda's 250MB limit", float64(size)/(1024*1024))
+		if size > lambdaZipHardLimitBytes {
+			return nil, fmt.Errorf("lambda zip is %.1fMB — exceeds Lambda's 250MB unzipped limit", float64(size)/(1024*1024))
+		}
+		if size > lambdaZipWarnThresholdBytes {
+			result.SizeWarning = fmt.Sprintf("lambda zip is %.1fMB — approaching Lambda's 250MB limit", float64(size)/(1024*1024))
+		}
 	}
 
 	tarPath := filepath.Join(p.tmpDir, "app.tar.gz")

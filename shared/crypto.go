@@ -129,7 +129,7 @@ func GenerateKeyPair() (*KeyPair, error) {
 }
 
 func RunCryptoHealthChecks() error {
-	// TODO:Test ECDH key exchange
+	// TODO:Test #62 ECDH key exchange
 	return nil
 }
 

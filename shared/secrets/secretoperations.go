@@ -93,8 +93,8 @@ func (sm *SecretManager) PrepareSecretsContext() error {
 }
 
 func (sm *SecretManager) SetSecret(name, value string, encrypt bool) error {
-	// TODO: ❗ Enforce naming rules, avoid reserved/system keys.
-	// TODO: 🔐 Store encryption metadata (alg version, salt, iv) with each secret.
+	// TODO: #60 ❗ Enforce naming rules, avoid reserved/system keys.
+	// TODO: #61 🔐 Store encryption metadata (alg version, salt, iv) with each secret.
 
 	sm.mu.Lock()
 	defer sm.mu.Unlock()

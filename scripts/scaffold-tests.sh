@@ -42,7 +42,7 @@ package ${pkg}
 
 import "testing"
 
-// TODO(coverage): replace this scaffold with real tests for the ${pkg} package.
+// TODO(coverage): #57 #56 #55 replace this scaffold with real tests for the ${pkg} package.
 // Goal: 45% total coverage by 2026-09-02. See todo.md and docs/testing.md.
 // Delete the t.Skip below once you add a real assertion.
 func TestScaffold(t *testing.T) {

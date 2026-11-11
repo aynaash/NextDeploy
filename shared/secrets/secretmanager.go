@@ -94,7 +94,7 @@ func NewSecretManager(opts ...Option) (*SecretManager, error) {
 	}
 
 	if sm.cfg == nil {
-		//TODO: the secrets env should be loaded here not config
+		//TODO: #59 #58 the secrets env should be loaded here not config
 		cfg, err := config.Load()
 		if err != nil {
 			return nil, ErrConfigNotFound
