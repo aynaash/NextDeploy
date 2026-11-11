@@ -26,15 +26,15 @@ var (
 var rootCmd = &cobra.Command{
 	Use:     "nextdeploy",
 	Version: shared.Version,
-	Short:   "CLI for automating Next.js deployments on any VPS with a custom daemon.",
+	Short:   "CLI for automating Next.js deployments on Serverless (Cloudflare Workers, AWS Lambda) and VPS.",
 	Long: fmt.Sprintf(`%s %s
 
 %s
-Deploy your Next.js app to *any* VPS — with SSL, logs, and zero downtime.
+Deploy your Next.js app to Serverless (Cloudflare Workers, AWS Lambda) or VPS — with SSL, logs, and zero downtime.
 
 %s
 %s Build Next.js applications seamlessly
-%s Deploy to remote servers in seconds
+%s Deploy to Cloudflare Workers, AWS, or VPS in seconds
 %s Configure automatic SSL + monitoring
 %s Ship production-ready builds with full control
 
@@ -57,9 +57,9 @@ Deploy your Next.js app to *any* VPS — with SSL, logs, and zero downtime.
 		if len(args) == 0 {
 			fmt.Println(highlight("Quick Start:"))
 			fmt.Printf("  %s - Initialize a new project\n", command("nextdeploy init"))
-			fmt.Printf("  %s - Prepare a target server\n", command("nextdeploy prepare"))
+			fmt.Printf("  %s - Prepare a target server (VPS)\n", command("nextdeploy prepare"))
 			fmt.Printf("  %s - Build your app locally\n", command("nextdeploy build"))
-			fmt.Printf("  %s - Deploy your app on the VPS\n\n", command("nextdeploy ship"))
+			fmt.Printf("  %s - Deploy your app (Serverless or VPS)\n\n", command("nextdeploy ship"))
 
 			fmt.Printf("%s %s\n\n",
 				warning("Docs →"), command("https://github.com/aynaash/nextdeploy"),

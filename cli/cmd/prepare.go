@@ -292,6 +292,9 @@ func resolveTargetServers() ([]config.ServerConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
+	if strings.ToLower(cfg.ResolveTargetType("")) == "serverless" {
+		return nil, fmt.Errorf("target is serverless (no VPS servers to prepare). For serverless infrastructure, use 'nextdeploy plan' and 'nextdeploy apply'")
+	}
 	if len(cfg.Servers) == 0 {
 		return nil, fmt.Errorf("no servers configured in nextdeploy.yml")
 	}

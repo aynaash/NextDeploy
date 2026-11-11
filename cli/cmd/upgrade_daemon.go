@@ -37,6 +37,11 @@ func runUpgradeDaemon(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	if strings.ToLower(cfg.ResolveTargetType("")) == "serverless" {
+		log.Info("Deployment target is SERVERLESS — NextDeploy daemon is only used for VPS deployments.")
+		return
+	}
+
 	if len(cfg.Servers) == 0 {
 		log.Error("No servers configured in nextdeploy.yml")
 		os.Exit(1)

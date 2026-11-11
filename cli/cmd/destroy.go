@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/aynaash/nextdeploy/cli/internal/server"
@@ -82,7 +83,7 @@ var destroyCmd = &cobra.Command{
 			appName = meta.AppName
 		}
 
-		switch cfg.TargetType {
+		switch strings.ToLower(cfg.ResolveTargetType("")) {
 		case "serverless":
 			log.Info("Targeting SERVERLESS for destruction...")
 

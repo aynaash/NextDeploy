@@ -91,26 +91,26 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	if err != nil {
 		return err
 	}
-
-	if err := p.Initialize(ctx, cfg); err != nil {
+	if err = p.Initialize(ctx, cfg); err != nil {
 		return fmt.Errorf("provider initialization failed: %w", err)
 	}
 
 	if syncer, ok := p.(interface {
 		SyncResourceState(context.Context, *config.NextDeployConfig) error
 	}); ok {
-		if err := syncer.SyncResourceState(ctx, cfg); err != nil {
+		if err = syncer.SyncResourceState(ctx, cfg); err != nil {
 			return fmt.Errorf("synchronize provider state: %w", err)
 		}
 	}
 
 	// ── 1b. Provision declared resources (idempotent; --no-provision opts out) ─
-	if err := maybeProvisionResources(ctx, p, cfg, provision, log); err != nil {
+	if err = maybeProvisionResources(ctx, p, cfg, provision, log); err != nil {
 		return err
 	}
 
 	// ── 2. Run Packaging ───────────────────────────────────────────────────
-	projectDir, err := os.Getwd()
+	var projectDir string
+	projectDir, err = os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get project root: %w", err)
 	}
@@ -141,7 +141,8 @@ func Deploy(ctx context.Context, cfg *config.NextDeployConfig, meta *nextcore.Ne
 	//      bindings during DeployCompute. This avoids the per-secret PUT
 	//      rate limit (CF error 10013).
 	pushSecrets := func() error {
-		appSecrets, err := loadLocalSecrets(cfg)
+		var appSecrets map[string]string
+		appSecrets, err = loadLocalSecrets(cfg)
 		if err != nil {
 			// Only tolerable when nothing was declared. If the project references
 			// secret sources, a load failure must abort — shipping an empty set

@@ -1,3 +1,4 @@
+// Package daemon is the main daemon at vps
 package daemon
 
 import (
@@ -23,7 +24,7 @@ type AuditLogger struct {
 
 func NewAuditLogger(path string) *AuditLogger {
 	// Ensure log directory exists
-	_ = os.MkdirAll(filepath.Dir(path), 0750)
+	_ = os.MkdirAll(filepath.Dir(path), 0o750)
 	return &AuditLogger{path: path}
 }
 
@@ -40,7 +41,7 @@ func (al *AuditLogger) Log(entry AuditEntry) {
 
 	// Use O_APPEND to keep a history
 	// #nosec G304
-	f, err := os.OpenFile(al.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	f, err := os.OpenFile(al.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("[audit] Error opening audit log: %v", err)
 		return

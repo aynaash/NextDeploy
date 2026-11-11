@@ -1,19 +1,4 @@
 // Package buildflow is the single entry point for "prepare a Next.js
-// project for deployment". Both `nextdeploy build` and `nextdeploy ship`
-// call Run; ship continues on to deploy, build exits.
-//
-// Why this exists: until this consolidation, build and ship had divergent
-// pre-deploy contracts.
-//
-//   - `nextdeploy build` validated output mode + features and produced a
-//     VPS tarball, but never invoked `next build` itself.
-//   - `nextdeploy ship` only ran `next build` for the Cloudflare path
-//     (forcing --webpack), and skipped the build-side validations entirely.
-//
-// The result was inconsistent pre-conditions across the three deployment
-// targets (VPS, AWS Lambda, Cloudflare Worker) and two places where
-// "should we rebuild?" / "is this output valid?" logic lived. Run owns
-// both questions for every target.
 package buildflow
 
 import (
@@ -32,32 +17,17 @@ import (
 
 // Opts configures a single Run invocation.
 type Opts struct {
-	// ProjectDir is the working directory containing package.json and
-	// next.config.*. Defaults to "." when empty.
 	ProjectDir string
-
-	// Cfg drives target-aware behavior. Required.
 	Cfg *config.NextDeployConfig
-
-	// Force bypasses the incremental skip (git-commit unchanged → no
-	// rebuild). Wired to `nextdeploy build --force`. Ship always passes
-	// false because shipping with an unverified-stale build is a footgun.
 	Force bool
-
-	// Log receives lifecycle messages. Required.
 	Log *shared.Logger
 }
 
 // Result is the artifact set produced by a Run.
 type Result struct {
 	Payload nextcore.NextCorePayload
-
-	// EffectiveTarget is the target this build was prepared for —
 	// "serverless" or "vps". Resolved from Cfg + payload.
 	EffectiveTarget string
-
-	// StandaloneDir is the path to .next/standalone. Populated when
-	// OutputMode is standalone (required for serverless, common for VPS).
 	StandaloneDir string
 
 	// ReleaseDir / TarballPath are populated only on the VPS path —
@@ -94,7 +64,12 @@ func Run(ctx context.Context, opts Opts) (*Result, error) {
 	}
 	project := opts.ProjectDir
 	if project == "" {
-		project = "."
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("get working directory: %w", err)
+		}
+		project = cwd
+		fmt.Printf("ProjectDir not set — using current working directory: %s\n", project)
 	}
 
 	// ── 1. Incremental skip ────────────────────────────────────────────

@@ -233,6 +233,7 @@ func imageQualityAllowed(quality int, cfg *nextcore.ImageConfig) bool {
 	if cfg == nil || len(cfg.Qualities) == 0 {
 		return true
 	}
+
 	for _, allowed := range cfg.Qualities {
 		if quality == allowed {
 			return true

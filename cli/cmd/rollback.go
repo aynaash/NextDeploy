@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/aynaash/nextdeploy/cli/internal/server"
 	"github.com/aynaash/nextdeploy/cli/internal/serverless"
@@ -45,7 +46,7 @@ the commit must still be within the retention window.`,
 			os.Exit(1)
 		}
 
-		switch cfg.TargetType {
+		switch strings.ToLower(cfg.ResolveTargetType("")) {
 		case "serverless":
 			log.Info("Deployment Target: SERVERLESS (No VPS required)")
 			if cfg.Serverless == nil {

@@ -108,6 +108,7 @@ func shipServerless(ctx context.Context, log *shared.Logger, cfg *config.NextDep
 	// Emit the Worker script name on stdout in a stable, greppable form so CI
 	// can compose the deployment URL (https://<worker>.<subdomain>.workers.dev)
 	// without the CLI having to call the Workers Subdomains API — that would
+	// without the CLI having to call the Workers Subdomains API — that would
 	// add SDK surface and another token scope to print something the account
 	// already knows. Cloudflare-only; other providers name resources
 	// differently.
@@ -275,7 +276,6 @@ func shipVPS(ctx context.Context, log *shared.Logger, cfg *config.NextDeployConf
 
 func init() {
 	shipCmd.Flags().BoolVarP(&shipVerbose, "verbose", "v", false, "Print detailed deployment logs (S3 uploads, Lambda steps, CloudFront status)")
-	shipCmd.Flags().BoolVar(&shipNoProvision, "no-provision", false, "Skip reconciling declared Cloudflare resources (KV/Hyperdrive/D1) before deploying")
 	shipCmd.Flags().BoolVar(&shipVerify, "verify", false, "Fail the deploy if the post-deploy smoke check does not pass (for CI)")
 	// Every cache needs a manual invalidation escape hatch for the moment the
 	// automatic one is wrong. `build` had --force; `ship` — the command people

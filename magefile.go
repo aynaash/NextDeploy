@@ -9,6 +9,7 @@
 // List targets:        mage -l
 // Run a target:        mage buildCLI
 // Verbose + args:      mage -v testPkg ./cli/internal/serverless
+// Package main is mage file that used for dev needdds
 package main
 
 import (
@@ -276,8 +277,10 @@ func CrossBuildCLI() error {
 		return err
 	}
 	platforms := []struct{ os, arch string }{
-		{"linux", "amd64"}, {"linux", "arm64"},
-		{"darwin", "amd64"}, {"darwin", "arm64"},
+		{"linux", "amd64"},
+		{"linux", "arm64"},
+		{"darwin", "amd64"},
+		{"darwin", "arm64"},
 		{"windows", "amd64"},
 	}
 	for _, p := range platforms {
@@ -378,7 +381,7 @@ func Lint() error {
 
 // SecurityScan runs gosec and govulncheck.
 func SecurityScan() error {
-	if err := ensureTool("gosec", "github.com/securecodewarrior/gosec/v2/cmd/gosec@latest"); err != nil {
+	if err := ensureTool("gosec", "github.com/securego/gosec/v2/cmd/gosec@latest"); err != nil {
 		return err
 	}
 	if err := sh.Run("gosec", "./..."); err != nil {

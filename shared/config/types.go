@@ -11,6 +11,7 @@ import (
 type NextDeployConfig struct {
 	Version       string               `yaml:"version"`
 	TargetType    string               `yaml:"target_type"` // e.g., "vps", "serverless"
+	Target        string               `yaml:"target,omitempty"` // alias for target_type
 	App           AppConfig            `yaml:"app"`
 	GoSidecar     *GoSidecarConfig     `yaml:"gosidecar,omitempty"`
 	Repository    Repository           `yaml:"repository"`
@@ -719,6 +720,9 @@ func SaveConfig(path string, cfg *NextDeployConfig) error {
 func (cfg *NextDeployConfig) ResolveTargetType(metaTarget string) string {
 	if cfg.TargetType != "" {
 		return cfg.TargetType
+	}
+	if cfg.Target != "" {
+		return cfg.Target
 	}
 	// If serverless block is present, assume serverless
 	if cfg.Serverless != nil {

@@ -113,10 +113,7 @@ GitHub secrets you need to configure for it.`,
 // generated workflow needs. Returns ("vps", "") for VPS, or
 // ("serverless", "<provider>") for AWS/Cloudflare.
 func resolveCITarget(cfg *config.NextDeployConfig) (target, provider string) {
-	target = strings.ToLower(cfg.TargetType)
-	if target == "" {
-		target = "vps"
-	}
+	target = strings.ToLower(cfg.ResolveTargetType(""))
 	if target == "serverless" && cfg.Serverless != nil {
 		provider = strings.ToLower(cfg.Serverless.Provider)
 	}

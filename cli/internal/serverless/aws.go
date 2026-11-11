@@ -335,14 +335,26 @@ func (p *AWSProvider) GetResourceMap(ctx context.Context, appCfg *cfgTypes.NextD
 		AppName:        appCfg.App.Name,
 		Environment:    "production",
 		Region:         p.cfg.Region,
+		WorkerName:     functionName,
 		S3BucketName:   bucketName,
 		DeploymentTime: time.Now(),
+		Status:         "Unknown",
 	}
 
 	clientLambda := lambda.NewFromConfig(p.cfg)
 	fn, err := clientLambda.GetFunction(ctx, &lambda.GetFunctionInput{FunctionName: aws.String(functionName)})
 	if err == nil && fn.Configuration != nil {
 		res.LambdaARN = *fn.Configuration.FunctionArn
+		res.Status = "Online"
+		if fn.Configuration.LastModified != nil {
+			if t, err := time.Parse("2006-01-02T15:04:05.000-0700", *fn.Configuration.LastModified); err == nil {
+				res.DeploymentTime = t
+			} else if t, err := time.Parse(time.RFC3339, *fn.Configuration.LastModified); err == nil {
+				res.DeploymentTime = t
+			}
+		}
+	} else if err != nil {
+		res.Status = "Not Deployed"
 	}
 
 	fUrl, err := clientLambda.GetFunctionUrlConfig(ctx, &lambda.GetFunctionUrlConfigInput{FunctionName: aws.String(functionName)})

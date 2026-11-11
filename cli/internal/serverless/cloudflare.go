@@ -1,3 +1,4 @@
+// Package serverless is the serverless deployment package for nextdeploy
 package serverless
 
 import (
@@ -1301,7 +1302,6 @@ func (p *CloudflareProvider) UpdateSecrets(ctx context.Context, appName string, 
 // at-risk secrets. No live secrets makes it a no-op. GetSecrets returns
 // map[name]"[secret]" — only the keys matter here.
 func refuseSecretWipe(pending, live map[string]string, allow bool) error {
-
 	if allow || len(live) == 0 {
 		return nil
 	}
@@ -1540,14 +1540,40 @@ func (p *CloudflareProvider) Destroy(ctx context.Context, cfg *config.NextDeploy
 }
 
 func (p *CloudflareProvider) GetResourceMap(ctx context.Context, cfg *config.NextDeployConfig) (ServerlessResourceMap, error) {
-	return ServerlessResourceMap{
+	workerName := p.getWorkerName(cfg)
+	res := ServerlessResourceMap{
 		AppName:        cfg.App.Name,
 		Environment:    cfg.App.Environment,
 		Region:         "global",
+		WorkerName:     workerName,
 		S3BucketName:   p.getBucketName(cfg),
 		CustomDomain:   cfg.App.Domain.Name,
 		DeploymentTime: time.Now(),
-	}, nil
+		Status:         "Unknown",
+	}
+
+	if cfg.Serverless != nil && cfg.Serverless.Cloudflare != nil && len(cfg.Serverless.Cloudflare.CustomDomains) > 0 && res.CustomDomain == "" {
+		res.CustomDomain = cfg.Serverless.Cloudflare.CustomDomains[0].Hostname
+	}
+
+	list, err := p.cf.Workers.Scripts.Deployments.List(ctx, workerName, workers.ScriptDeploymentListParams{
+		AccountID: cloudflare.F(p.accountID),
+	})
+	if err == nil && len(list.Deployments) > 0 {
+		latest := list.Deployments[0]
+		res.DeploymentTime = latest.CreatedOn
+		res.Status = "Online"
+		if len(latest.Versions) > 0 {
+			res.ActiveVersion = pickActiveVersion(latest.Versions)
+		}
+	} else if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "10007") || strings.Contains(strings.ToLower(errStr), "not found") {
+			res.Status = "Not Deployed"
+		}
+	}
+
+	return res, nil
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

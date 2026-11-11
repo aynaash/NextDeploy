@@ -36,7 +36,7 @@ type NextCorePayload struct {
 	// --- next.config projection -------------------------------------------
 	// Parsed from next.config by ParseNextConfigFile and carried through to
 	// the compiler so routing + asset URLs honor them. Populated in
-	// GenerateMetadata; zero when next.config is absent or unparseable (the
+	// GenerateMetadata; zero when next.config is absent or unparsable (the
 	// parse is non-fatal). ImageConfig above is part of the same projection.
 	BasePath    string      `json:"base_path,omitempty"`
 	AssetPrefix string      `json:"asset_prefix,omitempty"`
@@ -250,14 +250,14 @@ type RouteInfo struct {
 }
 
 type NextBuildMetadata struct {
-	BuildID               string      `json:"buildId"`
-	BuildManifest         interface{} `json:"buildManifest"`
-	AppBuildManifest      interface{} `json:"appBuildManifest"`
-	PrerenderManifest     interface{} `json:"prerenderManifest"`
-	RoutesManifest        interface{} `json:"routesManifest"`
-	ImagesManifest        interface{} `json:"imagesManifest"`
-	AppPathRoutesManifest interface{} `json:"appPathRoutesManifest"`
-	ReactLoadableManifest interface{} `json:"reactLoadableManifest"`
-	Diagnostics           []string    `json:"diagnostics"`
-	HasAppRouter          bool        `json:"hasAppRouter"`
+	BuildID               string   `json:"buildId"`
+	BuildManifest         any      `json:"buildManifest"`
+	AppBuildManifest      any      `json:"appBuildManifest"`
+	PrerenderManifest     any      `json:"prerenderManifest"`
+	RoutesManifest        any      `json:"routesManifest"`
+	ImagesManifest        any      `json:"imagesManifest"`
+	AppPathRoutesManifest any      `json:"appPathRoutesManifest"`
+	ReactLoadableManifest any      `json:"reactLoadableManifest"`
+	Diagnostics           []string `json:"diagnostics"`
+	HasAppRouter          bool     `json:"hasAppRouter"`
 }

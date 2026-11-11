@@ -18,6 +18,9 @@ type ServerlessResourceMap struct {
 	AppName           string
 	Environment       string
 	Region            string
+	WorkerName        string
+	ActiveVersion     string
+	Status            string // "Online", "Deploying", "Not Deployed", etc.
 	LambdaARN         string
 	FunctionURL       string
 	S3BucketName      string
