@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.20.0](https://github.com/aynaash/NextDeploy/compare/v0.19.1...v0.20.0) (2026-11-11)
+
+
+### Features
+
+* enhance serverless deployment packaging and improve error handling ([377d6ca](https://github.com/aynaash/NextDeploy/commit/377d6ca50650439ceb58baf40b9c6381fd7edcb7))
+* improve serverless support and CLI commands ([cdf2e1c](https://github.com/aynaash/NextDeploy/commit/cdf2e1c0aac644b4bcea5ec07d32dabd38ab3872))
+* improve serverless support and CLI commands ([8be42d2](https://github.com/aynaash/NextDeploy/commit/8be42d2e60b33d39bbc3e2cfe9404650c33f15e0))
+
 ## [0.19.1](https://github.com/aynaash/NextDeploy/compare/v0.19.0...v0.19.1) (2026-11-07)
 
 
