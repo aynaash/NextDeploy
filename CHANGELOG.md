@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/aynaash/NextDeploy/compare/v0.20.0...v0.20.1) (2026-11-20)
+
+
+### Documentation
+
+* build VitePress documentation site and GitHub Pages deployment workflow ([#63](https://github.com/aynaash/NextDeploy/issues/63)) ([dfc76ec](https://github.com/aynaash/NextDeploy/commit/dfc76ec3d9d6490c683d2462f03825b2f43dc11b))
+
 ## [0.20.0](https://github.com/aynaash/NextDeploy/compare/v0.19.1...v0.20.0) (2026-11-11)
 
 
