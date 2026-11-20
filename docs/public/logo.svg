@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#10b981" />
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#2dd4bf" stop-opacity="0.2" />
+    </linearGradient>
+  </defs>
+  <!-- Background Shape -->
+  <rect width="90" height="90" x="5" y="5" rx="22" fill="#0f172a" stroke="url(#grad)" stroke-width="3" />
+  <!-- Fast Forward / Rocket Chevron Glyphs -->
+  <path d="M30 30 L52 50 L30 70" fill="none" stroke="url(#grad)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M50 30 L72 50 L50 70" fill="none" stroke="#38bdf8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" />
+  <!-- Speed Dot -->
+  <circle cx="75" cy="50" r="3" fill="#34d399" />
+</svg>

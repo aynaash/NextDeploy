@@ -724,6 +724,27 @@ func Info() {
 	fmt.Printf("GOOS/ARCH : %s/%s\n", runtime.GOOS, runtime.GOARCH)
 }
 
+// Docs starts the local VitePress documentation development server.
+func Docs() error {
+	fmt.Println("==> Starting documentation server...")
+	cmd := exec.Command("npm", "run", "docs:dev")
+	cmd.Dir = "docs"
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
+// DocsBuild builds the VitePress documentation site for production.
+func DocsBuild() error {
+	fmt.Println("==> Building documentation site...")
+	cmd := exec.Command("npm", "run", "docs:build")
+	cmd.Dir = "docs"
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 // ── internal ─────────────────────────────────────────────────────────────────
 
 func sha256File(path string) {
