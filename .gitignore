@@ -63,8 +63,11 @@ test_src_dir/
 !cli/internal/serverless/REVIEW.md
 !**/README.md
 !CLOUDFLARE_PARITY.md
-!docs/deploy-nextjs-vps-go-sidecar.md
-!docs/local-development-air.md
+!docs/*.md
+!docs/**/*.md
+/.vitepress/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
 
 # ── Misc ─────────────────────────────────────────────────────────
 /daemon.md

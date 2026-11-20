@@ -71,11 +71,13 @@ sample.nextdeploy.yml      Annotated reference config
 
 ## Documentation
 
-- Full docs: <https://hersi.dev/nextdeploy>
-- VPS deployment with the Go sidecar:
-  [`docs/deploy-nextjs-vps-go-sidecar.md`](./docs/deploy-nextjs-vps-go-sidecar.md)
-- Sample config: [`sample.nextdeploy.yml`](./sample.nextdeploy.yml)
-- Each command also has `nextdeploy <cmd> explain` for inline help
+- **Full Documentation Site**: <https://aynaash.github.io/NextDeploy/> (Mirror: <https://hersi.dev/nextdeploy>)
+- **Docs Source**: Maintained in [`docs/`](./docs/). Run `mage docs` (or `cd docs && npm run docs:dev`) to run locally with hot-reloading.
+- **VPS Deployment & Go Sidecar**: [`docs/targets/vps.md`](./docs/targets/vps.md)
+- **Cloudflare Workers Target**: [`docs/targets/cloudflare.md`](./docs/targets/cloudflare.md)
+- **AWS Serverless Target**: [`docs/targets/aws.md`](./docs/targets/aws.md)
+- **Sample Configuration**: [`sample.nextdeploy.yml`](./sample.nextdeploy.yml)
+- **Inline Help**: Each CLI command includes `nextdeploy <cmd> explain` for interactive architecture walk-throughs.
 
 ## Contributing
 
