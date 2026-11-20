@@ -95,7 +95,6 @@ func (p *Packager) Package(target string) (*PackageResult, error) {
 	}
 	result.S3Assets = s3Assets
 
-
 	zipPath := filepath.Join(p.tmpDir, "lambda.zip")
 	size, err := p.buildLambdaZip(zipPath)
 	if target == "cloudflare" {

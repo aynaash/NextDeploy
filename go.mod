@@ -28,6 +28,7 @@ require (
 	github.com/gofrs/flock v0.13.0
 	github.com/golangci/golangci-lint v1.64.8
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/magefile/mage v1.15.0
 	github.com/pkg/sftp v1.13.9
 	github.com/securego/gosec/v2 v2.25.0
@@ -134,7 +135,6 @@ require (
 	github.com/googleapis/gax-go/v2 v2.22.0 // indirect
 	github.com/gookit/color v1.6.0 // indirect
 	github.com/gordonklaus/ineffassign v0.1.0 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/gostaticanalysis/analysisutil v0.7.1 // indirect
 	github.com/gostaticanalysis/comment v1.5.0 // indirect
 	github.com/gostaticanalysis/forcetypeassert v0.2.0 // indirect
