@@ -80,3 +80,30 @@ func TestCloudflareWorkerName_MatchesProvider(t *testing.T) {
 		t.Errorf("provider bucketName = %q, exported = %q", got, want)
 	}
 }
+
+func TestZoneNameFromHostname_PublicSuffix(t *testing.T) {
+	cases := map[string]string{
+		"example.com":         "example.com",
+		"app.example.com":     "example.com",
+		"example.co.uk":       "example.co.uk",
+		"app.example.co.uk":   "example.co.uk",
+		"shop.example.com.au": "example.com.au",
+		"app.example.com.":    "example.com",
+	}
+	for host, want := range cases {
+		if got := zoneNameFromHostname(host); got != want {
+			t.Errorf("zoneNameFromHostname(%q) = %q, want %q", host, got, want)
+		}
+	}
+}
+
+func TestAutoCustomDomainHostnames_MultiLabelTLD(t *testing.T) {
+	got := autoCustomDomainHostnames("example.co.uk")
+	if len(got) != 2 || got[0] != "example.co.uk" || got[1] != "www.example.co.uk" {
+		t.Fatalf("unexpected apex hostnames: %v", got)
+	}
+	sub := autoCustomDomainHostnames("api.example.co.uk")
+	if len(sub) != 1 || sub[0] != "api.example.co.uk" {
+		t.Fatalf("unexpected subdomain hostnames: %v", sub)
+	}
+}

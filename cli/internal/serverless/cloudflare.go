@@ -25,6 +25,7 @@ import (
 	"github.com/aynaash/nextdeploy/shared/credstore"
 	"github.com/aynaash/nextdeploy/shared/nextcore"
 	"github.com/aynaash/nextdeploy/shared/sensitive"
+	"golang.org/x/net/publicsuffix"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -1184,11 +1185,11 @@ func autoCustomDomainHostnames(domain string) []string {
 	if domain == "" {
 		return nil
 	}
-	parts := strings.Split(domain, ".")
-	isApex := len(parts) == 2
-	if isApex {
+	apex := zoneNameFromHostname(domain)
+	if strings.EqualFold(domain, apex) {
 		return []string{domain, "www." + domain}
 	}
+
 	return []string{domain}
 }
 
@@ -1236,6 +1237,14 @@ func (p *CloudflareProvider) ensureCustomDomain(ctx context.Context, workerName 
 // handle public suffix exceptions like .co.uk. Users with multi-label TLDs
 // should set zone_id explicitly.
 func zoneNameFromHostname(host string) string {
+	host = strings.TrimSpace(strings.TrimSuffix(host, "."))
+	if host == "" {
+		return ""
+	}
+	if ectld1, err := publicsuffix.EffectiveTLDPlusOne(host); err == nil {
+		return ectld1
+	}
+
 	parts := strings.Split(host, ".")
 	if len(parts) <= 2 {
 		return host
