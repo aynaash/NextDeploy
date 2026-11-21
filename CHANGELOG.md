@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.2](https://github.com/aynaash/NextDeploy/compare/v0.20.1...v0.20.2) (2026-11-21)
+
+
+### Bug Fixes
+
+* **cloudflare:** preview zone_settings TTL overrides in nextdeploy plan ([934d5bc](https://github.com/aynaash/NextDeploy/commit/934d5bc942ebf4196288d40ac403b34cf25ab146))
+
 ## [0.20.1](https://github.com/aynaash/NextDeploy/compare/v0.20.0...v0.20.1) (2026-11-20)
 
 
