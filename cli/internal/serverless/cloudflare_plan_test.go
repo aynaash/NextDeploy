@@ -1,6 +1,10 @@
 package serverless
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/aynaash/nextdeploy/shared/config"
+)
 
 func TestPlanResult_HasDrift(t *testing.T) {
 	cases := []struct {
@@ -20,6 +24,24 @@ func TestPlanResult_HasDrift(t *testing.T) {
 				t.Errorf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestPlanZoneSettings_Validation(t *testing.T) {
+	p := &CloudflareProvider{}
+
+	if _, err := p.planZoneSettings(t.Context(), config.CFZoneSettings{}); err == nil {
+		t.Fatal("expected error for empty zone")
+	}
+	if _, err := p.planZoneSettings(t.Context(), config.CFZoneSettings{Zone: "example.com", MinTTL: 1}); err == nil {
+		t.Fatal("expected error for min_ttl=1")
+	}
+	item, err := p.planZoneSettings(t.Context(), config.CFZoneSettings{Zone: "example.com", MinTTL: 0})
+	if err != nil {
+		t.Fatalf("unexpected error for min_ttl=0: %v", err)
+	}
+	if item.Action != PlanNoOp {
+		t.Fatalf("got action %q, want %q", item.Action, PlanNoOp)
 	}
 }
 

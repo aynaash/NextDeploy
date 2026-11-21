@@ -11,6 +11,7 @@ import (
 
 	"github.com/cloudflare/cloudflare-go/v6"
 	"github.com/cloudflare/cloudflare-go/v6/ai_gateway"
+	"github.com/cloudflare/cloudflare-go/v6/dns"
 	"github.com/cloudflare/cloudflare-go/v6/vectorize"
 )
 
@@ -140,9 +141,82 @@ func (p *CloudflareProvider) Plan(ctx context.Context, cfg *config.NextDeployCon
 		}
 		out.Items = append(out.Items, item)
 	}
+	if res.ZoneSettings != nil {
+		item, err := p.planZoneSettings(ctx, *res.ZoneSettings)
+		if err != nil {
+			return nil, fmt.Errorf("plan zone_settings %q: %w", res.ZoneSettings.Zone, err)
+		}
+		out.Items = append(out.Items, item)
+	}
 
 	p.appendAdvisories(ctx, cfg, out)
 	return out, nil
+}
+
+func (p *CloudflareProvider) planZoneSettings(ctx context.Context, s config.CFZoneSettings) (PlanItem, error) {
+	if s.Zone == "" {
+		return PlanItem{}, errors.New("zone is required")
+	}
+	if s.MinTTL <= 0 {
+		return PlanItem{
+			Kind:   "zone_settings",
+			Name:   s.Zone,
+			Action: PlanNoOp,
+			Detail: "no min_ttl override configured",
+		}, nil
+	}
+	if s.MinTTL == 1 {
+		return PlanItem{}, errors.New("min_ttl=1 (auto) is not a valid floor; pick an explicit seconds value")
+	}
+
+	zoneID, err := p.getZoneID(ctx, s.Zone)
+	if err != nil {
+		return PlanItem{}, err
+	}
+
+	target := dns.TTL(s.MinTTL)
+	var toLower, skippedUnsupported int
+	iter := p.cf.DNS.Records.ListAutoPaging(ctx, dns.RecordListParams{
+		ZoneID: cloudflare.F(zoneID),
+	})
+	for iter.Next() {
+		r := iter.Current()
+		if r.TTL <= target || r.TTL == 1 {
+			continue
+		}
+		if _, _, err := buildDNSRecordBody(r.Name, string(r.Type), r.Content, s.MinTTL, r.Proxied); err != nil {
+			skippedUnsupported++
+			continue
+		}
+		toLower++
+	}
+	if err := iter.Err(); err != nil {
+		return PlanItem{}, fmt.Errorf("list records: %w", err)
+	}
+
+	if toLower == 0 {
+		detail := fmt.Sprintf("all supported records already <= %ds", s.MinTTL)
+		if skippedUnsupported > 0 {
+			detail += fmt.Sprintf(" (%d unsupported record(s) skipped)", skippedUnsupported)
+		}
+		return PlanItem{
+			Kind:   "zone_settings",
+			Name:   s.Zone,
+			Action: PlanNoOp,
+			Detail: detail,
+		}, nil
+	}
+
+	detail := fmt.Sprintf("will lower TTL on %d record(s) to %ds", toLower, s.MinTTL)
+	if skippedUnsupported > 0 {
+		detail += fmt.Sprintf(" (%d unsupported record(s) skipped)", skippedUnsupported)
+	}
+	return PlanItem{
+		Kind:   "zone_settings",
+		Name:   s.Zone,
+		Action: PlanUpdate,
+		Detail: detail,
+	}, nil
 }
 
 // appendAdvisories attaches the non-resource-scoped warnings: undeclared queue
