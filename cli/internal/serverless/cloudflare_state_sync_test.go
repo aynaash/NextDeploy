@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aynaash/nextdeploy/cli/internal/serverless/cfstate"
 	"github.com/aynaash/nextdeploy/shared"
@@ -173,5 +174,16 @@ func TestRefResolverWithFallback_FindsLiveResourceWhenNotInManifest(t *testing.T
 	}
 	if id != "live-db-uuid" {
 		t.Fatalf("got id %q, want live-db-uuid", id)
+	}
+}
+
+func TestStateSyncBackoff_Bounds(t *testing.T) {
+	for attempt := range 5 {
+		d := stateSyncBackoff(attempt)
+		minWait := 50 * time.Millisecond << attempt
+		maxWait := minWait + minWait/2
+		if d < minWait || d >= maxWait {
+			t.Fatalf("attempt %d: backoff %v outside [%v, %v)", attempt, d, minWait, maxWait)
+		}
 	}
 }

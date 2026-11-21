@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"time"
@@ -106,18 +107,29 @@ func (p *CloudflareProvider) syncRemoteState(ctx context.Context, bucket, object
 		} else {
 			input.IfNoneMatch = awsv2.String("*")
 		}
-		if _, err := p.r2s3.PutObject(ctx, input); err == nil {
-			p.log.Info("Synchronized encrypted resource state to R2 (%s)", objectKey)
+		_, putErr := p.r2s3.PutObject(ctx, input)
+		if putErr == nil {
+			p.log.Info("Sync encrypted resource state to r2 (%s)", objectKey)
 			return nil
 		}
+
 		if attempt == attempts-1 {
-			return fmt.Errorf("write remote state after %d concurrent update retries: %w", attempts, err)
+			return fmt.Errorf("write remote state after %d concurrent update retries: %w", attempts, putErr)
 		}
-		// A conditional write may lose to another deploy. Reload and merge its
-		// state before retrying; transient failures are also surfaced if retries
-		// are exhausted.
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("state sync cancelled during retry backoff: %w", ctx.Err())
+		case <-time.After(stateSyncBackoff(attempt)):
+		}
 	}
 	return errors.New("remote state synchronization exhausted retries")
+}
+
+func stateSyncBackoff(attempt int) time.Duration {
+	const base = 50 * time.Millisecond
+	delay := base << min(attempt, 5)
+	return delay + rand.N(delay/2)
 }
 
 func (p *CloudflareProvider) loadRemoteResourceManifest(ctx context.Context, bucket, objectKey string, key []byte) (*cfstate.Manifest, *string, error) {
