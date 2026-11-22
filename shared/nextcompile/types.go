@@ -49,6 +49,21 @@ const (
 	TargetVPS              Target = "vps"
 )
 
+// Engine selects the Worker runtime compilation strategy.
+type Engine string
+
+const (
+	// EngineAuto chooses EngineNextServer for Turbopack output and
+	// EngineLegacy for Webpack output.
+	EngineAuto Engine = "auto"
+	// EngineLegacy uses nextcompile's lightweight hand-written RSC/SSR runtime.
+	EngineLegacy Engine = "legacy"
+	// EngineNextServer runs Next's own NextNodeServer inside the Worker with a
+	// build-time Virtual FS + static chunk registry (supports both Turbopack
+	// and Webpack builds with full Next.js App Router parity).
+	EngineNextServer Engine = "nextserver"
+)
+
 // RouteKind categorizes a compiled module. Dispatch order in the runtime
 // follows this roughly: Middleware → Static/SSG → ISR → SSR/Page → API/Action.
 type RouteKind string
@@ -103,6 +118,10 @@ type CompileOpts struct {
 
 	// Target picks the emit strategy. Defaults to TargetCloudflareWorker.
 	Target Target
+
+	// Engine selects the runtime compilation mode ("auto", "legacy", or
+	// "nextserver"). Empty defaults to EngineAuto.
+	Engine Engine
 
 	// Protection is the normalized edge-guard policy (built by the adapter
 	// from nextdeploy.yml `cloudflare.protection`). Nil means no guard: the
@@ -320,6 +339,9 @@ type CompiledBundle struct {
 	ManifestPath      string
 	DispatchPath      string
 	ActionManifest    string
+	VFSPath           string
+	ChunksPath        string
+	ResolvedEngine    Engine
 	DetectedVersion   NextVersion
 	DetectedReact     ReactVersion
 	SuggestedBindings []BindingHint

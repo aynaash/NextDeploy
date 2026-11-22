@@ -31,7 +31,9 @@ func Compile(ctx context.Context, opts CompileOpts) (*CompiledBundle, error) {
 	log := opts.Log
 
 	start := time.Now()
-	log.Info("nextcompile: starting (target=%s, standalone=%s)", opts.Target, opts.StandaloneDir)
+	distDir := payloadDistDir(opts.Payload)
+	resolvedEngine := ResolveEngine(opts.Engine, opts.StandaloneDir, distDir)
+	log.Info("nextcompile: starting (target=%s, engine=%s, standalone=%s)", opts.Target, resolvedEngine, opts.StandaloneDir)
 
 	// Phase 1 — detect Next + React versions.
 	nextVer, reactVer, err := DetectVersions(opts.StandaloneDir)
@@ -101,10 +103,14 @@ func Compile(ctx context.Context, opts CompileOpts) (*CompiledBundle, error) {
 	}
 	log.Debug("nextcompile: extracted %d runtime files", len(runtimeFiles))
 
-	// Phase 10 — vendor RSC runtime when the target requires it.
-	vendored, err := maybeVendorRSC(opts, manifest.Features, reactVer, log)
-	if err != nil {
-		return nil, err
+	// Phase 10 — vendor RSC runtime (legacy engine only; nextserver runs
+	// Next.js's own NextNodeServer + compiled page runtimes directly).
+	var vendored *VendoredPackage
+	if resolvedEngine == EngineLegacy {
+		vendored, err = maybeVendorRSC(opts, manifest.Features, reactVer, log)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Phase 11 — emit action_manifest.json. Always emitted (empty when app
@@ -120,10 +126,27 @@ func Compile(ctx context.Context, opts CompileOpts) (*CompiledBundle, error) {
 		return nil, fmt.Errorf("emit protection config: %w", err)
 	}
 
-	// Phase 13 — emit worker_entry.mjs (the esbuild entrypoint).
-	entryPath, err := EmitWorkerEntry(opts.OutDir)
-	if err != nil {
-		return nil, fmt.Errorf("emit worker entry: %w", err)
+	// Phase 13 — emit engine-specific Worker entrypoint (+ VFS & chunk registry
+	// for nextserver).
+	var entryPath, vfsPath, chunksPath string
+	if resolvedEngine == EngineNextServer {
+		vfsPath, err = EmitVirtualFS(opts.StandaloneDir, distDir, opts.OutDir)
+		if err != nil {
+			return nil, fmt.Errorf("emit virtual fs: %w", err)
+		}
+		chunksPath, err = EmitChunkRegistry(opts.StandaloneDir, distDir, opts.OutDir)
+		if err != nil {
+			return nil, fmt.Errorf("emit chunk registry: %w", err)
+		}
+		entryPath, err = EmitNextServerEntry(opts.OutDir)
+		if err != nil {
+			return nil, fmt.Errorf("emit nextserver entry: %w", err)
+		}
+	} else {
+		entryPath, err = EmitWorkerEntry(opts.OutDir)
+		if err != nil {
+			return nil, fmt.Errorf("emit worker entry: %w", err)
+		}
 	}
 
 	// Phase 14 — compute content hash over every generated/extracted file in
@@ -132,6 +155,12 @@ func Compile(ctx context.Context, opts CompileOpts) (*CompiledBundle, error) {
 	// bytes embed the wall-clock GeneratedAt; hashBundle folds in a normalized
 	// (timestamp-zeroed) manifest instead so identical input hashes identically.
 	hashInputs := append([]string{dispatchPath, actionManifestPath, protectionPath, entryPath}, runtimeFiles...)
+	if vfsPath != "" {
+		hashInputs = append(hashInputs, vfsPath)
+	}
+	if chunksPath != "" {
+		hashInputs = append(hashInputs, chunksPath)
+	}
 	if vendored != nil {
 		hashInputs = append(hashInputs, vendored.TargetPath)
 		if vendored.ShimPath != "" {
@@ -178,6 +207,9 @@ func Compile(ctx context.Context, opts CompileOpts) (*CompiledBundle, error) {
 		ManifestPath:      manifestPath,
 		DispatchPath:      dispatchPath,
 		ActionManifest:    actionManifestPath,
+		VFSPath:           vfsPath,
+		ChunksPath:        chunksPath,
+		ResolvedEngine:    resolvedEngine,
 		DetectedVersion:   nextVer,
 		DetectedReact:     reactVer,
 		SuggestedBindings: hints,
