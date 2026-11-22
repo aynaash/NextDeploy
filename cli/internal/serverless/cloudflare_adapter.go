@@ -476,6 +476,16 @@ func runEsbuildNextServer(_ context.Context, entry, out, metaPath, cwd string, l
 	nodePaths := collectNodePaths(cwd)
 	externals := append([]string{"node:*", "cloudflare:*"}, optionalExternalPackages...)
 
+	alias := map[string]string{
+		"@opentelemetry/api": "next/dist/compiled/@opentelemetry/api",
+	}
+	for _, np := range nodePaths {
+		if candidate := filepath.Join(np, "@opentelemetry", "api"); fileOrDirExists(candidate) {
+			alias["@opentelemetry/api"] = candidate
+			break
+		}
+	}
+
 	log.Info("Bundling NextServer Worker via in-process esbuild (entry: %s)...", filepath.Base(entry))
 
 	result := api.Build(api.BuildOptions{
@@ -488,6 +498,7 @@ func runEsbuildNextServer(_ context.Context, entry, out, metaPath, cwd string, l
 		Conditions:  []string{"workerd", "worker", "node", "default"},
 		External:    externals,
 		NodePaths:   nodePaths,
+		Alias:       alias,
 		Define: map[string]string{
 			"process.env.NODE_ENV": `"production"`,
 		},
@@ -504,7 +515,7 @@ func runEsbuildNextServer(_ context.Context, entry, out, metaPath, cwd string, l
 		},
 		Plugins: []api.Plugin{
 			vfsFsPlugin(runtimeRoot),
-			nextServerTrimPlugin(runtimeRoot),
+			nextServerTrimPlugin(runtimeRoot, nodePaths),
 			dynamicRequirePatchPlugin(),
 			nodeBuiltinsPlugin(),
 		},
@@ -549,17 +560,47 @@ func vfsFsPlugin(runtimeRoot string) api.Plugin {
 	}
 }
 
+func fileOrDirExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// resolveNextCompiledReactServer maps Next.js internal bare requires like
+// `react-server-dom-webpack/client` or `react-server-dom-turbopack/server` to
+// Next's bundled copies under `next/dist/compiled/...` when present.
+func resolveNextCompiledReactServer(spec string, nodePaths []string) string {
+	for _, np := range nodePaths {
+		base := filepath.Join(np, "next", "dist", "compiled", filepath.FromSlash(spec))
+		for _, cand := range []string{base, base + ".js", base + ".edge.js", base + ".node.js"} {
+			if info, err := os.Stat(cand); err == nil && !info.IsDir() {
+				return cand
+			}
+		}
+	}
+	return ""
+}
+
 // nextServerTrimPlugin stubs build-time / native-binary packages conditionally
 // referenced by NextNodeServer (sharp, swc, webpack, terser, telemetry, etc.)
-// and resolves our internal Cloudflare CacheHandler specifier.
-func nextServerTrimPlugin(runtimeRoot string) api.Plugin {
+// and resolves our internal Cloudflare CacheHandler specifier + Next's compiled
+// react-server-dom-{webpack,turbopack} modules.
+func nextServerTrimPlugin(runtimeRoot string, nodePaths []string) api.Plugin {
 	cacheHandlerPath := filepath.Join(runtimeRoot, "nextserver", "cf_cache_handler.mjs")
-	trimFilter := `^(sharp|webpack|webpack/.*|terser|typescript|@next/swc-.*|@babel/.*|styled-jsx/macro|caniuse-lite|caniuse-lite/.*|browserslist|@vercel/og|next/dist/compiled/webpack/.*|next/dist/telemetry/.*|next/dist/trace/.*|next/dist/build/.*)$`
+	trimFilter := `^(sharp|webpack|webpack/.*|terser|typescript|@next/swc-.*|@babel/.*|styled-jsx/macro|caniuse-lite|caniuse-lite/.*|browserslist|@vercel/og|react-dom/static|next/dist/compiled/webpack/.*|next/dist/compiled/edge-runtime.*|next/dist/compiled/next-server/.*-experimental\.runtime\..*|next/dist/compiled/next-server/.*\.runtime\.dev\.js|next/dist/telemetry/.*|next/dist/trace/.*|next/dist/build/.*)$`
 	return api.Plugin{
 		Name: "nextserver-trim",
 		Setup: func(build api.PluginBuild) {
 			build.OnResolve(api.OnResolveOptions{Filter: `^__nextdeploy_cf_cache_handler__$`}, func(_ api.OnResolveArgs) (api.OnResolveResult, error) {
 				return api.OnResolveResult{Path: cacheHandlerPath}, nil
+			})
+			build.OnResolve(api.OnResolveOptions{Filter: `^react-server-dom-(webpack|turbopack)/`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				if resolved := resolveNextCompiledReactServer(args.Path, nodePaths); resolved != "" {
+					return api.OnResolveResult{Path: resolved}, nil
+				}
+				return api.OnResolveResult{
+					Path:      args.Path,
+					Namespace: "next-trim-stub",
+				}, nil
 			})
 			build.OnResolve(api.OnResolveOptions{Filter: trimFilter}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				return api.OnResolveResult{
@@ -569,12 +610,16 @@ func nextServerTrimPlugin(runtimeRoot string) api.Plugin {
 			})
 			build.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "next-trim-stub"}, func(_ api.OnLoadArgs) (api.OnLoadResult, error) {
 				contents := `
-const stub = new Proxy(() => {}, {
-	get: (_t, prop) => (prop === "__esModule" ? true : prop === "default" ? stub : stub),
+const stub = new Proxy(function() {}, {
+	get: (_t, prop) => {
+		if (prop === "__esModule") return true;
+		if (prop === "default") return stub;
+		return stub;
+	},
 	apply: () => stub,
 	construct: () => stub,
 });
-export default stub;
+module.exports = stub;
 `
 				return api.OnLoadResult{
 					Contents: &contents,
@@ -585,21 +630,55 @@ export default stub;
 	}
 }
 
-var dynamicRequireExprRe = regexp.MustCompile(`\brequire\(\s*([^'"\s][^)]*)\)`)
+var dynamicRequireExprRe = regexp.MustCompile(`(^|[^\w.$])require\(\s*([^'"` + "`" + `\s][^)]*)\)`)
 
 const dynamicRequireHelper = `
 const __ndDynRequire = (spec) => {
-  if (spec === "__nextdeploy_cf_cache_handler__" && globalThis.__nextdeployCacheHandler) {
+  if (typeof spec === "string" && spec.includes("__nextdeploy_cf_cache_handler__") && globalThis.__nextdeployCacheHandler) {
     return globalThis.__nextdeployCacheHandler;
   }
   const loaded = globalThis.__nextdeployLoadModule?.(spec);
   if (loaded !== undefined) return loaded;
-  return require(spec);
+  if (typeof spec === "string" && spec.endsWith(".json") && globalThis.__nextdeployVFS?.files) {
+    const clean = spec.replace(/\\/g, "/").replace(/^\/+/, "");
+    const nextIdx = clean.indexOf(".next/");
+    const key = nextIdx >= 0 ? clean.slice(nextIdx) : clean;
+    if (Object.prototype.hasOwnProperty.call(globalThis.__nextdeployVFS.files, key)) {
+      return JSON.parse(globalThis.__nextdeployVFS.files[key]);
+    }
+  }
+  const err = new Error("Cannot find module '" + spec + "'");
+  err.code = "MODULE_NOT_FOUND";
+  throw err;
+};
+const __ndDynImport = async (spec) => {
+  if (typeof spec === "string" && spec.includes("__nextdeploy_cf_cache_handler__") && globalThis.__nextdeployCacheHandler) {
+    return { default: globalThis.__nextdeployCacheHandler };
+  }
+  const loaded = globalThis.__nextdeployLoadModule?.(spec);
+  if (loaded !== undefined) return loaded;
+  return import(spec);
 };
 `
 
+func patchDynamicRequires(src string) string {
+	out := dynamicRequireExprRe.ReplaceAllStringFunc(src, func(match string) string {
+		// Never rewrite `function require(...)` declarations.
+		trimmed := strings.TrimSpace(match)
+		if strings.HasPrefix(trimmed, "require(") {
+			idx := strings.Index(src, match)
+			if idx >= 9 && strings.HasSuffix(strings.TrimSpace(src[:idx]), "function") {
+				return match
+			}
+		}
+		return dynamicRequireExprRe.ReplaceAllString(match, "${1}__ndDynRequire(${2})")
+	})
+	out = strings.ReplaceAll(out, "await dynamicImportEsmDefault(", "await __ndDynImport(")
+	return out
+}
+
 // dynamicRequirePatchPlugin rewrites dynamic `require(expr)` calls inside
-// Next.js's page/cache loaders and Turbopack's server chunk runtime so they
+// Next.js's server internals and Turbopack's server chunk runtime so they
 // resolve synchronously against the build-time static chunk registry.
 func dynamicRequirePatchPlugin() api.Plugin {
 	return api.Plugin{
@@ -607,11 +686,80 @@ func dynamicRequirePatchPlugin() api.Plugin {
 		Setup: func(build api.PluginBuild) {
 			build.OnLoad(api.OnLoadOptions{Filter: `\.(c?js)$`}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				slash := filepath.ToSlash(args.Path)
+				// require-hook.js monkey-patches Node's Module.prototype.require
+				// which does not exist in Cloudflare Workers / ESM bundles.
+				if strings.HasSuffix(slash, "/next/dist/server/require-hook.js") {
+					contents := `
+const hookPropertyMap = new Map();
+const defaultOverrides = {};
+function addHookAliases(aliases = []) {
+  for (const [k, v] of aliases) hookPropertyMap.set(k, v);
+}
+module.exports = { addHookAliases, defaultOverrides, hookPropertyMap };
+`
+					return api.OnLoadResult{
+						Contents:   &contents,
+						Loader:     api.LoaderJS,
+						ResolveDir: filepath.Dir(args.Path),
+					}, nil
+				}
+				// load-manifest.external.js uses vm.runInNewContext for evalManifest,
+				// which is forbidden in Cloudflare Workers. Execute the pre-bundled
+				// manifest module directly via our static chunk registry instead.
+				if strings.HasSuffix(slash, "/next/dist/server/load-manifest.external.js") {
+					contents := `
+const fs = require("fs");
+const pathMod = require("path");
+const sharedCache = new Map();
+function loadManifest(manifestPath, shouldCache = true, cache = sharedCache, skipParse = false) {
+  const cached = shouldCache && cache && cache.get(manifestPath);
+  if (cached) return cached;
+  let manifest = fs.readFileSync(manifestPath, "utf8");
+  if (!skipParse) {
+    manifest = JSON.parse(manifest);
+  }
+  if (shouldCache && cache) cache.set(manifestPath, manifest);
+  return manifest;
+}
+function evalManifest(manifestPath, shouldCache = true, cache = sharedCache) {
+  const cached = shouldCache && cache && cache.get(manifestPath);
+  if (cached) return cached;
+  globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};
+  const loaded = globalThis.__nextdeployLoadModule?.(manifestPath);
+  if (loaded === undefined) {
+    const err = new Error("ENOENT: no such manifest '" + manifestPath + "'");
+    err.code = "ENOENT";
+    throw err;
+  }
+  const result = { __RSC_MANIFEST: globalThis.__RSC_MANIFEST };
+  if (shouldCache && cache) cache.set(manifestPath, result);
+  return result;
+}
+function loadManifestFromRelativePath({ projectDir, distDir, manifest, shouldCache, cache, skipParse, handleMissing, useEval }) {
+  try {
+    const manifestPath = pathMod.join(projectDir || "/", distDir || ".next", manifest);
+    if (useEval) {
+      return evalManifest(manifestPath, shouldCache, cache);
+    }
+    return loadManifest(manifestPath, shouldCache, cache, skipParse);
+  } catch (err) {
+    if (handleMissing) return {};
+    throw err;
+  }
+}
+function clearManifestCache(manifestPath, cache = sharedCache) {
+  return cache ? cache.delete(manifestPath) : false;
+}
+module.exports = { loadManifest, evalManifest, loadManifestFromRelativePath, clearManifestCache };
+`
+					return api.OnLoadResult{
+						Contents:   &contents,
+						Loader:     api.LoaderJS,
+						ResolveDir: filepath.Dir(args.Path),
+					}, nil
+				}
 				needsPatch := strings.Contains(slash, "/[turbopack]") ||
-					strings.HasSuffix(slash, "/next/dist/server/require.js") ||
-					strings.HasSuffix(slash, "/next/dist/server/load-components.js") ||
-					strings.HasSuffix(slash, "/next/dist/server/lib/incremental-cache/index.js") ||
-					strings.HasSuffix(slash, "/next/dist/server/require-hook.js")
+					(strings.Contains(slash, "/next/dist/server/") && !strings.Contains(slash, "/compiled/"))
 				if !needsPatch {
 					return api.OnLoadResult{}, nil
 				}
@@ -620,7 +768,7 @@ func dynamicRequirePatchPlugin() api.Plugin {
 					return api.OnLoadResult{}, err
 				}
 				src := string(raw)
-				patched := dynamicRequireExprRe.ReplaceAllString(src, "__ndDynRequire($1)")
+				patched := patchDynamicRequires(src)
 				if patched == src {
 					return api.OnLoadResult{}, nil
 				}
@@ -769,20 +917,36 @@ func nodeBuiltinsPlugin() api.Plugin {
 				}, nil
 			})
 
-			build.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "node-stub"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+			build.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "node-stub"}, func(_ api.OnLoadArgs) (api.OnLoadResult, error) {
 				contents := `
-const stub = new Proxy(() => {}, {
+const noop = () => {};
+const overrides = {
+	__esModule: true,
+	STATUS_CODES: {},
+	METHODS: [],
+	isatty: () => false,
+	EOL: "\n",
+	platform: () => "linux",
+	arch: () => "x64",
+	tmpdir: () => "/tmp",
+	homedir: () => "/",
+	hostname: () => "cloudflare-worker",
+	cpus: () => [{ model: "workerd", speed: 1000 }],
+	totalmem: () => 134217728,
+	freemem: () => 67108864,
+	networkInterfaces: () => ({}),
+	constants: {},
+};
+const stub = new Proxy(function() {}, {
 	get: (_target, prop) => {
-		if (prop === '__esModule') return true;
-		if (prop === 'default') return stub;
-		if (prop === 'STATUS_CODES') return {};
-		if (prop === 'METHODS') return [];
+		if (prop === "default") return stub;
+		if (Object.prototype.hasOwnProperty.call(overrides, prop)) return overrides[prop];
 		return stub;
 	},
 	apply: () => stub,
 	construct: () => stub,
 });
-export default stub;
+module.exports = stub;
 `
 				return api.OnLoadResult{
 					Contents: &contents,

@@ -148,6 +148,28 @@ test("CloudflareCacheHandler persists to R2 and invalidates via revalidateTag", 
   assert.equal(await handler.get("/blog"), null);
 });
 
+test("CloudflareCacheHandler loads build-time prerendered HTML and RSC payloads from R2 release assets", async () => {
+  const releaseStore = new Map([
+    ["_nextdeploy/releases/v1/docs/advanced/nextcompile.html", { body: "<h1>NextCompile</h1>" }],
+    ["_nextdeploy/releases/v1/docs/advanced/nextcompile.rsc", { body: "0:[\"$\",\"h1\",null,{\"children\":\"NextCompile\"}]\n" }],
+  ]);
+  globalThis.__nextdeployEnv = {
+    ASSETS: {
+      get: async (k) => releaseStore.get(k) || null,
+    },
+  };
+  const handler = new CloudflareCacheHandler({ assetVersion: "v1" });
+  const hit = await handler.get("/docs/advanced/nextcompile", { kind: "APP_PAGE" });
+  assert.equal(hit?.value?.kind, "APP_PAGE");
+  assert.equal(hit?.value?.html, "<h1>NextCompile</h1>");
+  assert.ok(Buffer.isBuffer(hit?.value?.rscData));
+  assert.equal(hit.value.rscData.toString("utf8"), "0:[\"$\",\"h1\",null,{\"children\":\"NextCompile\"}]\n");
+
+  // FETCH cache lookups must never collide with release HTML files.
+  resetLocalCacheForTests();
+  assert.equal(await handler.get("/docs/advanced/nextcompile", { kind: "FETCH" }), null);
+});
+
 // ── NextServer driver tests ──────────────────────────────────────────────────
 
 test("dispatchNextServer runs guard, serves R2 static assets, and delegates dynamic routes to NextNodeServer", async () => {
@@ -209,4 +231,105 @@ test("dispatchNextServer runs guard, serves R2 static assets, and delegates dyna
   );
   assert.equal(robotsRes.status, 200);
   assert.equal(await robotsRes.text(), "User-agent: *");
+});
+
+test("dispatchNextServer serves SSG and fresh ISR HTML from R2, bypassing for RSC Flight and expired ISR", async () => {
+  const freshDate = new Date();
+  const staleDate = new Date(Date.now() - 120_000);
+  const r2Assets = {
+    "_nextdeploy/releases/v1/docs/advanced/nextcompile.html": {
+      body: "<h1>Pre-rendered SSG Doc</h1>",
+      writeHttpMetadata() {},
+    },
+    "_nextdeploy/releases/v1/blog/fresh.html": {
+      body: "<h1>Fresh ISR</h1>",
+      uploaded: freshDate,
+      writeHttpMetadata() {},
+    },
+    "_nextdeploy/releases/v1/blog/stale.html": {
+      body: "<h1>Stale ISR</h1>",
+      uploaded: staleDate,
+      writeHttpMetadata() {},
+    },
+  };
+  const env = {
+    ASSETS: {
+      get: async (k) => r2Assets[k] || null,
+    },
+  };
+  const manifest = {
+    assetVersion: "v1",
+    routes: {
+      ssg: {
+        "/docs/advanced/nextcompile": "/docs/advanced/nextcompile.html",
+      },
+      isr: {
+        "/blog/fresh": "/blog/fresh.html",
+        "/blog/stale": "/blog/stale.html",
+      },
+    },
+    isr: {
+      intervals: {
+        "/blog/fresh": 60,
+        "/blog/stale": 60,
+      },
+    },
+  };
+
+  let serverHits = 0;
+  const createServer = async () => ({
+    prepare: async () => {},
+    getRequestHandler: () => async (req, res) => {
+      serverHits++;
+      res.statusCode = 200;
+      res.setHeader("content-type", "text/html");
+      res.end(`server:${req.url}`);
+    },
+  });
+
+  // 1. SSG route GET hits R2 directly, 0 NextNodeServer hits.
+  const ssgRes = await dispatchNextServer(
+    new Request("https://app.example.com/docs/advanced/nextcompile"),
+    env,
+    {},
+    { manifest, createServer },
+  );
+  assert.equal(ssgRes.status, 200);
+  assert.equal(await ssgRes.text(), "<h1>Pre-rendered SSG Doc</h1>");
+  assert.equal(serverHits, 0);
+
+  // 2. RSC Flight request on the same SSG route falls through to NextNodeServer.
+  const rscRes = await dispatchNextServer(
+    new Request("https://app.example.com/docs/advanced/nextcompile", {
+      headers: { rsc: "1" },
+    }),
+    env,
+    {},
+    { manifest, createServer },
+  );
+  assert.equal(rscRes.status, 200);
+  assert.equal(await rscRes.text(), "server:/docs/advanced/nextcompile");
+  assert.equal(serverHits, 1);
+
+  // 3. Fresh ISR serves straight from R2 without invoking NextNodeServer.
+  const freshRes = await dispatchNextServer(
+    new Request("https://app.example.com/blog/fresh"),
+    env,
+    {},
+    { manifest, createServer },
+  );
+  assert.equal(freshRes.status, 200);
+  assert.equal(await freshRes.text(), "<h1>Fresh ISR</h1>");
+  assert.equal(serverHits, 1);
+
+  // 4. Expired ISR falls through to NextNodeServer for regeneration.
+  const staleRes = await dispatchNextServer(
+    new Request("https://app.example.com/blog/stale"),
+    env,
+    {},
+    { manifest, createServer },
+  );
+  assert.equal(staleRes.status, 200);
+  assert.equal(await staleRes.text(), "server:/blog/stale");
+  assert.equal(serverHits, 2);
 });

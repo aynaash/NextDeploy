@@ -372,6 +372,55 @@ console.log("OK:" + body);
 	}
 }
 
+// TestBuildWorkerBundle_RealStandaloneSmoke lets developers verify the
+// nextserver engine against any real Next.js standalone tree on disk:
+//
+//	NEXTDEPLOY_CF_ENGINE=nextserver NEXTDEPLOY_TEST_STANDALONE=/path/to/app/.next/standalone \
+//	  go test -v ./cli/internal/serverless -run TestBuildWorkerBundle_RealStandaloneSmoke
+func TestBuildWorkerBundle_RealStandaloneSmoke(t *testing.T) {
+	standaloneDir := os.Getenv("NEXTDEPLOY_TEST_STANDALONE")
+	if standaloneDir == "" {
+		t.Skip("NEXTDEPLOY_TEST_STANDALONE not set")
+	}
+	meta := &nextcore.NextCorePayload{
+		AppName:    "real-smoke",
+		DistDir:    ".next",
+		OutputMode: nextcore.OutputModeStandalone,
+		NextBuildMetadata: nextcore.NextBuildMetadata{
+			HasAppRouter: true,
+		},
+	}
+	log := shared.PackageLogger("test", "TEST")
+	workerOut, err := BuildWorkerBundle(context.Background(), standaloneDir, meta, nil, log)
+	if err != nil {
+		t.Fatalf("BuildWorkerBundle(%s): %v", standaloneDir, err)
+	}
+	info, err := os.Stat(workerOut)
+	if err != nil {
+		t.Fatalf("stat %s: %v", workerOut, err)
+	}
+	t.Logf("Compiled worker.mjs: %s (%.1f KB)", workerOut, float64(info.Size())/1024)
+
+	nodeBin, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not on PATH")
+	}
+	script := `
+import worker from "` + filepath.ToSlash(workerOut) + `";
+for (const p of ["/api/health", "/", "/docs"]) {
+  const res = await worker.fetch(new Request("https://app.example.com" + p), {}, { waitUntil() {} });
+  const text = await res.text();
+  console.log("ROUTE", p, "STATUS", res.status, "CT", res.headers.get("content-type"), "LEN", text.length, "SNIPPET", JSON.stringify(text.slice(0, 400)));
+}
+`
+	cmd := exec.CommandContext(t.Context(), nodeBin, "--input-type=module", "-e", script) // #nosec G204
+	out, err := cmd.CombinedOutput()
+	t.Logf("Node execution output:\n%s", string(out))
+	if err != nil {
+		t.Fatalf("worker execution failed: %v", err)
+	}
+}
+
 // writeTestFile mirrors the test helper in nextcompile — duplicated here
 // because Go test helpers don't cross package boundaries.
 func writeTestFile(t *testing.T, path, content string) {

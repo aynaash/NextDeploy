@@ -10,7 +10,7 @@
 //      Middleware/Proxy, API routes, error.tsx, not-found.tsx, ISR via CacheHandler)
 //   5. Root public/* fallback from R2 on 404 (e.g. /robots.txt, /favicon.ico)
 
-import { serveStaticFromR2, serveRootPublicFromR2 } from "../serve.mjs";
+import { serveStaticFromR2, serveSSGFromR2, serveISRFromR2, serveRootPublicFromR2 } from "../serve.mjs";
 import { handleImageRequest } from "../image.mjs";
 import { serverError } from "../errors.mjs";
 import { invokeNodeHandler } from "./http_bridge.mjs";
@@ -27,6 +27,17 @@ export function installNextServerGlobals({ vfs, loadServerModule, assetVersion }
   globalThis.__nextdeployLoadModule = loadServerModule || (() => undefined);
   globalThis.__nextdeployAssetVersion = assetVersion || "";
   globalThis.__nextdeployCacheHandler = CloudflareCacheHandler;
+  // Next.js 15/16 reads Symbol.for("@next/cache-handlers").FetchCache across
+  // module boundaries when creating per-route IncrementalCache instances;
+  // registering CloudflareCacheHandler here prevents silent fallback to
+  // FileSystemCache (which would fail on the read-only Worker VFS).
+  const cacheHandlersSym = Symbol.for("@next/cache-handlers");
+  const existing = globalThis[cacheHandlersSym];
+  if (!existing || typeof existing !== "object") {
+    globalThis[cacheHandlersSym] = { FetchCache: CloudflareCacheHandler };
+  } else if (!existing.FetchCache) {
+    existing.FetchCache = CloudflareCacheHandler;
+  }
 }
 
 /**
@@ -116,6 +127,24 @@ export async function dispatchNextServer(request, env, ctx, opts) {
     if (pathname.startsWith("/_next/static/") || pathname.startsWith("/public/")) {
       const staticRes = await serveStaticFromR2(env, pathname, manifest);
       if (staticRes) return staticRes;
+    }
+
+    // 3b. Pre-rendered SSG / fresh ISR HTML served straight from R2 (fast path
+    //     for generateStaticParams routes like /docs/[...slug], falling through
+    //     to NextNodeServer on miss, expiry, RSC Flight requests, or non-GET).
+    const isRSCFlightReq = request.headers.has("rsc") || url.searchParams.has("_rsc");
+    if (request.method === "GET" && env?.ASSETS && !isRSCFlightReq) {
+      const ssgTarget = manifest?.routes?.ssg?.[pathname];
+      if (ssgTarget) {
+        const ssgRes = await serveSSGFromR2(env, ssgTarget, manifest);
+        if (ssgRes) return ssgRes;
+      }
+      const isrTarget = manifest?.routes?.isr?.[pathname];
+      if (isrTarget) {
+        const ttl = manifest?.isr?.intervals?.[pathname] || 0;
+        const { response: isrRes, expired } = await serveISRFromR2(env, isrTarget, manifest, ttl);
+        if (!expired && isrRes) return isrRes;
+      }
     }
 
     // 4. Delegate dynamic / SSR / RSC / API / Action / Middleware / ISR traffic

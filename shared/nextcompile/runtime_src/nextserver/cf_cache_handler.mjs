@@ -29,6 +29,45 @@ function cacheObjectKey(key, assetVersion) {
   return `${prefix}/${clean}.json`;
 }
 
+function releaseAssetKey(relPath, assetVersion) {
+  const clean = String(relPath || "").replace(/^\/+/, "");
+  return assetVersion ? `_nextdeploy/releases/${assetVersion}/${clean}` : clean;
+}
+
+function reviveSerializedBuffers(value) {
+  if (!value || typeof value !== "object") return value;
+  if (
+    value.rscData &&
+    typeof value.rscData === "object" &&
+    value.rscData.type === "Buffer" &&
+    Array.isArray(value.rscData.data) &&
+    typeof Buffer !== "undefined"
+  ) {
+    return { ...value, rscData: Buffer.from(value.rscData.data) };
+  }
+  return value;
+}
+
+async function readR2Text(obj) {
+  if (!obj) return "";
+  if (typeof obj.text === "function") return await obj.text();
+  if (typeof obj.body === "string") return obj.body;
+  return await new Response(obj.body).text();
+}
+
+async function readR2Buffer(obj) {
+  if (!obj) return undefined;
+  if (typeof obj.arrayBuffer === "function") {
+    const ab = await obj.arrayBuffer();
+    return typeof Buffer !== "undefined" ? Buffer.from(ab) : new Uint8Array(ab);
+  }
+  if (typeof obj.body === "string") {
+    return typeof Buffer !== "undefined" ? Buffer.from(obj.body, "utf8") : new TextEncoder().encode(obj.body);
+  }
+  const ab = await new Response(obj.body).arrayBuffer();
+  return typeof Buffer !== "undefined" ? Buffer.from(ab) : new Uint8Array(ab);
+}
+
 async function isEntryInvalidatedByTags(tags, lastModified, env) {
   if (!Array.isArray(tags) || tags.length === 0) return false;
   const lm = Number(lastModified) || 0;
@@ -56,7 +95,7 @@ export class CloudflareCacheHandler {
     this.assetVersion = options.assetVersion || globalThis.__nextdeployAssetVersion || "";
   }
 
-  async get(key) {
+  async get(key, ctx = {}) {
     const env = getEnv();
     const l1 = l1Cache.get(key);
     if (l1) {
@@ -66,22 +105,63 @@ export class CloudflareCacheHandler {
       l1Cache.delete(key);
     }
 
-    if (!env?.ASSETS) return null;
+    if (!env?.ASSETS || typeof env.ASSETS.get !== "function") return null;
     try {
       const obj = await env.ASSETS.get(cacheObjectKey(key, this.assetVersion));
-      if (!obj) return null;
-      const parsed = typeof obj.json === "function"
-        ? await obj.json()
-        : JSON.parse(await new Response(obj.body).text());
-      if (!parsed || typeof parsed !== "object") return null;
-      if (await isEntryInvalidatedByTags(parsed.tags, parsed.lastModified, env)) {
-        return null;
+      if (obj) {
+        const parsed = typeof obj.json === "function"
+          ? await obj.json()
+          : JSON.parse(await readR2Text(obj));
+        if (parsed && typeof parsed === "object") {
+          if (!(await isEntryInvalidatedByTags(parsed.tags, parsed.lastModified, env))) {
+            parsed.value = reviveSerializedBuffers(parsed.value);
+            l1Cache.set(key, parsed);
+            return { value: parsed.value, lastModified: parsed.lastModified };
+          }
+        }
       }
-      l1Cache.set(key, parsed);
-      return { value: parsed.value, lastModified: parsed.lastModified };
     } catch {
-      return null;
+      // Fall through to build-time prerendered R2 lookup.
     }
+
+    // Fallback for build-time pre-rendered SSG/ISR routes stored in R2
+    // (_nextdeploy/releases/<assetVersion>/<route>.html and optional .rsc).
+    // Serves both HTML and client-side RSC Flight navigations for
+    // generateStaticParams routes without hitting NoFallbackError.
+    if (ctx?.kind !== "FETCH" && typeof key === "string" && key.startsWith("/")) {
+      try {
+        const clean = key === "/" ? "index" : key.replace(/^\/+/, "");
+        const htmlObj = await env.ASSETS.get(releaseAssetKey(`${clean}.html`, this.assetVersion));
+        if (htmlObj) {
+          const [html, rscObj] = await Promise.all([
+            readR2Text(htmlObj),
+            env.ASSETS.get(releaseAssetKey(`${clean}.rsc`, this.assetVersion)).catch(() => null),
+          ]);
+          const rscData = rscObj ? await readR2Buffer(rscObj) : undefined;
+          const lastModified =
+            Number(htmlObj.customMetadata?.revalidatedAt) ||
+            (htmlObj.uploaded instanceof Date ? htmlObj.uploaded.getTime() : Date.now());
+          const entry = {
+            value: {
+              kind: "APP_PAGE",
+              html,
+              rscData,
+              headers: {},
+              postponed: undefined,
+              status: 200,
+            },
+            lastModified,
+            tags: [],
+          };
+          l1Cache.set(key, entry);
+          return { value: entry.value, lastModified: entry.lastModified };
+        }
+      } catch {
+        // Non-fatal
+      }
+    }
+
+    return null;
   }
 
   async set(key, data, ctx = {}) {
@@ -94,7 +174,7 @@ export class CloudflareCacheHandler {
     };
     l1Cache.set(key, entry);
 
-    if (!env?.ASSETS) return;
+    if (typeof env?.ASSETS?.put !== "function") return;
     const writePromise = env.ASSETS.put(
       cacheObjectKey(key, this.assetVersion),
       JSON.stringify(entry),

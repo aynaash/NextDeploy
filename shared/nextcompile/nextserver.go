@@ -231,14 +231,17 @@ const chunkLoaderRuntimeJS = `function normalizeModuleKey(raw) {
     const sub = joined.slice(idx);
     if (Object.prototype.hasOwnProperty.call(serverModules, sub)) return sub;
   }
-  const prefixed = SERVER_PREFIX + joined.replace(/^\/+/, "");
+  const stripped = joined.replace(/^\/+/, "");
+  const distPrefixed = DIST_PREFIX + stripped;
+  if (Object.prototype.hasOwnProperty.call(serverModules, distPrefixed)) return distPrefixed;
+  const prefixed = SERVER_PREFIX + stripped;
   if (Object.prototype.hasOwnProperty.call(serverModules, prefixed)) return prefixed;
   if (!joined.endsWith(".js")) {
     for (const ext of [".js", ".cjs", ".mjs"]) {
-      const withExt = joined + ext;
-      if (Object.prototype.hasOwnProperty.call(serverModules, withExt)) return withExt;
-      const prefixedExt = prefixed + ext;
-      if (Object.prototype.hasOwnProperty.call(serverModules, prefixedExt)) return prefixedExt;
+      for (const base of [joined, distPrefixed, prefixed]) {
+        const cand = base + ext;
+        if (Object.prototype.hasOwnProperty.call(serverModules, cand)) return cand;
+      }
     }
   }
   return "";
@@ -307,6 +310,7 @@ func EmitChunkRegistry(standaloneDir, distDir, outDir string) (string, error) {
 	}
 
 	prefix := importPrefixFor(dir, standaloneDir)
+	distPrefix := filepath.ToSlash(distDir) + "/"
 	serverPrefix := filepath.ToSlash(filepath.Join(distDir, "server")) + "/"
 
 	var b strings.Builder
@@ -317,6 +321,7 @@ func EmitChunkRegistry(standaloneDir, distDir, outDir string) (string, error) {
 		fmt.Fprintf(&b, "  %s: () => require(%s),\n", jsStringLiteral(rel), jsStringLiteral(importPath(rel, prefix)))
 	}
 	b.WriteString("});\n\n")
+	fmt.Fprintf(&b, "const DIST_PREFIX = %q;\n", distPrefix)
 	fmt.Fprintf(&b, "const SERVER_PREFIX = %q;\n\n", serverPrefix)
 	b.WriteString(chunkLoaderRuntimeJS)
 
