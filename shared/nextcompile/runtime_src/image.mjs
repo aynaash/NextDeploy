@@ -14,6 +14,8 @@
 // Security: every hostname must match a remotePatterns entry. No exceptions.
 // Next's default is deny-all for external domains until the app opts in.
 
+import { serveStaticFromR2, serveRootPublicFromR2 } from "./serve.mjs";
+
 const DEFAULT_CACHE_TTL = 60 * 60 * 24; // 24h
 
 /**
@@ -61,21 +63,29 @@ export async function handleImageRequest(request, env, manifest) {
     return textError(403, "url does not match any remotePatterns / domains entry in next.config");
   }
 
-  const resolved = resolvedURL.toString();
+  const loadArgs = { resolvedURL, sameOrigin, env, manifest };
 
   if (manifest?.images?.unoptimized) {
-    return passthroughFetch(resolved);
+    return passthroughFetch(loadArgs, {});
   }
 
   if (typeof env?.IMAGES?.input === "function") {
-    return await transformWithCloudflareImages(env.IMAGES, resolved, {
+    return await transformWithCloudflareImages(env.IMAGES, loadArgs, {
       width,
       quality,
       format,
     });
   }
 
-  return passthroughFetch(resolved);
+  if (typeof globalThis.__nextdeployWasmImageTransform === "function") {
+    return await transformWithWasmAndCache(request, loadArgs, {
+      width,
+      quality,
+      format,
+    });
+  }
+
+  return passthroughFetch(loadArgs, { width, quality, format });
 }
 
 // isBlockedHost reports whether a hostname points at loopback, link-local, or
@@ -165,13 +175,27 @@ function pathnameMatches(pathname, pattern) {
   return false;
 }
 
+async function loadUpstreamImage(resolvedURL, sameOrigin, env, manifest, cfOpts) {
+  if (sameOrigin && env?.ASSETS) {
+    const pathname = resolvedURL.pathname;
+    const fromStatic = await serveStaticFromR2(env, pathname, manifest);
+    if (fromStatic) return fromStatic;
+    const fromPublic = await serveRootPublicFromR2(env, pathname, manifest);
+    if (fromPublic) return fromPublic;
+  }
+  return fetch(resolvedURL.toString(), { cf: cfOpts });
+}
+
 /**
  * Cloudflare Images binding path. env.IMAGES.input() returns a chainable
  * transform pipeline. This is the lowest-cost, highest-quality path when
  * the binding is configured — transforms happen natively at the edge.
  */
-async function transformWithCloudflareImages(images, src, { width, quality, format }) {
-  const upstream = await fetch(src, { cf: { cacheTtl: DEFAULT_CACHE_TTL } });
+async function transformWithCloudflareImages(images, loadArgs, { width, quality, format }) {
+  const upstream = await loadUpstreamImage(
+    loadArgs.resolvedURL, loadArgs.sameOrigin, loadArgs.env, loadArgs.manifest,
+    { cacheTtl: DEFAULT_CACHE_TTL },
+  );
   if (!upstream.ok) {
     return textError(upstream.status, `upstream image fetch failed: ${upstream.statusText}`);
   }
@@ -192,13 +216,55 @@ async function transformWithCloudflareImages(images, src, { width, quality, form
   return new Response(resp.body, { status: resp.status, headers });
 }
 
+async function transformWithWasmAndCache(request, loadArgs, { width, quality, format }) {
+  const edgeCache = typeof caches !== "undefined" ? caches.default : null;
+  if (edgeCache) {
+    const cached = await edgeCache.match(request);
+    if (cached) return cached;
+  }
+  const upstream = await loadUpstreamImage(
+    loadArgs.resolvedURL, loadArgs.sameOrigin, loadArgs.env, loadArgs.manifest,
+    { cacheTtl: DEFAULT_CACHE_TTL },
+  );
+  if (!upstream.ok) {
+    return textError(upstream.status, `upstream image fetch failed: ${upstream.statusText}`);
+  }
+  const inputBytes = new Uint8Array(await upstream.arrayBuffer());
+  const { body, contentType } = await globalThis.__nextdeployWasmImageTransform(inputBytes, {
+    width,
+    quality,
+    format,
+    sourceContentType: upstream.headers.get("content-type") || "",
+  });
+  const resp = new Response(body, {
+    status: 200,
+    headers: {
+      "content-type": contentType,
+      "cache-control": `public, max-age=${DEFAULT_CACHE_TTL}, immutable`,
+      "x-nextcompile-image": "wasm",
+    },
+  });
+  if (edgeCache) {
+    await edgeCache.put(request, resp.clone()).catch(() => {});
+  }
+  return resp;
+}
+
 /**
- * No-binding fallback: fetch and pipe the upstream image through. Preserves
- * correctness but loses optimization. Operators should configure an IMAGES
- * binding for production.
+ * No-binding fallback: read from R2 (same-origin) or fetch upstream with
+ * Cloudflare's cf.image subrequest resizing parameters when requested.
  */
-async function passthroughFetch(src) {
-  const upstream = await fetch(src, { cf: { cacheTtl: DEFAULT_CACHE_TTL } });
+async function passthroughFetch(loadArgs, opts = {}) {
+  const cfOpts = { cacheTtl: DEFAULT_CACHE_TTL };
+  if (opts.width > 0 || (opts.format && opts.format !== "auto")) {
+    cfOpts.image = {};
+    if (opts.width > 0) cfOpts.image.width = opts.width;
+    if (opts.quality) cfOpts.image.quality = opts.quality;
+    if (opts.format && opts.format !== "auto") cfOpts.image.format = opts.format;
+  }
+  const upstream = await loadUpstreamImage(
+    loadArgs.resolvedURL, loadArgs.sameOrigin, loadArgs.env, loadArgs.manifest, cfOpts,
+  );
   if (!upstream.ok) {
     return textError(upstream.status, `upstream image fetch failed: ${upstream.statusText}`);
   }
@@ -206,7 +272,7 @@ async function passthroughFetch(src) {
   if (!headers.has("cache-control")) {
     headers.set("cache-control", `public, max-age=${DEFAULT_CACHE_TTL}`);
   }
-  headers.set("x-nextcompile-image", "passthrough");
+  headers.set("x-nextcompile-image", upstream.headers.has("cf-resized") ? "cf-image" : "passthrough");
   return new Response(upstream.body, { status: upstream.status, headers });
 }
 
