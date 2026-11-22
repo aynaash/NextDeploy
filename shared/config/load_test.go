@@ -203,7 +203,7 @@ func TestLoad_Errors(t *testing.T) {
 
 	t.Run("domain as app.name is rejected", func(t *testing.T) {
 		dir := t.TempDir()
-		yml := "version: \"1\"\napp:\n  name: ressencesystems.com\n  port: 3000\n"
+		yml := "version: \"1\"\napp:\n  name: example.com\n  port: 3000\n"
 		if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte(yml), 0o600); err != nil {
 			t.Fatal(err)
 		}

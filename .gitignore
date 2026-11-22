@@ -24,6 +24,7 @@ coverage.html
 !**/testdata/**/*.key
 credentials.json
 service-account*.json
+dist-config.json
 
 # ── Generated / packaged ─────────────────────────────────────────
 *.tar.gz
@@ -37,6 +38,7 @@ out/
 # ── Tooling / IDE / OS ───────────────────────────────────────────
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 *~
