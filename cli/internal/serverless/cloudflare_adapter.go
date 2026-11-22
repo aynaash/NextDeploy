@@ -703,6 +703,23 @@ module.exports = { addHookAliases, defaultOverrides, hookPropertyMap };
 						ResolveDir: filepath.Dir(args.Path),
 					}, nil
 				}
+				// node-environment.js loads Node-only process/console/crypto monkey-patches
+				// (e.g. unhandled-rejection.js calling process.listeners, which does not
+				// exist in Cloudflare workerd). Keep only the safe AsyncLocalStorage baseline.
+				if strings.HasSuffix(slash, "/next/dist/server/node-environment.js") {
+					contents := `
+if (typeof globalThis.AsyncLocalStorage !== "function") {
+  const { AsyncLocalStorage } = require("node:async_hooks");
+  globalThis.AsyncLocalStorage = AsyncLocalStorage;
+}
+module.exports = {};
+`
+					return api.OnLoadResult{
+						Contents:   &contents,
+						Loader:     api.LoaderJS,
+						ResolveDir: filepath.Dir(args.Path),
+					}, nil
+				}
 				// load-manifest.external.js uses vm.runInNewContext for evalManifest,
 				// which is forbidden in Cloudflare Workers. Execute the pre-bundled
 				// manifest module directly via our static chunk registry instead.
@@ -936,6 +953,9 @@ const overrides = {
 	freemem: () => 67108864,
 	networkInterfaces: () => ({}),
 	constants: {},
+	performance: globalThis.performance,
+	PerformanceObserver: globalThis.PerformanceObserver,
+	console: globalThis.console,
 };
 const stub = new Proxy(function() {}, {
 	get: (_target, prop) => {

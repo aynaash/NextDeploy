@@ -361,7 +361,11 @@ async function createNextServer() {
     conf: {
       ...nextConfig,
       distDir: distDir || ".next",
-      cacheHandler: "__nextdeploy_cf_cache_handler__",
+      // CloudflareCacheHandler is registered globally via
+      // Symbol.for("@next/cache-handlers").FetchCache in installNextServerGlobals(),
+      // so every IncrementalCache (including inside compiled Next.js runtimes)
+      // uses it directly without triggering dynamic ESM import() of a file path.
+      cacheHandler: undefined,
       cacheMaxMemorySize: 0,
     },
     customServer: false,

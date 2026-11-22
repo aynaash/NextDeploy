@@ -18,11 +18,141 @@ import { CloudflareCacheHandler } from "./cf_cache_handler.mjs";
 
 let cachedHandlerPromise = null;
 
+function setProcessProp(proc, key, value) {
+  try {
+    proc[key] = value;
+  } catch {
+    try {
+      Object.defineProperty(proc, key, {
+        value,
+        configurable: true,
+        writable: true,
+      });
+    } catch {
+      // Non-configurable in this runtime — leave as-is.
+    }
+  }
+}
+
+/**
+ * Polyfill Node `process` properties that Cloudflare `workerd`'s
+ * `nodejs_compat_v2` omits or leaves as throwing unenv stubs (such as
+ * `process.listeners`, `process.on`, `process.cwd`, `process.uptime`,
+ * `process.hrtime`, `process.stdout`, `process.stderr`).
+ */
+export function ensureProcessCompat(proc = globalThis.process) {
+  let p = proc;
+  if (!p || typeof p !== "object") {
+    p = { env: {} };
+    globalThis.process = p;
+  }
+  if (!p.env || typeof p.env !== "object") {
+    setProcessProp(p, "env", {});
+  }
+  if (typeof p.listeners !== "function") {
+    setProcessProp(p, "listeners", () => []);
+  }
+  const chainMethods = [
+    "on",
+    "once",
+    "off",
+    "addListener",
+    "removeListener",
+    "removeAllListeners",
+    "prependListener",
+    "prependOnceListener",
+  ];
+  for (const m of chainMethods) {
+    if (typeof p[m] !== "function") {
+      setProcessProp(p, m, () => p);
+    }
+  }
+  if (typeof p.emit !== "function") {
+    setProcessProp(p, "emit", () => false);
+  }
+  if (typeof p.emitWarning !== "function") {
+    setProcessProp(p, "emitWarning", () => {});
+  }
+  let cwdOk = false;
+  if (typeof p.cwd === "function") {
+    try {
+      cwdOk = typeof p.cwd() === "string";
+    } catch {
+      cwdOk = false;
+    }
+  }
+  if (!cwdOk) {
+    setProcessProp(p, "cwd", () => "/");
+  }
+  let uptimeOk = false;
+  if (typeof p.uptime === "function") {
+    try {
+      uptimeOk = typeof p.uptime() === "number";
+    } catch {
+      uptimeOk = false;
+    }
+  }
+  if (!uptimeOk) {
+    setProcessProp(p, "uptime", () => 0);
+  }
+  if (typeof p.hrtime !== "function") {
+    const hrtime = (prev) => {
+      const ms = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const sec = Math.floor(ms / 1000);
+      const ns = Math.floor((ms % 1000) * 1e6);
+      if (Array.isArray(prev)) {
+        let dSec = sec - prev[0];
+        let dNs = ns - prev[1];
+        if (dNs < 0) {
+          dSec -= 1;
+          dNs += 1e9;
+        }
+        return [dSec, dNs];
+      }
+      return [sec, ns];
+    };
+    hrtime.bigint = () => {
+      const ms = typeof performance !== "undefined" ? performance.now() : Date.now();
+      return BigInt(Math.floor(ms * 1e6));
+    };
+    setProcessProp(p, "hrtime", hrtime);
+  } else if (typeof p.hrtime.bigint !== "function") {
+    try {
+      p.hrtime.bigint = () => {
+        const ms = typeof performance !== "undefined" ? performance.now() : Date.now();
+        return BigInt(Math.floor(ms * 1e6));
+      };
+    } catch {
+      // Non-extensible
+    }
+  }
+  if (!p.stdout) {
+    setProcessProp(p, "stdout", { isTTY: false, write: () => true });
+  }
+  if (!p.stderr) {
+    setProcessProp(p, "stderr", { isTTY: false, write: () => true });
+  }
+  if (!Array.isArray(p.argv)) {
+    setProcessProp(p, "argv", ["node"]);
+  }
+  if (!p.versions || typeof p.versions !== "object") {
+    setProcessProp(p, "versions", { node: "22.0.0" });
+  }
+  if (typeof p.version !== "string") {
+    setProcessProp(p, "version", "v22.0.0");
+  }
+  if (typeof p.platform !== "string") {
+    setProcessProp(p, "platform", "linux");
+  }
+  return p;
+}
+
 /**
  * Install the build-time Virtual Filesystem and static server-chunk loader on
  * globalThis before NextNodeServer boots.
  */
 export function installNextServerGlobals({ vfs, loadServerModule, assetVersion }) {
+  ensureProcessCompat();
   globalThis.__nextdeployVFS = vfs || { files: {}, dirs: {} };
   globalThis.__nextdeployLoadModule = loadServerModule || (() => undefined);
   globalThis.__nextdeployAssetVersion = assetVersion || "";

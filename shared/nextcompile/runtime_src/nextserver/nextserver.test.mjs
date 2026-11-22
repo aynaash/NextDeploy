@@ -8,6 +8,7 @@ import fsShim, { normalizeVFSPath, readFileSync, existsSync, statSync, readdirSy
 import { invokeNodeHandler } from "./http_bridge.mjs";
 import { CloudflareCacheHandler, resetLocalCacheForTests } from "./cf_cache_handler.mjs";
 import {
+  ensureProcessCompat,
   installNextServerGlobals,
   dispatchNextServer,
   resetNextServerHandlerForTests,
@@ -338,4 +339,24 @@ test("dispatchNextServer serves SSG and fresh ISR HTML from R2, bypassing for RS
   assert.equal(staleRes.status, 200);
   assert.equal(await staleRes.text(), "server:/blog/stale");
   assert.equal(serverHits, 2);
+});
+
+test("ensureProcessCompat polyfills minimal workerd process and replaces throwing unenv stubs", () => {
+  const workerdLikeProcess = {
+    env: {},
+    cwd() {
+      throw new Error("[unenv] process.cwd is not implemented yet!");
+    },
+    uptime() {
+      throw new Error("[unenv] process.uptime is not implemented yet!");
+    },
+  };
+  ensureProcessCompat(workerdLikeProcess);
+  assert.deepEqual(workerdLikeProcess.listeners("unhandledRejection"), []);
+  assert.equal(workerdLikeProcess.on("exit", () => {}), workerdLikeProcess);
+  assert.equal(workerdLikeProcess.cwd(), "/");
+  assert.equal(workerdLikeProcess.uptime(), 0);
+  assert.equal(typeof workerdLikeProcess.hrtime.bigint(), "bigint");
+  assert.equal(workerdLikeProcess.stdout.isTTY, false);
+  assert.equal(workerdLikeProcess.versions.node, "22.0.0");
 });
