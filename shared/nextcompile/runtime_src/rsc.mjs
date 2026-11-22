@@ -5,7 +5,7 @@
 // (see runtime/vendor/README.md for the vendoring contract).
 //
 // Pipeline:
-//   1. Check PPR — not yet implemented; return 501 with clear message.
+//   1. Flag PPR routes for dynamic streaming SSR fallback (M3) instead of 501.
 //   2. Load the page module, its layout chain, and its client manifest
 //      in parallel.
 //   3. Compose layouts root → leaf → page.
@@ -65,12 +65,7 @@ async function loadVendored() {
  * @returns {Promise<Response>}
  */
 export async function renderRSC(entry, request, env, ctx, routeCtx, manifest) {
-  // B7 — PPR marker. Our renderer doesn't implement the static-shell +
-  // dynamic-holes protocol; surface a clear 501 so operators know why the
-  // deploy won't handle this page yet.
-  if (entry.ppr) {
-    return pprNotImplemented();
-  }
+  const isPPRFallback = Boolean(entry.ppr);
 
   const url = new URL(request.url);
   const reqCtx = createRequestContext(request, env, url, routeCtx.params, ctx);
@@ -196,6 +191,9 @@ export async function renderRSC(entry, request, env, ctx, routeCtx, manifest) {
     }
     for (const cookie of reqCtx.setCookies) {
       respHeaders.append("set-cookie", cookie);
+    }
+    if (isPPRFallback) {
+      respHeaders.set("x-nextcompile-ppr", "dynamic-streaming-fallback");
     }
 
     return new Response(htmlStream, { status: 200, headers: respHeaders });
@@ -508,24 +506,6 @@ function vendorMissingResponse() {
     "or ship the matching react-server-dom-webpack bundle for the detected\n" +
     "React version. See runtime/vendor/README.md for the exact steps.\n\n" +
     "Load error: " + String(vendoredLoadError);
-  return new Response(body, {
-    status: 501,
-    headers: {
-      "content-type": "text/plain; charset=utf-8",
-      "cache-control": "no-store",
-    },
-  });
-}
-
-function pprNotImplemented() {
-  const body =
-    "nextcompile: Partial Prerendering (PPR) is not yet implemented.\n\n" +
-    "This page is marked PPR in the compiled output, which means Next\n" +
-    "expects the server to stream a static shell with dynamic holes\n" +
-    "resolved inline. nextcompile's RSC renderer handles fully-dynamic\n" +
-    "pages today; PPR support is tracked as a follow-up milestone.\n\n" +
-    "Workaround: remove `experimental.ppr` or `experimental_ppr` from\n" +
-    "this route's config and redeploy.";
   return new Response(body, {
     status: 501,
     headers: {

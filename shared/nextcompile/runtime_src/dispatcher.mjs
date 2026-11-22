@@ -165,7 +165,7 @@ async function tryStaticAsset(env, pathname, manifest) {
  */
 async function tryRouteDispatch(request, env, ctx, url, pathname, tables) {
   const { manifest } = tables;
-  const cached = await tryCachedRender(env, manifest, pathname);
+  const cached = await tryCachedRender(env, manifest, pathname, tables);
   if (cached.response) return cached.response;
 
   const isrTarget = manifest.routes?.isr?.[pathname];
@@ -226,7 +226,13 @@ async function tryRouteDispatch(request, env, ctx, url, pathname, tables) {
  * Serve the pre-rendered HTML for SSG / ISR routes when the path isn't
  * marked stale or expired.
  */
-async function tryCachedRender(env, manifest, pathname) {
+async function tryCachedRender(env, manifest, pathname, tables) {
+  // Never serve a partial PPR static shell directly as a finished SSG page;
+  // fall through to renderRSC so dynamic Suspense holes stream via M3.
+  if (tables?.staticTable?.[pathname]?.ppr) {
+    return { response: null, stale: false };
+  }
+
   const ssgTarget = manifest.routes?.ssg?.[pathname];
   if (ssgTarget) {
     if (await isStale(pathname, isrTagsFor(pathname, manifest), env)) {
