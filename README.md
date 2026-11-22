@@ -4,11 +4,10 @@ Deploy Next.js apps to a VPS, AWS Lambda, or Cloudflare Workers from one
 config file and one command. Open source, self-hosted, no vendor lock-in.
 
 ```bash
-curl -fsSL https://hersi.dev/nextdeploy/install.sh | bash
-# Mirror: curl -fsSL https://nextdeploy.org/install.sh | bash
+curl -fsSL https://nextdeploy.org/install.sh | bash
 ```
 
-Windows: download `install.bat` from <https://hersi.dev/nextdeploy/install.bat> (or <https://nextdeploy.org/install.bat>).
+Windows: download `install.bat` from <https://nextdeploy.org/install.bat>.
 
 <p align="center">
   <img src="./assets/ship-demo.gif" alt="nextdeploy ship — edit a Next.js component and deploy to Cloudflare in seconds (2× speed, no edits)" width="820" />
@@ -42,7 +41,7 @@ provider. See `sample.nextdeploy.yml` in this repo for the full schema.
 | --------------- | ------ | -------------------------------------------------- |
 | **VPS**         | stable | Caddy + the `nextdeployd` daemon over SSH          |
 | **AWS**         | stable | Lambda + S3 + CloudFront, full SSR/ISR/image opt   |
-| **Cloudflare**  | beta   | Workers + R2 + KV via the `nextcompile` adapter    |
+| **Cloudflare**  | stable | Workers + R2 + KV + D1 + Hyperdrive + Queues via `nextcompile` (`nextserver` engine, Next.js 14/15/16 + Turbopack) |
 
 ## Build from source
 
@@ -71,7 +70,7 @@ sample.nextdeploy.yml      Annotated reference config
 
 ## Documentation
 
-- **Full Documentation Site**: <https://aynaash.github.io/NextDeploy/> (Mirror: <https://hersi.dev/nextdeploy>)
+- **Full Documentation Site**: <https://nextdeploy.org/docs>
 - **Docs Source**: Maintained in [`docs/`](./docs/). Run `mage docs` (or `cd docs && npm run docs:dev`) to run locally with hot-reloading.
 - **VPS Deployment & Go Sidecar**: [`docs/targets/vps.md`](./docs/targets/vps.md)
 - **Cloudflare Workers Target**: [`docs/targets/cloudflare.md`](./docs/targets/cloudflare.md)

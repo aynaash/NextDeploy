@@ -30,8 +30,6 @@ Before deploying with NextDeploy, make sure you have:
 Install the pre-compiled binary via the official installation script:
 
 ```bash
-curl -fsSL https://hersi.dev/nextdeploy/install.sh | bash
-# Mirror:
 curl -fsSL https://nextdeploy.org/install.sh | bash
 ```
 
@@ -42,7 +40,7 @@ This installs `nextdeploy` to `/usr/local/bin` (or `~/.local/bin`) and verifies 
 Run the PowerShell installer:
 
 ```powershell
-irm https://hersi.dev/nextdeploy/install.bat | iex
+irm https://nextdeploy.org/install.bat | iex
 ```
 
 ### Build from Source

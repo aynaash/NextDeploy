@@ -62,7 +62,7 @@ Deploy your Next.js app to Serverless (Cloudflare Workers, AWS Lambda) or VPS �
 			fmt.Printf("  %s - Deploy your app (Serverless or VPS)\n\n", command("nextdeploy ship"))
 
 			fmt.Printf("%s %s\n\n",
-				warning("Docs →"), command("https://github.com/aynaash/nextdeploy"),
+				warning("Docs →"), command("https://nextdeploy.org/docs"),
 			)
 		}
 	},
@@ -81,7 +81,7 @@ func Execute() {
 	fmt.Println(strings.Repeat("─", 60))
 	fmt.Printf("%s %s\n",
 		command("Need help?"),
-		warning("Docs: https://hersi.dev/nextdeploy  ·  Repo: https://github.com/aynaash/NextDeploy"),
+		warning("Docs: https://nextdeploy.org/docs  ·  Repo: https://github.com/aynaash/NextDeploy"),
 	)
 	fmt.Println(strings.Repeat("─", 60))
 	fmt.Println()

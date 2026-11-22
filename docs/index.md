@@ -45,14 +45,12 @@ features:
 ::: code-group
 
 ```bash [macOS / Linux]
-curl -fsSL https://hersi.dev/nextdeploy/install.sh | bash
-# Mirror:
-# curl -fsSL https://nextdeploy.org/install.sh | bash
+curl -fsSL https://nextdeploy.org/install.sh | bash
 ```
 
 ```powershell [Windows]
 # Download and execute install.bat
-irm https://hersi.dev/nextdeploy/install.bat | iex
+irm https://nextdeploy.org/install.bat | iex
 ```
 
 ```bash [Build from Source]

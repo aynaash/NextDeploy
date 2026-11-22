@@ -52,7 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install NextDeploy
-        run: curl -fsSL https://hersi.dev/nextdeploy/install.sh | bash
+        run: curl -fsSL https://nextdeploy.org/install.sh | bash
       - name: Dry-run Plan
         run: nextdeploy plan --detailed-exitcode
         env:
@@ -66,7 +66,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install NextDeploy
-        run: curl -fsSL https://hersi.dev/nextdeploy/install.sh | bash
+        run: curl -fsSL https://nextdeploy.org/install.sh | bash
       - name: Ship Application
         run: nextdeploy ship
         env:

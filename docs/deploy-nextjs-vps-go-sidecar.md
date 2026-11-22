@@ -22,7 +22,7 @@ working through the Node fallback.
 If you still need to install the CLI, use the official installer:
 
 ```bash
-curl -fsSL https://hersi.dev/nextdeploy/install.sh | bash
+curl -fsSL https://nextdeploy.org/install.sh | bash
 ```
 
 The Go sidecar is available for VPS deployments. It is not part of the AWS or
