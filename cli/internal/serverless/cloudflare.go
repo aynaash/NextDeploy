@@ -1042,6 +1042,12 @@ func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.P
 	}
 
 	deployHash := computeDeployHash(bundleSum, scriptMeta, p.pendingSecrets)
+	if meta != nil && meta.GitCommit != "" {
+		scriptMeta.Annotations = cloudflare.F(workers.ScriptUpdateParamsMetadataAnnotations{
+			WorkersMessage: cloudflare.F("commit:" + meta.GitCommit),
+			WorkersTag:     cloudflare.F(meta.GitCommit),
+		})
+	}
 	if p.workerAlreadyAtHash(ctx, workerName, deployHash) {
 		p.log.Info("Worker bundle and bindings unchanged (hash %s) — skipping upload", deployHash[:12])
 		// Still drop the secret stash even on skip — the deployed worker
@@ -1101,6 +1107,21 @@ func (p *CloudflareProvider) applyWorkerTriggers(ctx context.Context, workerName
 		return fmt.Errorf("apply cron triggers: %w", err)
 	}
 	return nil
+}
+
+func findDeploymentByCommit(deployments []workers.Deployment, commitPrefix string) (*workers.Deployment, error) {
+	prefix := strings.ToLower(strings.TrimSpace(commitPrefix))
+	if prefix == "" {
+		return nil, errors.New("commit prefix is required")
+	}
+	for i := range deployments {
+		msg := strings.TrimSpace(deployments[i].Annotations.WorkersMessage)
+		sha := strings.TrimPrefix(strings.ToLower(msg), "commit:")
+		if sha != "" && strings.HasPrefix(sha, prefix) {
+			return &deployments[i], nil
+		}
+	}
+	return nil, fmt.Errorf("no Cloudflare Worker deployment found for commit %q", commitPrefix)
 }
 
 // wireQueueConsumers attaches each declared queue consumer to the worker.
@@ -1403,17 +1424,10 @@ func (p *CloudflareProvider) InvalidateCache(ctx context.Context, cfg *config.Ne
 	return nil
 }
 
-// Rollback reverts the Worker to a previous deployment version.
-// Cloudflare's deployment API does not surface git commit metadata, so
-// --to <commit> is unsupported and falls back to step-based rollback.
+// Rollback reverts the Worker to a previous deployment version, either by
+// git commit prefix (--to <commit>, matched against workers/message
+// annotations stamped during deploy) or by step count (--steps N).
 func (p *CloudflareProvider) Rollback(ctx context.Context, cfg *config.NextDeployConfig, opts RollbackOptions) error {
-	if opts.ToCommit != "" {
-		p.log.Warn("Cloudflare rollback does not support --to <commit>; using step-based rollback instead")
-	}
-	steps := opts.Steps
-	if steps <= 0 {
-		steps = 1
-	}
 	workerName := p.getWorkerName(cfg)
 	p.log.Info("Fetching deployment history for worker: %s...", workerName)
 
@@ -1425,11 +1439,24 @@ func (p *CloudflareProvider) Rollback(ctx context.Context, cfg *config.NextDeplo
 	}
 
 	deployments := list.Deployments
-	if len(deployments) < steps+1 {
-		return fmt.Errorf("not enough deployment history to rollback %d step(s) (found %d, need at least %d)",
-			steps, len(deployments), steps+1)
+	var target workers.Deployment
+	if opts.ToCommit != "" {
+		matched, err := findDeploymentByCommit(deployments, opts.ToCommit)
+		if err != nil {
+			return err
+		}
+		target = *matched
+	} else {
+		steps := opts.Steps
+		if steps <= 0 {
+			steps = 1
+		}
+		if len(deployments) < steps+1 {
+			return fmt.Errorf("not enough deployment history to rollback %d step(s) (found %d, need at least %d)",
+				steps, len(deployments), steps+1)
+		}
+		target = deployments[steps]
 	}
-	target := deployments[steps]
 	if len(target.Versions) == 0 {
 		return fmt.Errorf("rollback target deployment %s has no versions", target.ID)
 	}

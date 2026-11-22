@@ -3,6 +3,8 @@ package serverless
 import (
 	"strings"
 	"testing"
+
+	"github.com/cloudflare/cloudflare-go/v6/workers"
 )
 
 // sanitizeCFName must produce names R2 and the Workers API accept: lowercase,
@@ -105,5 +107,19 @@ func TestAutoCustomDomainHostnames_MultiLabelTLD(t *testing.T) {
 	sub := autoCustomDomainHostnames("api.example.co.uk")
 	if len(sub) != 1 || sub[0] != "api.example.co.uk" {
 		t.Fatalf("unexpected subdomain hostnames: %v", sub)
+	}
+}
+
+func TestFindDeploymentByCommit(t *testing.T) {
+	deps := []workers.Deployment{
+		{ID: "d-new", Annotations: workers.DeploymentAnnotations{WorkersMessage: "commit:abcdef123456"}},
+		{ID: "d-old", Annotations: workers.DeploymentAnnotations{WorkersMessage: "commit:998877665544"}},
+	}
+	got, err := findDeploymentByCommit(deps, "998877")
+	if err != nil || got.ID != "d-old" {
+		t.Fatalf("got (%v, %v), want d-old", got, err)
+	}
+	if _, err := findDeploymentByCommit(deps, "deadbeef"); err == nil {
+		t.Fatal("expected error for unknown commit")
 	}
 }
