@@ -89,6 +89,7 @@ export default defineConfig({
         {
           text: 'Architecture & Internals',
           items: [
+            { text: 'NextServer Cloudflare Engine', link: '/internals/nextserver-cloudflare-engine' },
             { text: 'Zero-Downtime Cutover', link: '/internals/atomic-cutover' },
             { text: 'Cumulative Chunk Pooling', link: '/internals/chunk-pooling' },
             { text: 'Go High-Performance Sidecar', link: '/internals/go-sidecar' },
