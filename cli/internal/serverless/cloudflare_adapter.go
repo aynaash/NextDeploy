@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -60,11 +61,18 @@ func BuildWorkerBundle(
 	if err != nil {
 		return "", fmt.Errorf("protection config: %w", err)
 	}
+	var cfCfg *config.CloudflareConfig
+	if cfg != nil && cfg.Serverless != nil {
+		cfCfg = cfg.Serverless.Cloudflare
+	}
+	engine := nextcompile.Engine(cfCfg.ResolveEngine())
+
 	bundle, err := nextcompile.Compile(ctx, nextcompile.CompileOpts{
 		StandaloneDir: standaloneDir,
 		Payload:       payload,
 		OutDir:        outDir,
 		Target:        nextcompile.TargetCloudflareWorker,
+		Engine:        engine,
 		Protection:    prot,
 		Log:           log,
 	})
@@ -75,8 +83,14 @@ func BuildWorkerBundle(
 
 	esbuildOut := filepath.Join(outDir, "worker.mjs")
 	metaPath := filepath.Join(outDir, "_nextdeploy", "esbuild-meta.json")
-	if err := runEsbuild(ctx, bundle.EntryPath, esbuildOut, metaPath, standaloneDir, log); err != nil {
-		return "", fmt.Errorf("esbuild: %w", err)
+	if bundle.ResolvedEngine == nextcompile.EngineNextServer {
+		if err := runEsbuildNextServer(ctx, bundle.EntryPath, esbuildOut, metaPath, standaloneDir, log); err != nil {
+			return "", fmt.Errorf("esbuild (nextserver): %w", err)
+		}
+	} else {
+		if err := runEsbuild(ctx, bundle.EntryPath, esbuildOut, metaPath, standaloneDir, log); err != nil {
+			return "", fmt.Errorf("esbuild: %w", err)
+		}
 	}
 
 	info, err := os.Stat(esbuildOut)
@@ -94,6 +108,7 @@ func BuildWorkerBundle(
 func logBundleSummary(log *shared.Logger, bundle *nextcompile.CompiledBundle) {
 	f := bundleFeaturesFromManifest(bundle)
 	log.Info("─────────── nextcompile bundle ───────────")
+	log.Info("  Engine:         %s", bundle.ResolvedEngine)
 	log.Info("  Next.js:        %s", bundle.DetectedVersion.Raw)
 	log.Info("  React:          %s", bundle.DetectedReact.Raw)
 	log.Info("  Routes:         %d (elided %d)", bundle.Stats.RouteCount, bundle.Stats.DeadRoutesElided)
@@ -428,6 +443,196 @@ func runEsbuild(ctx context.Context, entry, out, metaPath, cwd string, log *shar
 	}
 
 	return nil
+}
+
+func collectNodePaths(cwd string) []string {
+	var nodePaths []string
+	if nm := filepath.Join(cwd, "node_modules"); nm != "" {
+		if info, err := os.Stat(nm); err == nil && info.IsDir() {
+			nodePaths = append(nodePaths, nm)
+		}
+	}
+	if wd, err := os.Getwd(); err == nil {
+		curr := wd
+		for range 5 {
+			nm := filepath.Join(curr, "node_modules")
+			if info, err := os.Stat(nm); err == nil && info.IsDir() {
+				nodePaths = append(nodePaths, nm)
+			}
+			parent := filepath.Dir(curr)
+			if parent == curr {
+				break
+			}
+			curr = parent
+		}
+	}
+	return nodePaths
+}
+
+// runEsbuildNextServer bundles the NextNodeServer-backed Worker entrypoint
+// (supports both Turbopack and Webpack Next.js standalone outputs).
+func runEsbuildNextServer(_ context.Context, entry, out, metaPath, cwd string, log *shared.Logger) error {
+	runtimeRoot := filepath.Join(cwd, ".nextdeploy-cf", "_nextdeploy", "runtime")
+	nodePaths := collectNodePaths(cwd)
+	externals := append([]string{"node:*", "cloudflare:*"}, optionalExternalPackages...)
+
+	log.Info("Bundling NextServer Worker via in-process esbuild (entry: %s)...", filepath.Base(entry))
+
+	result := api.Build(api.BuildOptions{
+		EntryPoints: []string{entry},
+		Bundle:      true,
+		Platform:    api.PlatformNode,
+		Format:      api.FormatESModule,
+		Target:      api.ESNext,
+		MainFields:  []string{"module", "main"},
+		Conditions:  []string{"workerd", "worker", "node", "default"},
+		External:    externals,
+		NodePaths:   nodePaths,
+		Define: map[string]string{
+			"process.env.NODE_ENV": `"production"`,
+		},
+		Loader: map[string]api.Loader{
+			".node": api.LoaderCopy,
+			".json": api.LoaderJSON,
+		},
+		MinifySyntax:     true,
+		MinifyWhitespace: true,
+		LegalComments:    api.LegalCommentsNone,
+		Metafile:         true,
+		Banner: map[string]string{
+			"js": "var __dirname = \"/\"; var __filename = \"/worker.mjs\"; globalThis.__dirname = \"/\"; globalThis.__filename = \"/worker.mjs\"; if (typeof process !== \"undefined\" && process.env) { process.env.NODE_ENV = \"production\"; process.env.NEXT_RUNTIME = process.env.NEXT_RUNTIME || \"nodejs\"; }",
+		},
+		Plugins: []api.Plugin{
+			vfsFsPlugin(runtimeRoot),
+			nextServerTrimPlugin(runtimeRoot),
+			dynamicRequirePatchPlugin(),
+			nodeBuiltinsPlugin(),
+		},
+		AbsWorkingDir: cwd,
+		Outfile:       out,
+		Write:         true,
+	})
+
+	if len(result.Errors) > 0 {
+		formatted := api.FormatMessages(result.Errors, api.FormatMessagesOptions{
+			Kind:          api.ErrorMessage,
+			Color:         false,
+			TerminalWidth: 80,
+		})
+		return fmt.Errorf("esbuild failed:\n%s", strings.Join(formatted, "\n"))
+	}
+
+	if result.Metafile != "" {
+		if err := os.MkdirAll(filepath.Dir(metaPath), 0o750); err == nil {
+			_ = os.WriteFile(metaPath, []byte(result.Metafile), 0o600)
+		}
+	}
+	return nil
+}
+
+// vfsFsPlugin routes `fs` / `node:fs` and `fs/promises` / `node:fs/promises`
+// to our Virtual Filesystem shim so NextNodeServer's manifest reads succeed
+// inside Cloudflare Workers without a disk.
+func vfsFsPlugin(runtimeRoot string) api.Plugin {
+	fsShim := filepath.Join(runtimeRoot, "nextserver", "vfs_fs_shim.mjs")
+	fsPromisesShim := filepath.Join(runtimeRoot, "nextserver", "vfs_fs_promises_shim.mjs")
+	return api.Plugin{
+		Name: "nextserver-vfs-fs",
+		Setup: func(build api.PluginBuild) {
+			build.OnResolve(api.OnResolveOptions{Filter: `^(node:)?fs$`}, func(_ api.OnResolveArgs) (api.OnResolveResult, error) {
+				return api.OnResolveResult{Path: fsShim}, nil
+			})
+			build.OnResolve(api.OnResolveOptions{Filter: `^(node:)?fs/promises$`}, func(_ api.OnResolveArgs) (api.OnResolveResult, error) {
+				return api.OnResolveResult{Path: fsPromisesShim}, nil
+			})
+		},
+	}
+}
+
+// nextServerTrimPlugin stubs build-time / native-binary packages conditionally
+// referenced by NextNodeServer (sharp, swc, webpack, terser, telemetry, etc.)
+// and resolves our internal Cloudflare CacheHandler specifier.
+func nextServerTrimPlugin(runtimeRoot string) api.Plugin {
+	cacheHandlerPath := filepath.Join(runtimeRoot, "nextserver", "cf_cache_handler.mjs")
+	trimFilter := `^(sharp|webpack|webpack/.*|terser|typescript|@next/swc-.*|@babel/.*|styled-jsx/macro|caniuse-lite|caniuse-lite/.*|browserslist|@vercel/og|next/dist/compiled/webpack/.*|next/dist/telemetry/.*|next/dist/trace/.*|next/dist/build/.*)$`
+	return api.Plugin{
+		Name: "nextserver-trim",
+		Setup: func(build api.PluginBuild) {
+			build.OnResolve(api.OnResolveOptions{Filter: `^__nextdeploy_cf_cache_handler__$`}, func(_ api.OnResolveArgs) (api.OnResolveResult, error) {
+				return api.OnResolveResult{Path: cacheHandlerPath}, nil
+			})
+			build.OnResolve(api.OnResolveOptions{Filter: trimFilter}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				return api.OnResolveResult{
+					Path:      args.Path,
+					Namespace: "next-trim-stub",
+				}, nil
+			})
+			build.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "next-trim-stub"}, func(_ api.OnLoadArgs) (api.OnLoadResult, error) {
+				contents := `
+const stub = new Proxy(() => {}, {
+	get: (_t, prop) => (prop === "__esModule" ? true : prop === "default" ? stub : stub),
+	apply: () => stub,
+	construct: () => stub,
+});
+export default stub;
+`
+				return api.OnLoadResult{
+					Contents: &contents,
+					Loader:   api.LoaderJS,
+				}, nil
+			})
+		},
+	}
+}
+
+var dynamicRequireExprRe = regexp.MustCompile(`\brequire\(\s*([^'"\s][^)]*)\)`)
+
+const dynamicRequireHelper = `
+const __ndDynRequire = (spec) => {
+  if (spec === "__nextdeploy_cf_cache_handler__" && globalThis.__nextdeployCacheHandler) {
+    return globalThis.__nextdeployCacheHandler;
+  }
+  const loaded = globalThis.__nextdeployLoadModule?.(spec);
+  if (loaded !== undefined) return loaded;
+  return require(spec);
+};
+`
+
+// dynamicRequirePatchPlugin rewrites dynamic `require(expr)` calls inside
+// Next.js's page/cache loaders and Turbopack's server chunk runtime so they
+// resolve synchronously against the build-time static chunk registry.
+func dynamicRequirePatchPlugin() api.Plugin {
+	return api.Plugin{
+		Name: "nextserver-dynamic-require-patch",
+		Setup: func(build api.PluginBuild) {
+			build.OnLoad(api.OnLoadOptions{Filter: `\.(c?js)$`}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				slash := filepath.ToSlash(args.Path)
+				needsPatch := strings.Contains(slash, "/[turbopack]") ||
+					strings.HasSuffix(slash, "/next/dist/server/require.js") ||
+					strings.HasSuffix(slash, "/next/dist/server/load-components.js") ||
+					strings.HasSuffix(slash, "/next/dist/server/lib/incremental-cache/index.js") ||
+					strings.HasSuffix(slash, "/next/dist/server/require-hook.js")
+				if !needsPatch {
+					return api.OnLoadResult{}, nil
+				}
+				raw, err := os.ReadFile(args.Path) // #nosec G304 — esbuild resolved module path
+				if err != nil {
+					return api.OnLoadResult{}, err
+				}
+				src := string(raw)
+				patched := dynamicRequireExprRe.ReplaceAllString(src, "__ndDynRequire($1)")
+				if patched == src {
+					return api.OnLoadResult{}, nil
+				}
+				contents := dynamicRequireHelper + "\n" + patched
+				return api.OnLoadResult{
+					Contents:   &contents,
+					Loader:     api.LoaderJS,
+					ResolveDir: filepath.Dir(args.Path),
+				}, nil
+			})
+		},
+	}
 }
 
 // reactConditionPlugin resolves bare `react` imports per importer so a single

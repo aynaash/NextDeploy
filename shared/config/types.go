@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -120,6 +121,31 @@ type CloudflareConfig struct {
 	// from production. Default false: a would-be wipe aborts the deploy. Set
 	// true only for a deliberate teardown / secret reset.
 	AllowSecretWipe bool `yaml:"allow_secret_wipe,omitempty"`
+
+	// Engine selects the Cloudflare Worker runtime architecture:
+	//   - "auto" (default): uses "nextserver" for Turbopack builds and "legacy" for Webpack builds
+	//   - "nextserver": runs Next's own NextNodeServer inside the Worker with a build-time
+	//     Virtual FS + static chunk registry (full App Router / Turbopack / PPR parity)
+	//   - "legacy": uses the lightweight hand-written nextcompile RSC/SSR runtime (Webpack only)
+	Engine string `yaml:"engine,omitempty"`
+}
+
+// ResolveEngine returns the effective Cloudflare runtime engine ("auto",
+// "nextserver", or "legacy"), honoring the NEXTDEPLOY_CF_ENGINE env override.
+func (c *CloudflareConfig) ResolveEngine() string {
+	if env := strings.ToLower(strings.TrimSpace(os.Getenv("NEXTDEPLOY_CF_ENGINE"))); env != "" {
+		switch env {
+		case "nextserver", "legacy", "auto":
+			return env
+		}
+	}
+	if c != nil {
+		switch strings.ToLower(strings.TrimSpace(c.Engine)) {
+		case "nextserver", "legacy", "auto":
+			return strings.ToLower(strings.TrimSpace(c.Engine))
+		}
+	}
+	return "auto"
 }
 
 // CFObservability mirrors the Workers observability metadata. Enabled is a

@@ -26,6 +26,7 @@ is production-ready and what is not**.
 
 | Capability | Notes |
 |---|---|
+| Worker Runtime Engines (`cloudflare.engine`) | Supports `auto` (default), `nextserver`, and `legacy` (also overridable via `NEXTDEPLOY_CF_ENGINE`). **`nextserver`** runs Next.js's own `NextNodeServer` inside the Worker with a build-time Virtual Filesystem (`vfs.mjs`), static Turbopack/Webpack chunk registry (`chunks.mjs`), streaming Web↔Node HTTP bridge, and Cloudflare R2+KV `CacheHandler` — enabling **native Next 16 Turbopack builds** and full App Router parity (`error.tsx`, `not-found.tsx`, parallel/intercepting routes, PPR, Server Actions). **`auto`** picks `nextserver` for Turbopack builds and `legacy` for Webpack builds. |
 | Static / prerendered pages (`○`, `●`) | Served from the Worker + R2 |
 | ISR & Revalidation | Enforces both time-based `manifest.isr.intervals` (via R2 `customMetadata.revalidatedAt` / `obj.uploaded`) and on-demand `revalidatePath`/`revalidateTag`. Fresh `200 OK` HTML responses write back to R2 asynchronously via `ctx.waitUntil` and clear stale markers; `unstable_cache` persists across isolates when `env.NEXTCOMPILE_CACHE` KV is bound. |
 | Progressive RSC streaming with Suspense boundaries (M3) | App Router pages render and stream progressively via vendored `react-server-dom-webpack/server.edge.mjs`, `react-dom/server.edge.mjs`, and standard-condition `react` (`React.use(rootPromise)`). `<Suspense fallback={...}>` and `loading.tsx` flush as soon as the shell is ready; falls back to M1 awaited rendering if standard `react` was not vendored. |

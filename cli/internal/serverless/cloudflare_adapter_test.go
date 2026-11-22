@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -261,6 +262,113 @@ func TestBuildWorkerBundle_ProductionDefinesAndReactDirFallback(t *testing.T) {
 	info, err := os.Stat(workerOut)
 	if err != nil || info.Size() == 0 {
 		t.Fatalf("expected non-empty worker bundle at %s (err=%v)", workerOut, err)
+	}
+}
+
+// TestBuildWorkerBundle_NextServerTurbopackEndToEnd verifies the full
+// NextNodeServer + Virtual FS + Turbopack chunk-registry pipeline end to end:
+// compiles a synthetic Turbopack Next 16 standalone tree via BuildWorkerBundle,
+// then executes the bundled worker.mjs in Node to assert VFS reads, dynamic
+// Turbopack chunk loading, and streaming HTTP responses all work together.
+func TestBuildWorkerBundle_NextServerTurbopackEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+
+	writeTestFile(t, filepath.Join(dir, "package.json"), `{
+		"name": "turbo-e2e",
+		"dependencies": {"next":"16.0.10","react":"19.2.0"}
+	}`)
+	writeTestFile(t, filepath.Join(dir, ".next", "BUILD_ID"), `turbo-build-42`)
+	writeTestFile(t, filepath.Join(dir, ".next", "routes-manifest.json"), `{"version":3,"basePath":""}`)
+	writeTestFile(t, filepath.Join(dir, ".next", "required-server-files.json"), `{"config":{"poweredByHeader":false}}`)
+
+	// Turbopack chunk runtime + SSR chunk loaded dynamically via require(path.join(...)).
+	writeTestFile(t, filepath.Join(dir, ".next", "server", "chunks", "ssr", "[turbopack]_runtime.js"), `
+const path = require("path");
+exports.loadChunk = function(chunkRel) {
+  return require(path.join(".next/server", chunkRel));
+};
+`)
+	writeTestFile(t, filepath.Join(dir, ".next", "server", "chunks", "ssr", "page_chunk_1.js"), `
+exports.greeting = "Hello from Turbopack NextServer!";
+`)
+	writeTestFile(t, filepath.Join(dir, ".next", "server", "app", "page.js"), `
+const rt = require("../chunks/ssr/[turbopack]_runtime.js");
+exports.render = function() {
+  const chunk = rt.loadChunk("chunks/ssr/page_chunk_1.js");
+  return chunk.greeting;
+};
+`)
+
+	// Minimal NextNodeServer + require.js matching Next.js's real runtime contracts:
+	// reads BUILD_ID via fs.readFileSync (VFS) and dynamically requires page.js.
+	writeTestFile(t, filepath.Join(dir, "node_modules", "next", "dist", "server", "require.js"), `
+exports.requirePage = function(pagePath) {
+  return require(pagePath);
+};
+`)
+	writeTestFile(t, filepath.Join(dir, "node_modules", "next", "dist", "server", "next-server.js"), `
+const fs = require("fs");
+const { requirePage } = require("./require.js");
+
+class NextNodeServer {
+  constructor(opts) {
+    this.opts = opts;
+  }
+  async prepare() {
+    this.buildId = fs.readFileSync("/.next/BUILD_ID", "utf8").trim();
+  }
+  getRequestHandler() {
+    return async (req, res) => {
+      const page = requirePage(".next/server/app/page.js");
+      res.statusCode = 200;
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      res.setHeader("x-build-id", this.buildId);
+      res.write("<h1>" + page.render() + "</h1>");
+      res.end("<p>url=" + req.url + "</p>");
+    };
+  }
+}
+module.exports = NextNodeServer;
+`)
+
+	meta := &nextcore.NextCorePayload{
+		AppName:    "turbo-e2e",
+		DistDir:    ".next",
+		OutputMode: nextcore.OutputModeStandalone,
+		NextBuildMetadata: nextcore.NextBuildMetadata{
+			BuildID:      "turbo-build-42",
+			HasAppRouter: true,
+		},
+	}
+
+	log := shared.PackageLogger("test", "TEST")
+	workerOut, err := BuildWorkerBundle(context.Background(), dir, meta, nil, log)
+	if err != nil {
+		t.Fatalf("BuildWorkerBundle (nextserver/turbopack): %v", err)
+	}
+
+	nodeBin, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not on PATH; skipping runtime execution check")
+	}
+
+	script := `
+import worker from ` + `"` + filepath.ToSlash(workerOut) + `"` + `;
+const res = await worker.fetch(new Request("https://app.example.com/docs?tab=turbo"), {}, { waitUntil() {} });
+const body = await res.text();
+if (res.status !== 200) throw new Error("status=" + res.status + " body=" + body);
+if (res.headers.get("x-build-id") !== "turbo-build-42") throw new Error("bad build id: " + res.headers.get("x-build-id"));
+if (!body.includes("Hello from Turbopack NextServer!")) throw new Error("unexpected body: " + body);
+if (!body.includes("url=/docs?tab=turbo")) throw new Error("missing url in body: " + body);
+console.log("OK:" + body);
+`
+	cmd := exec.CommandContext(t.Context(), nodeBin, "--input-type=module", "-e", script) // #nosec G204
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("executing compiled Turbopack worker.mjs failed: %v\noutput:\n%s", err, string(out))
+	}
+	if !strings.Contains(string(out), "OK:<h1>Hello from Turbopack NextServer!</h1><p>url=/docs?tab=turbo</p>") {
+		t.Fatalf("unexpected worker output: %s", string(out))
 	}
 }
 

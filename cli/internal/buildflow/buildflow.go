@@ -74,7 +74,7 @@ func Run(ctx context.Context, opts Opts) (*Result, error) {
 
 	// ── 1. Incremental skip ────────────────────────────────────────────
 	skipAllowed := !opts.Force
-	if skipAllowed && opts.Cfg.Serverless != nil && opts.Cfg.Serverless.Provider == "cloudflare" && nextbuild.IsTurbopackOutput(".") {
+	if skipAllowed && requiresLegacyWebpackRebuild(opts.Cfg) && nextbuild.IsTurbopackOutput(".") {
 		skipAllowed = false
 	}
 	if skipAllowed {
@@ -225,19 +225,38 @@ func ensureNextBuild(ctx context.Context, target string, cfg *config.NextDeployC
 	hasBuild := err == nil && info.IsDir()
 
 	if target == "serverless" && cfg.Serverless != nil && cfg.Serverless.Provider == "cloudflare" {
-		if hasBuild && !nextbuild.IsTurbopackOutput(".") {
-			log.Info("Existing Webpack standalone detected — skipping rebuild.")
+		if requiresLegacyWebpackRebuild(cfg) {
+			if hasBuild && !nextbuild.IsTurbopackOutput(".") {
+				log.Info("Existing Webpack standalone detected — skipping rebuild.")
+				return false, nil
+			}
+			if !hasBuild {
+				log.Info("No standalone build found — running `next build --webpack` (legacy engine).")
+			} else {
+				log.Warn("Turbopack standalone detected — legacy Cloudflare engine requires Webpack output.")
+				log.Info("Re-running `next build --webpack` (this overwrites .next/).")
+			}
+			if err := nextbuild.Run(ctx, nextbuild.Opts{
+				ProjectDir: ".",
+				Target:     nextbuild.TargetCloudflareWorker,
+				Log:        log,
+			}); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+		if hasBuild {
+			if nextbuild.IsTurbopackOutput(".") {
+				log.Info("Existing Turbopack standalone detected — using NextServer Worker engine.")
+			} else {
+				log.Info("Existing Webpack standalone detected — skipping rebuild.")
+			}
 			return false, nil
 		}
-		if !hasBuild {
-			log.Info("No standalone build found — running `next build --webpack`.")
-		} else {
-			log.Warn("Turbopack standalone detected — Cloudflare adapter requires Webpack output.")
-			log.Info("Re-running `next build --webpack` (this overwrites .next/).")
-		}
+		log.Info("No standalone build found — running `next build`.")
 		if err := nextbuild.Run(ctx, nextbuild.Opts{
 			ProjectDir: ".",
-			Target:     nextbuild.TargetCloudflareWorker,
+			Target:     nextbuild.TargetGeneric,
 			Log:        log,
 		}); err != nil {
 			return false, err
@@ -258,6 +277,13 @@ func ensureNextBuild(ctx context.Context, target string, cfg *config.NextDeployC
 		return false, err
 	}
 	return true, nil
+}
+
+func requiresLegacyWebpackRebuild(cfg *config.NextDeployConfig) bool {
+	if cfg == nil || cfg.Serverless == nil || cfg.Serverless.Provider != "cloudflare" {
+		return false
+	}
+	return cfg.Serverless.Cloudflare.ResolveEngine() == "legacy"
 }
 
 func nextbuildTargetFor(target string) nextbuild.Target {
