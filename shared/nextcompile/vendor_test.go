@@ -344,3 +344,25 @@ func TestDetectModuleFormat(t *testing.T) {
 		t.Errorf("flat esm should sniff as esm, got %q", got)
 	}
 }
+
+func TestVendorRSC_VendorsStandardReactWhenPresent(t *testing.T) {
+	dir := t.TempDir()
+	pkgDir := writeRSCFixture(t, dir, "19.0.0")
+	writeFile(t, filepath.Join(pkgDir, "esm", "react-server-dom-webpack-server.edge.production.js"), `// server`)
+	reactDir := filepath.Join(dir, "node_modules", "react")
+	writeFile(t, filepath.Join(reactDir, "package.json"), `{"name":"react","version":"19.0.0"}`)
+	writeFile(t, filepath.Join(reactDir, "cjs", "react.production.js"),
+		`'use strict'; exports.use = function(){}; exports.createElement = function(){};`)
+
+	out := filepath.Join(dir, "out")
+	pkg, err := VendorRSC(dir, out)
+	if err != nil {
+		t.Fatalf("VendorRSC: %v", err)
+	}
+	if len(pkg.Extra) != 3 {
+		t.Fatalf("want 3 companions (client.edge, react-dom, react), got %d", len(pkg.Extra))
+	}
+	if _, err := os.Stat(filepath.Join(out, "_nextdeploy", "runtime", "vendor", "react", "index.mjs")); err != nil {
+		t.Fatalf("vendored standard react interop shim missing: %v", err)
+	}
+}

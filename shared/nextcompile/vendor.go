@@ -30,6 +30,8 @@ var (
 	ErrRSCClientEdgeNotFound   = errors.New("react-server-dom-webpack client.edge build not found")
 	ErrReactDOMPackageNotFound = errors.New("react-dom not found in node_modules")
 	ErrReactDOMServerNotFound  = errors.New("react-dom server.edge build not found")
+	ErrReactPackageNotFound    = errors.New("react not found in node_modules")
+	ErrReactStandardNotFound   = errors.New("react standard production build not found")
 )
 
 // VendoredPackage records what VendorRSC copied into the bundle. The
@@ -120,6 +122,13 @@ func VendorRSC(standaloneDir, bundleDir string) (*VendoredPackage, error) {
 	}
 	domPkg.Version = domMeta.Version
 	primary.Extra = append(primary.Extra, *domPkg)
+
+	// SSR companion 3 — standard (non-react-server) react build for Fizz SSR.
+	if reactPkg, err := vendorStandardReact(standaloneDir, bundleDir); err == nil {
+		primary.Extra = append(primary.Extra, *reactPkg)
+	} else if !errors.Is(err, ErrReactPackageNotFound) {
+		return nil, err
+	}
 
 	return primary, nil
 }
@@ -360,6 +369,116 @@ func locateReactDOMPackage(standaloneDir string) (string, error) {
 		return firstPkg, nil
 	}
 	return "", ErrReactDOMPackageNotFound
+}
+
+func findStandardReactBuild(pkgDir string) (string, string, error) {
+	candidates := []struct {
+		rel       string
+		buildKind string
+	}{
+		{"cjs/react.production.js", "production"},
+		{"cjs/react.production.min.js", "production"},
+		{"esm/react.production.js", "production"},
+		{"cjs/react.development.js", "development"},
+		{"index.js", "legacy"},
+	}
+	for _, c := range candidates {
+		p := filepath.Join(pkgDir, c.rel)
+		if _, err := os.Stat(p); err == nil {
+			return p, c.buildKind, nil
+		}
+	}
+	return "", "", ErrReactStandardNotFound
+}
+
+func locateReactPackage(standaloneDir string) (string, error) {
+	var firstPkg string
+	check := func(dir string) (string, bool) {
+		current := dir
+		for range 5 {
+			candidates := []string{
+				filepath.Join(current, "node_modules", "react"),
+				filepath.Join(current, "node_modules", "next", "dist", "compiled", "react"),
+			}
+			for _, candidate := range candidates {
+				if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
+					if _, _, err := findStandardReactBuild(candidate); err == nil {
+						return candidate, true
+					}
+					if firstPkg == "" {
+						firstPkg = candidate
+					}
+				}
+			}
+			parent := filepath.Dir(current)
+			if parent == current {
+				break
+			}
+			current = parent
+		}
+		return "", false
+	}
+	if match, ok := check(standaloneDir); ok {
+		return match, nil
+	}
+	if wd, err := os.Getwd(); err == nil {
+		if match, ok := check(wd); ok {
+			return match, nil
+		}
+	}
+	if firstPkg != "" {
+		return firstPkg, nil
+	}
+	return "", ErrReactPackageNotFound
+}
+
+func vendorStandardReact(standaloneDir, bundleDir string) (*VendoredPackage, error) {
+	reactDir, err := locateReactPackage(standaloneDir)
+	if err != nil {
+		return nil, err
+	}
+	meta, err := readRSCPackageMeta(reactDir)
+	if err != nil {
+		return nil, fmt.Errorf("read react metadata: %w", err)
+	}
+	src, buildKind, err := findStandardReactBuild(reactDir)
+	if err != nil {
+		return nil, err
+	}
+	format, err := detectModuleFormat(src)
+	if err != nil {
+		return nil, fmt.Errorf("classify %s: %w", src, err)
+	}
+	targetDir := filepath.Join(bundleDir, "_nextdeploy", "runtime", "vendor", "react")
+	if err := os.MkdirAll(targetDir, 0o750); err != nil {
+		return nil, fmt.Errorf("mkdir vendor react: %w", err)
+	}
+	ext := ".mjs"
+	if format == "cjs" {
+		ext = ".cjs"
+	}
+	dst := filepath.Join(targetDir, "index"+ext)
+	n, err := copyFile(src, dst)
+	if err != nil {
+		return nil, fmt.Errorf("copy %s → %s: %w", src, dst, err)
+	}
+	out := &VendoredPackage{
+		Name:       "react",
+		Version:    meta.Version,
+		SourcePath: src,
+		TargetPath: dst,
+		Bytes:      n,
+		BuildKind:  buildKind,
+		Format:     format,
+	}
+	if format == "cjs" {
+		shim := filepath.Join(targetDir, "index.mjs")
+		if err := writeInteropShim(shim, "index"+ext); err != nil {
+			return nil, err
+		}
+		out.ShimPath = shim
+	}
+	return out, nil
 }
 
 // copyFile byte-copies src to dst and returns the number of bytes written.
