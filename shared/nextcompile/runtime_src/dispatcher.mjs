@@ -24,14 +24,14 @@
 // without RSC fall through to the legacy default-export path (Pages
 // Router + simple App Router pages).
 
-import { serveStaticFromR2, serveSSGFromR2, serveRootPublicFromR2 } from "./serve.mjs";
+import { serveStaticFromR2, serveSSGFromR2, serveISRFromR2, serveRootPublicFromR2, versionedKey } from "./serve.mjs";
 import { buildRouteContext } from "./route_match.mjs";
 import { buildRouteTrie, matchTrie } from "./route_trie.mjs";
 import { notFound, serverError } from "./errors.mjs";
 import { runWithContext, createRequestContext } from "./context.mjs";
 import { renderRSC } from "./rsc.mjs";
 import { isServerAction, handleServerAction } from "./actions.mjs";
-import { initCacheIndex, isStale } from "./cache.mjs";
+import { initCacheIndex, isStale, clearStale } from "./cache.mjs";
 import { handleImageRequest } from "./image.mjs";
 import { middlewareMatches } from "./middleware_match.mjs";
 
@@ -159,46 +159,89 @@ async function tryStaticAsset(env, pathname, manifest) {
  * dynamic table. Returns Response on match, null to fall through.
  */
 async function tryRouteDispatch(request, env, ctx, url, pathname, tables) {
-  // Cached prerendered HTML (SSG / ISR) is checked FIRST. App Router
-  // pages have a compiled module in staticTable AND a prerendered HTML
-  // file in R2 — but the compiled module can't be invoked directly
-  // (no default export, App Router runtime not available). Serving the
-  // HTML from R2 is correct for any route that prerendered, regardless
-  // of whether a compiled module also exists.
-  const cached = await tryCachedRender(env, tables.manifest, pathname);
-  if (cached) return cached;
+  const { manifest } = tables;
+  const cached = await tryCachedRender(env, manifest, pathname);
+  if (cached.response) return cached.response;
 
+  const isrTarget = manifest.routes?.isr?.[pathname];
+  const canWriteBack = Boolean(
+    cached.stale &&
+      isrTarget &&
+      request.method === "GET" &&
+      env.ASSETS &&
+      typeof ctx?.waitUntil === "function",
+  );
+
+  let response = null;
   const staticEntry = tables.staticTable[pathname];
   if (staticEntry) {
-    return invokeCompiled(staticEntry, request, env, ctx, { params: {} }, url, tables.manifest);
+    response = await invokeCompiled(staticEntry, request, env, ctx, { params: {} }, url, manifest);
+  } else {
+    if (!tables._routeTrie) {
+      tables._routeTrie = buildRouteTrie(tables.dynamicTable || []);
+    }
+    const dyn = matchTrie(pathname, tables._routeTrie);
+    if (dyn) {
+      const routeCtx = buildRouteContext(url, dyn.params);
+      response = await invokeCompiled(dyn.entry, request, env, ctx, routeCtx, url, manifest);
+    }
   }
 
-  if (!tables._routeTrie) {
-    tables._routeTrie = buildRouteTrie(tables.dynamicTable || []);
+  // Only persist public 200 HTML responses without Set-Cookie headers.
+  if (
+    response &&
+    canWriteBack &&
+    response.status === 200 &&
+    !response.headers.has("set-cookie") &&
+    (response.headers.get("content-type") || "").includes("text/html")
+  ) {
+    const clone = response.clone();
+    const r2Key = versionedKey(isrTarget.replace(/^\/+/, ""), manifest?.assetVersion);
+    const tags = isrTagsFor(pathname, manifest);
+    ctx.waitUntil(
+      (async () => {
+        try {
+          const htmlBytes = await clone.arrayBuffer();
+          await env.ASSETS.put(r2Key, htmlBytes, {
+            httpMetadata: { contentType: "text/html; charset=utf-8" },
+            customMetadata: { revalidatedAt: String(Date.now()) },
+          });
+          await clearStale(pathname, tags, env);
+        } catch (err) {
+          console.error("[nextcompile isr write-back failed]", err);
+        }
+      })(),
+    );
   }
-  const dyn = matchTrie(pathname, tables._routeTrie);
-  if (dyn) {
-    const routeCtx = buildRouteContext(url, dyn.params);
-    return invokeCompiled(dyn.entry, request, env, ctx, routeCtx, url, tables.manifest);
-  }
-  return null;
+
+  return response;
 }
 
 /**
  * Serve the pre-rendered HTML for SSG / ISR routes when the path isn't
- * marked stale. Unified because both tiers use the same R2 lookup path
- * and stale-check; only the manifest source differs.
+ * marked stale or expired.
  */
 async function tryCachedRender(env, manifest, pathname) {
-  for (const bucket of ["ssg", "isr"]) {
-    const target = manifest.routes[bucket]?.[pathname];
-    if (!target) continue;
-    const stale = await isStale(pathname, isrTagsFor(pathname, manifest), env);
-    if (stale) continue;
-    const res = await serveSSGFromR2(env, target, manifest);
-    if (res) return res;
+  const ssgTarget = manifest.routes?.ssg?.[pathname];
+  if (ssgTarget) {
+    if (await isStale(pathname, isrTagsFor(pathname, manifest), env)) {
+      return { response: null, stale: true };
+    }
+    const res = await serveSSGFromR2(env, ssgTarget, manifest);
+    if (res) return { response: res, stale: false };
   }
-  return null;
+
+  const isrTarget = manifest.routes?.isr?.[pathname];
+  if (isrTarget) {
+    if (await isStale(pathname, isrTagsFor(pathname, manifest), env)) {
+      return { response: null, stale: true };
+    }
+    const ttl = manifest.isr?.intervals?.[pathname] || 0;
+    const { response, expired } = await serveISRFromR2(env, isrTarget, manifest, ttl);
+    if (expired) return { response: null, stale: true };
+    if (response) return { response: response, stale: false };
+  }
+  return { response: null, stale: false };
 }
 
 /**
