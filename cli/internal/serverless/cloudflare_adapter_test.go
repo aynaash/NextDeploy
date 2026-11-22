@@ -202,6 +202,68 @@ func TestAdapterPreEsbuildStateIsValid(t *testing.T) {
 	}
 }
 
+// TestBuildWorkerBundle_ProductionDefinesAndReactDirFallback guards against two
+// real-world React 19 standalone bundling regressions:
+//  1. node_modules/react without react.react-server.js must NOT resolve to the
+//     react directory itself inside reactConditionPlugin ("is a directory").
+//  2. node_modules/react-dom/index.js with a NODE_ENV branch referencing a
+//     stripped ./cjs/react-dom.development.js must fold to production.
+func TestBuildWorkerBundle_ProductionDefinesAndReactDirFallback(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "package.json"), `{
+		"name": "react19-demo",
+		"dependencies": {"next":"16.0.0","react":"19.2.0"}
+	}`)
+	writeTestFile(t, filepath.Join(dir, ".next", "server", "app", "page.js"),
+		`const React = require("react"); const ReactDOM = require("react-dom"); export default function Page(){ return [React, ReactDOM]; }`)
+
+	// Minimal node_modules/react without react.react-server.js (CJS prod only).
+	writeTestFile(t, filepath.Join(dir, "node_modules", "react", "package.json"),
+		`{"name":"react","version":"19.2.0","main":"index.js"}`)
+	writeTestFile(t, filepath.Join(dir, "node_modules", "react", "index.js"),
+		`if (process.env.NODE_ENV === 'production') { module.exports = require('./cjs/react.production.js'); } else { module.exports = require('./cjs/react.development.js'); }`)
+	writeTestFile(t, filepath.Join(dir, "node_modules", "react", "cjs", "react.production.js"),
+		`'use strict'; exports.use = function(){}; exports.createElement = function(){};`)
+
+	// Minimal node_modules/react-dom with stripped development build.
+	writeTestFile(t, filepath.Join(dir, "node_modules", "react-dom", "package.json"),
+		`{"name":"react-dom","version":"19.2.0","main":"index.js"}`)
+	writeTestFile(t, filepath.Join(dir, "node_modules", "react-dom", "index.js"),
+		`if (process.env.NODE_ENV === 'production') { module.exports = require('./cjs/react-dom.production.js'); } else { module.exports = require('./cjs/react-dom.development.js'); }`)
+	writeTestFile(t, filepath.Join(dir, "node_modules", "react-dom", "cjs", "react-dom.production.js"),
+		`'use strict'; exports.version = '19.2.0';`)
+	writeTestFile(t, filepath.Join(dir, "node_modules", "react-dom", "cjs", "react-dom-server.edge.production.js"),
+		`'use strict'; const React = require('react'); exports.renderToReadableStream = function(){ return React; };`)
+
+	// Minimal react-server-dom-webpack requiring bare "react".
+	writeTestFile(t, filepath.Join(dir, "node_modules", "react-server-dom-webpack", "package.json"),
+		`{"name":"react-server-dom-webpack","version":"19.2.0"}`)
+	writeTestFile(t, filepath.Join(dir, "node_modules", "react-server-dom-webpack", "cjs", "react-server-dom-webpack-server.edge.production.js"),
+		`'use strict'; const React = require('react'); exports.renderToReadableStream = function(){ return React; };`)
+	writeTestFile(t, filepath.Join(dir, "node_modules", "react-server-dom-webpack", "cjs", "react-server-dom-webpack-client.edge.production.js"),
+		`'use strict'; const React = require('react'); exports.createFromReadableStream = function(){ return React; };`)
+
+	meta := &nextcore.NextCorePayload{
+		AppName:    "react19-demo",
+		DistDir:    ".next",
+		OutputMode: nextcore.OutputModeStandalone,
+		NextBuildMetadata: nextcore.NextBuildMetadata{
+			BuildID:      "build-99",
+			HasAppRouter: true,
+		},
+	}
+
+	log := shared.PackageLogger("test", "TEST")
+	workerOut, err := BuildWorkerBundle(context.Background(), dir, meta, nil, log)
+	if err != nil {
+		t.Fatalf("BuildWorkerBundle failed: %v", err)
+	}
+	info, err := os.Stat(workerOut)
+	if err != nil || info.Size() == 0 {
+		t.Fatalf("expected non-empty worker bundle at %s (err=%v)", workerOut, err)
+	}
+}
+
 // writeTestFile mirrors the test helper in nextcompile — duplicated here
 // because Go test helpers don't cross package boundaries.
 func writeTestFile(t *testing.T, path, content string) {

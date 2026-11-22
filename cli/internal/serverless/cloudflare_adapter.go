@@ -344,12 +344,17 @@ func runEsbuild(ctx context.Context, entry, out, metaPath, cwd string, log *shar
 	var reactServerPath string
 	for _, np := range nodePaths {
 		if reactServerPath == "" {
-			candidateServer := filepath.Join(np, "react", "react.react-server.js")
-			candidate := filepath.Join(np, "react")
-			if _, err := os.Stat(candidateServer); err == nil {
-				reactServerPath = candidateServer
-			} else if _, err := os.Stat(candidate); err == nil {
-				reactServerPath = candidate
+			for _, rel := range []string{
+				filepath.Join("react", "react.react-server.js"),
+				filepath.Join("react", "cjs", "react.react-server.production.js"),
+				filepath.Join("next", "dist", "compiled", "react", "react.react-server.js"),
+				filepath.Join("next", "dist", "compiled", "react", "cjs", "react.react-server.production.js"),
+			} {
+				candidate := filepath.Join(np, rel)
+				if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+					reactServerPath = candidate
+					break
+				}
 			}
 		}
 		if _, ok := alias["react-dom"]; !ok {
@@ -383,6 +388,9 @@ func runEsbuild(ctx context.Context, entry, out, metaPath, cwd string, log *shar
 		Conditions:  []string{"react-server", "workerd", "worker", "node"},
 		External:    externals,
 		NodePaths:   nodePaths,
+		Define: map[string]string{
+			"process.env.NODE_ENV": `"production"`,
+		},
 		Loader: map[string]api.Loader{
 			".node": api.LoaderCopy,
 			".json": api.LoaderJSON,
@@ -436,7 +444,7 @@ func reactConditionPlugin(runtimeRoot, reactServerPath string) api.Plugin {
 					strings.Contains(imp, "/vendor/react-server-dom-webpack/client.edge") ||
 					strings.HasSuffix(imp, "/runtime/ssr.mjs")
 				if isSSRImporter {
-					if _, err := os.Stat(ssrReact); err == nil {
+					if info, err := os.Stat(ssrReact); err == nil && !info.IsDir() {
 						return api.OnResolveResult{Path: ssrReact}, nil
 					}
 				}
