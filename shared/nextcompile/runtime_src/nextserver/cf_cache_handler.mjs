@@ -148,7 +148,7 @@ export class CloudflareCacheHandler {
               rscData,
               headers: {},
               postponed: undefined,
-              status: 200,
+              status: key === "/_not-found" ? 404 : undefined,
             },
             lastModified,
             tags: [],

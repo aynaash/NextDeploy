@@ -152,6 +152,7 @@ test("CloudflareCacheHandler loads build-time prerendered HTML and RSC payloads 
   const releaseStore = new Map([
     ["_nextdeploy/releases/v1/docs/advanced/nextcompile.html", { body: "<h1>NextCompile</h1>" }],
     ["_nextdeploy/releases/v1/docs/advanced/nextcompile.rsc", { body: "0:[\"$\",\"h1\",null,{\"children\":\"NextCompile\"}]\n" }],
+    ["_nextdeploy/releases/v1/_not-found.html", { body: "<h1>Not Found</h1>" }],
   ]);
   globalThis.__nextdeployEnv = {
     ASSETS: {
@@ -162,8 +163,13 @@ test("CloudflareCacheHandler loads build-time prerendered HTML and RSC payloads 
   const hit = await handler.get("/docs/advanced/nextcompile", { kind: "APP_PAGE" });
   assert.equal(hit?.value?.kind, "APP_PAGE");
   assert.equal(hit?.value?.html, "<h1>NextCompile</h1>");
+  assert.equal(hit?.value?.status, undefined);
   assert.ok(Buffer.isBuffer(hit?.value?.rscData));
   assert.equal(hit.value.rscData.toString("utf8"), "0:[\"$\",\"h1\",null,{\"children\":\"NextCompile\"}]\n");
+
+  // /_not-found must preserve HTTP 404 status so NextNodeServer never returns 200 for missing routes.
+  const notFoundHit = await handler.get("/_not-found", { kind: "APP_PAGE" });
+  assert.equal(notFoundHit?.value?.status, 404);
 
   // FETCH cache lookups must never collide with release HTML files.
   resetLocalCacheForTests();
