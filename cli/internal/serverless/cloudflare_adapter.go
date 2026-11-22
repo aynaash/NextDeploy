@@ -341,14 +341,15 @@ func runEsbuild(ctx context.Context, entry, out, metaPath, cwd string, log *shar
 		}
 	}
 
+	var reactServerPath string
 	for _, np := range nodePaths {
-		if _, ok := alias["react"]; !ok {
+		if reactServerPath == "" {
 			candidateServer := filepath.Join(np, "react", "react.react-server.js")
 			candidate := filepath.Join(np, "react")
 			if _, err := os.Stat(candidateServer); err == nil {
-				alias["react"] = candidateServer
+				reactServerPath = candidateServer
 			} else if _, err := os.Stat(candidate); err == nil {
-				alias["react"] = candidate
+				reactServerPath = candidate
 			}
 		}
 		if _, ok := alias["react-dom"]; !ok {
@@ -395,6 +396,7 @@ func runEsbuild(ctx context.Context, entry, out, metaPath, cwd string, log *shar
 			"js": "var __dirname = \"/\"; var __filename = \"/worker.mjs\"; globalThis.__dirname = \"/\"; globalThis.__filename = \"/worker.mjs\"; process.env.NEXT_RUNTIME = process.env.NEXT_RUNTIME || \"edge\";",
 		},
 		Plugins: []api.Plugin{
+			reactConditionPlugin(runtimeRoot, reactServerPath),
 			nodeBuiltinsPlugin(),
 		},
 		AbsWorkingDir: cwd,
@@ -418,6 +420,33 @@ func runEsbuild(ctx context.Context, entry, out, metaPath, cwd string, log *shar
 	}
 
 	return nil
+}
+
+// reactConditionPlugin resolves bare `react` imports per importer so a single
+// Worker bundle can hold both react.react-server (for RSC encoding) and the
+// standard React build (for react-dom/server.edge and Suspense use() streaming).
+func reactConditionPlugin(runtimeRoot, reactServerPath string) api.Plugin {
+	ssrReact := filepath.Join(runtimeRoot, "vendor", "react", "index.mjs")
+	return api.Plugin{
+		Name: "react-dual-condition",
+		Setup: func(build api.PluginBuild) {
+			build.OnResolve(api.OnResolveOptions{Filter: `^react$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				imp := filepath.ToSlash(args.Importer)
+				isSSRImporter := strings.Contains(imp, "/vendor/react-dom/") ||
+					strings.Contains(imp, "/vendor/react-server-dom-webpack/client.edge") ||
+					strings.HasSuffix(imp, "/runtime/ssr.mjs")
+				if isSSRImporter {
+					if _, err := os.Stat(ssrReact); err == nil {
+						return api.OnResolveResult{Path: ssrReact}, nil
+					}
+				}
+				if reactServerPath != "" {
+					return api.OnResolveResult{Path: reactServerPath}, nil
+				}
+				return api.OnResolveResult{}, nil
+			})
+		},
+	}
 }
 
 var nativeNodeModules = map[string]bool{
