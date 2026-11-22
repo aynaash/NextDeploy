@@ -371,7 +371,7 @@ func locateReactDOMPackage(standaloneDir string) (string, error) {
 	return "", ErrReactDOMPackageNotFound
 }
 
-func findStandardReactBuild(pkgDir string) (string, string, error) {
+func findStandardReactBuild(pkgDir string) (srcPath, buildKind string, err error) {
 	candidates := []struct {
 		rel       string
 		buildKind string
@@ -384,46 +384,51 @@ func findStandardReactBuild(pkgDir string) (string, string, error) {
 	}
 	for _, c := range candidates {
 		p := filepath.Join(pkgDir, c.rel)
-		if _, err := os.Stat(p); err == nil {
+		if _, statErr := os.Stat(p); statErr == nil {
 			return p, c.buildKind, nil
 		}
 	}
 	return "", "", ErrReactStandardNotFound
 }
 
-func locateReactPackage(standaloneDir string) (string, error) {
-	var firstPkg string
-	check := func(dir string) (string, bool) {
-		current := dir
-		for range 5 {
-			candidates := []string{
-				filepath.Join(current, "node_modules", "react"),
-				filepath.Join(current, "node_modules", "next", "dist", "compiled", "react"),
+func findReactInAncestors(startDir string) (matched, fallback string) {
+	current := startDir
+	for range 5 {
+		for _, candidate := range []string{
+			filepath.Join(current, "node_modules", "react"),
+			filepath.Join(current, "node_modules", "next", "dist", "compiled", "react"),
+		} {
+			if _, err := os.Stat(filepath.Join(candidate, "package.json")); err != nil {
+				continue
 			}
-			for _, candidate := range candidates {
-				if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
-					if _, _, err := findStandardReactBuild(candidate); err == nil {
-						return candidate, true
-					}
-					if firstPkg == "" {
-						firstPkg = candidate
-					}
-				}
+			if _, _, err := findStandardReactBuild(candidate); err == nil {
+				return candidate, fallback
 			}
-			parent := filepath.Dir(current)
-			if parent == current {
-				break
+			if fallback == "" {
+				fallback = candidate
 			}
-			current = parent
 		}
-		return "", false
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
 	}
-	if match, ok := check(standaloneDir); ok {
+	return "", fallback
+}
+
+func locateReactPackage(standaloneDir string) (string, error) {
+	match, firstPkg := findReactInAncestors(standaloneDir)
+	if match != "" {
 		return match, nil
 	}
 	if wd, err := os.Getwd(); err == nil {
-		if match, ok := check(wd); ok {
-			return match, nil
+		wdMatch, wdFallback := findReactInAncestors(wd)
+		if wdMatch != "" {
+			return wdMatch, nil
+		}
+		if firstPkg == "" {
+			firstPkg = wdFallback
 		}
 	}
 	if firstPkg != "" {
