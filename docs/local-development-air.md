@@ -30,7 +30,7 @@ mage dev
 ```
 
 ### What happens:
-* Air watches [`cli/`](../cli) and [`shared/`](../shared) directories for `.go` and `.toml` changes.
+* Air watches [`cli/`](https://github.com/aynaash/NextDeploy/tree/main/cli) and [`shared/`](https://github.com/aynaash/NextDeploy/tree/main/shared) directories for `.go` and `.toml` changes.
 * On change, it compiles:
   ```bash
   go build -o tmp/nextdeploy ./cli && mkdir -p $HOME/.nextdeploy/bin && cp tmp/nextdeploy $HOME/.nextdeploy/bin/nextdeploy
@@ -55,7 +55,7 @@ mage devDaemon
 ```
 
 ### What happens:
-* Air watches [`daemon/`](../daemon) and [`shared/`](../shared).
+* Air watches [`daemon/`](https://github.com/aynaash/NextDeploy/tree/main/daemon) and [`shared/`](https://github.com/aynaash/NextDeploy/tree/main/shared).
 * Rebuilds and restarts the foreground daemon process on port/socket automatically.
 
 ---
@@ -77,10 +77,10 @@ To run rapid compilation, tests, and formatting checks alongside Air:
 
 ## 4. Configuration Details
 
-* **CLI configuration:** [`.air.cli.toml`](../.air.cli.toml)
+* **CLI configuration:** [`.air.cli.toml`](https://github.com/aynaash/NextDeploy/blob/main/.air.cli.toml)
   * Watches: `cli/`, `shared/`
   * Excludes: `tmp/`, `vendor/`, `daemon/`, `docs/`, `_test.go`
   * Destination: `tmp/nextdeploy` and `$HOME/.nextdeploy/bin/nextdeploy`
-* **Daemon configuration:** [`.air.daemon.toml`](../.air.daemon.toml)
+* **Daemon configuration:** [`.air.daemon.toml`](https://github.com/aynaash/NextDeploy/blob/main/.air.daemon.toml)
   * Watches: `daemon/`, `shared/`
   * Excludes: `tmp/`, `vendor/`, `cli/`, `docs/`, `_test.go`
