@@ -85,6 +85,11 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		NextCoreLogger.Error("Failed to parse middleware configuration: %v", err)
 		return NextCorePayload{}, err
 	}
+	proxyConfig, err := ParseProxy(cwd)
+	if err != nil {
+		NextCoreLogger.Error("Failed to parse proxy configuration: %v", err)
+		return NextCorePayload{}, err
+	}
 
 	staticAssets, err := ParseStaticAssets(cwd, features.DistDir)
 	if err != nil {
@@ -140,6 +145,7 @@ func GenerateMetadata() (metadata NextCorePayload, err error) {
 		DistDir:          features.DistDir,
 		ExportDir:        features.ExportDir,
 		Middleware:       middlewareConfig,
+		Proxy:            proxyConfig,
 		StaticAssets:     staticAssets,
 		GitCommit:        gitCommit,
 		GitDirty:         git.IsDirty(),
@@ -537,84 +543,64 @@ func scanRootAssets(projectDir string) ([]StaticAsset, error) {
 	return assets, nil
 }
 
-// ParseMiddleware parses Next.js middleware configuration.
+// ParseMiddleware parses Next.js middleware.{ts,js} configuration.
+// Falls back to proxy.{ts,js} only when no middleware file exists so callers
+// reading payload.Middleware directly remain backward compatible.
 func ParseMiddleware(projectDir string) (*MiddlewareConfig, error) {
-	config := &MiddlewareConfig{
-		Path:     filepath.Join(projectDir, "middleware.js"),
-		Matchers: []MiddlewareRoute{},
-		Runtime:  "nodejs", // Default runtime
-	}
-
-	// Check for middleware.ts first, then middleware.js.
-	//
-	// Only the FIRST match is parsed, so an app carrying both middleware.* and
-	// proxy.* yields one matcher block. The runtime gates both refs on that
-	// single list (dispatcher.mjs runMiddlewareStack), so the second file
-	// inherits the first's matcher — see the log warning below.
-	middlewarePaths := []string{
+	return parseInterceptorFiles([]string{
 		filepath.Join(projectDir, "middleware.ts"),
 		filepath.Join(projectDir, "middleware.js"),
 		filepath.Join(projectDir, "proxy.ts"),
 		filepath.Join(projectDir, "proxy.js"),
-	}
+	})
+}
 
-	var middlewareFile string
-	for _, path := range middlewarePaths {
-		if _, err := os.Stat(path); err == nil {
-			middlewareFile = path
-			config.Path = path
+// ParseProxy parses Next 15+ proxy.{ts,js} configuration independently.
+func ParseProxy(projectDir string) (*MiddlewareConfig, error) {
+	return parseInterceptorFiles([]string{
+		filepath.Join(projectDir, "proxy.ts"),
+		filepath.Join(projectDir, "proxy.js"),
+	})
+}
+
+func parseInterceptorFiles(candidates []string) (*MiddlewareConfig, error) {
+	var found string
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			found = p
 			break
 		}
 	}
-
-	if middlewareFile == "" {
-		return nil, nil // No middleware file found
+	if found == "" {
+		return nil, nil
 	}
 
-	// Warn when a second interceptor file exists but is not parsed — its
-	// matcher is silently replaced by middlewareFile's at request time.
-	for _, path := range middlewarePaths {
-		if path == middlewareFile {
-			continue
-		}
-		if _, err := os.Stat(path); err == nil {
-			NextCoreLogger.Warn(
-				"Multiple middleware/proxy files found; only %s is parsed. %s will run with %s's matcher.",
-				filepath.Base(middlewareFile), filepath.Base(path), filepath.Base(middlewareFile))
-		}
-	}
-
-	// #nosec G304
-	// Read middleware file content
-	content, err := os.ReadFile(middlewareFile)
+	content, err := os.ReadFile(found) // #nosec G304
 	if err != nil {
-		NextCoreLogger.Error("Failed to read middleware file: %v", err)
-		return nil, fmt.Errorf("failed to read middleware file: %w", err)
+		NextCoreLogger.Error("Failed to read interceptor file %s: %v", found, err)
+		return nil, fmt.Errorf("failed to read %s: %w", filepath.Base(found), err)
 	}
 
-	// Parse middleware matchers
 	matchers, err := parseMiddlewareMatchers(string(content))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse middleware matchers: %w", err)
-	}
-	config.Matchers = matchers
-
-	// Check for Edge runtime
-	if strings.Contains(string(content), "runtime: 'edge'") {
-		config.Runtime = "edge"
+		return nil, fmt.Errorf("failed to parse matchers in %s: %w", filepath.Base(found), err)
 	}
 
-	// Check for regions configuration
+	cfg := &MiddlewareConfig{
+		Path:     found,
+		Matchers: matchers,
+		Runtime:  "nodejs",
+	}
+	if strings.Contains(string(content), "runtime: 'edge'") || strings.Contains(string(content), `runtime: "edge"`) {
+		cfg.Runtime = "edge"
+	}
 	if regions := parseEdgeRegions(string(content)); len(regions) > 0 {
-		config.Regions = regions
+		cfg.Regions = regions
 	}
-
-	// Check for unstable flags
 	if flag := parseUnstableFlag(string(content)); flag != "" {
-		config.UnstableFlag = flag
+		cfg.UnstableFlag = flag
 	}
-
-	return config, nil
+	return cfg, nil
 }
 
 // parseMiddlewareMatchers extracts route matchers from middleware file.

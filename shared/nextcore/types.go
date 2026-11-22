@@ -18,6 +18,7 @@ type NextCorePayload struct {
 	CDNEnabled        bool              `json:"cdn_enabled"`
 	Domain            string            `json:"domain"`
 	Middleware        *MiddlewareConfig `json:"middleware"`
+	Proxy             *MiddlewareConfig `json:"proxy,omitempty"`
 	StaticAssets      *StaticAssets     `json:"static_assets"`
 	GitCommit         string            `json:"git_commit,omitempty"`
 	AssetVersion      string            `json:"asset_version,omitempty"`
