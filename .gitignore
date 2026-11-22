@@ -60,6 +60,9 @@ test_src_dir/
 !CODE_QUALITY.md
 !CHANGELOG.md
 !CONTRIBUTING.md
+!SECURITY.md
+!CODE_OF_CONDUCT.md
+!.github/**/*.md
 !cli/internal/serverless/REVIEW.md
 !**/README.md
 !CLOUDFLARE_PARITY.md
