@@ -38,6 +38,7 @@ type Manifest struct {
 	Routes        ManifestRoutes  `json:"routes"`
 	ISR           ManifestISR     `json:"isr"`
 	Middleware    *ManifestMiddle `json:"middleware,omitempty"`
+	Proxy         *ManifestMiddle `json:"proxy,omitempty"`
 	Images        *ManifestImages `json:"images,omitempty"`
 	I18n          *ManifestI18n   `json:"i18n,omitempty"`
 	HasAppRouter  bool            `json:"hasAppRouter"`
@@ -154,6 +155,14 @@ func BuildManifest(p Payload, next NextVersion, react ReactVersion, refs []Modul
 			Path:     p.Middleware.Path,
 			Runtime:  p.Middleware.Runtime,
 			Matchers: convertMatchers(p.Middleware.Matchers),
+		}
+	}
+
+	if p.Proxy != nil {
+		m.Proxy = &ManifestMiddle{
+			Path:     p.Proxy.Path,
+			Runtime:  p.Proxy.Runtime,
+			Matchers: convertMatchers(p.Proxy.Matchers),
 		}
 	}
 

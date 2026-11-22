@@ -121,17 +121,17 @@ async function tryShortCircuits(request, env, ctx, pathname, tables) {
  * Response or mutate the request. Returns { response?, request }.
  */
 async function runMiddlewareStack(request, env, ctx, tables) {
-  // The matcher is a guard, not just a path filter: without this gate the
-  // middleware ran on every request, including ones its has/missing
-  // conditions were written to exclude.
-  //
-  // Known limitation: nextcore.ParseMiddleware stores ONE matcher block (the
-  // first of middleware.{ts,js} / proxy.{ts,js} it finds), so an app carrying
-  // both files gates both refs on that single list. In practice proxy.ts
-  // declares no matcher (runs broadly) and middleware.ts carries the
-  // conditions, so the common shapes are correct.
-  const matchers = tables.manifest?.middleware?.matchers;
-  for (const ref of [tables.proxyRef, tables.middlewareRef]) {
+  const stack = [
+    {
+      ref: tables.proxyRef,
+      matchers: tables.manifest?.proxy?.matchers ?? tables.manifest?.middleware?.matchers,
+    },
+    {
+      ref: tables.middlewareRef,
+      matchers: tables.manifest?.middleware?.matchers,
+    },
+  ];
+  for (const { ref, matchers } of stack) {
     if (!ref) continue;
     if (!middlewareMatches(request, matchers)) continue;
     const result = await runMiddlewareLike(ref, request, env, ctx);

@@ -86,6 +86,14 @@ func toCompilePayload(meta *nextcore.NextCorePayload, _ *config.NextDeployConfig
 		}
 	}
 
+	if meta.Proxy != nil {
+		p.Proxy = &nextcompile.MiddlewareConfig{
+			Path:     meta.Proxy.Path,
+			Runtime:  meta.Proxy.Runtime,
+			Matchers: convertMiddlewareMatchers(meta.Proxy.Matchers),
+		}
+	}
+
 	return p
 }
 

@@ -135,6 +135,7 @@ type Payload struct {
 	HasAppRouter bool
 	Routes       RouteInfo
 	Middleware   *MiddlewareConfig
+	Proxy        *MiddlewareConfig
 	ImageConfig  *ImageConfig
 	I18n         *I18nConfig
 	BuildID      string
