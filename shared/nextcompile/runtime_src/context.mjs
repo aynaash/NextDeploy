@@ -77,6 +77,8 @@ export function createRequestContext(request, env, url, params, ctx) {
     draft: { enabled: false },
     responseHeaders: new Headers(),
     setCookies: [],
+    revalidatedPaths: [],
+    revalidatedTags: [],
     // workerCtx provides waitUntil — required by after(). Passing it here
     // (instead of fishing it out globally) keeps the primitive testable.
     workerCtx: ctx || null,

@@ -81,6 +81,7 @@ export function initCacheIndex(manifestISR) {
 export async function revalidatePath(path, _type) {
   if (!path) return;
   markStale(staleRoutes, path);
+  safeContext()?.revalidatedPaths?.push(path);
   await persistToKV(`rev:${path}`);
 }
 
@@ -91,10 +92,13 @@ export async function revalidatePath(path, _type) {
 export async function revalidateTag(tag) {
   if (!tag) return;
   markStale(staleTags, tag);
+  const ctx = safeContext();
+  ctx?.revalidatedTags?.push(tag);
   await persistToKV(`revTag:${tag}`);
   if (tagIndex && Array.isArray(tagIndex[tag])) {
     for (const path of tagIndex[tag]) {
       markStale(staleRoutes, path);
+      ctx?.revalidatedPaths?.push(path);
       await persistToKV(`rev:${path}`);
     }
   }

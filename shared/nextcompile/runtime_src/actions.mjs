@@ -61,7 +61,7 @@ export function isServerAction(request) {
  *   alongside the manifest; lets us dynamic-import by the exact module ID
  *   that server-reference-manifest recorded.
  */
-export async function handleServerAction(request, env, ctx, actionManifest, moduleLoaders) {
+export async function handleServerAction(request, env, ctx, actionManifest, moduleLoaders, tables = undefined) {
   const actionId = request.headers.get("next-action");
   if (!actionId) {
     return plainError(400, "Missing Next-Action header");
@@ -122,18 +122,32 @@ export async function handleServerAction(request, env, ctx, actionManifest, modu
     // Response passthrough — handlers may return redirect()/NextResponse
     // which already serialize correctly.
     if (result instanceof Response) {
+      queueISRWarmups(reqCtx, request, env, ctx, tables);
       return mergeContextHeaders(result, reqCtx);
     }
+
+    let clientModules = {};
+    const routeEntry = tables?.staticTable?.[url.pathname];
+    if (typeof routeEntry?.loadClientManifest === "function") {
+      try {
+        const cm = await routeEntry.loadClientManifest();
+        clientModules = cm?.default?.clientModules || cm?.clientModules || {};
+      } catch {
+        // Fall back to empty clientModules
+      }
+    }
+
+    queueISRWarmups(reqCtx, request, env, ctx, tables);
 
     // Encode the return value as a Flight (RSC) reply the Next client decodes
     // as the action result — the module's own react-server-dom-webpack
     // renderToReadableStream produces the `text/x-component` stream Next
     // expects. Falls back to JSON if the module doesn't expose the encoder or
     // the result shape can't be encoded.
-    const flight = encodeFlightReply(mod, result);
+    const flight = encodeFlightReply(mod, result, clientModules);
     if (flight) {
       const headers = new Headers({ "content-type": "text/x-component" });
-      applyContextHeaders(headers, reqCtx);
+      applyRevalidationHeaders(headers, reqCtx);
       return new Response(flight, { status: 200, headers });
     }
 
@@ -142,9 +156,20 @@ export async function handleServerAction(request, env, ctx, actionManifest, modu
       "content-type": "application/json",
       "x-nextcompile-action-response": "json",
     });
-    applyContextHeaders(headers, reqCtx);
+    applyRevalidationHeaders(headers, reqCtx);
     return new Response(body, { status: 200, headers });
   });
+}
+
+function queueISRWarmups(reqCtx, request, env, ctx, tables) {
+  if (!reqCtx.revalidatedPaths?.length || typeof tables?.warmISRPath !== "function") return;
+  if (typeof ctx?.waitUntil !== "function") return;
+  const origin = new URL(request.url).origin;
+  for (const path of new Set(reqCtx.revalidatedPaths)) {
+    if (tables.manifest?.routes?.isr?.[path]) {
+      ctx.waitUntil(tables.warmISRPath(path, origin, env, ctx, tables).catch(() => {}));
+    }
+  }
 }
 
 // ── Action resolution + response encoding ────────────────────────────────────
@@ -193,11 +218,11 @@ import("./vendor/react-server-dom-webpack/server.edge.mjs")
 // `text/x-component` format Next's client decodes. Returns the stream, or null
 // when the encoder is unavailable / throws (caller falls back to JSON). An empty
 // client manifest is sufficient for plain-data results (the common case).
-export function encodeFlightReply(mod, result) {
+export function encodeFlightReply(mod, result, clientModules = {}) {
   const render = pageExports(mod)?.renderToReadableStream || vendoredFlightEncoder;
   if (typeof render !== "function") return null;
   try {
-    return render(result === undefined ? null : result, {});
+    return render(result === undefined ? null : result, clientModules);
   } catch {
     return null;
   }
@@ -393,4 +418,17 @@ function mergeContextHeaders(response, reqCtx) {
 function applyContextHeaders(headers, reqCtx) {
   for (const [k, v] of reqCtx.responseHeaders) headers.set(k, v);
   for (const cookie of reqCtx.setCookies) headers.append("set-cookie", cookie);
+}
+
+function applyRevalidationHeaders(headers, reqCtx) {
+  applyContextHeaders(headers, reqCtx);
+  if (reqCtx.revalidatedPaths?.length > 0 || reqCtx.revalidatedTags?.length > 0) {
+    headers.set("x-nextjs-revalidate", "1");
+    if (reqCtx.revalidatedPaths.length > 0) {
+      headers.set("x-nextcompile-revalidated-paths", reqCtx.revalidatedPaths.join(","));
+    }
+    if (!headers.has("cache-control")) {
+      headers.set("cache-control", "no-store, must-revalidate");
+    }
+  }
 }

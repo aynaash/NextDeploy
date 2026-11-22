@@ -111,7 +111,12 @@ async function tryShortCircuits(request, env, ctx, pathname, tables) {
     return handleImageRequest(request, env, tables.manifest);
   }
   if (tables.actionManifest && isServerAction(request)) {
-    return handleServerAction(request, env, ctx, tables.actionManifest, tables.actionLoaders);
+    const actionTables = {
+      ...tables,
+      warmISRPath: (path, origin, e, c, t) =>
+        tryRouteDispatch(new Request(origin + path, { method: "GET" }), e, c, new URL(origin + path), path, t),
+    };
+    return handleServerAction(request, env, ctx, tables.actionManifest, tables.actionLoaders, actionTables);
   }
   return null;
 }
