@@ -9,6 +9,7 @@
 *.prof
 coverage.out
 coverage.html
+assets/lambda/*/bootstrap
 
 # ── Secrets and credentials ──────────────────────────────────────
 .env

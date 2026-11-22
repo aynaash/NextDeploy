@@ -192,6 +192,8 @@ func Clean() error {
 	_ = sh.Rm(distDir)
 	_ = os.Remove("coverage.out")
 	_ = os.Remove("coverage.html")
+	_ = sh.Rm(filepath.Join("assets", "lambda", "imgopt"))
+	_ = sh.Rm(filepath.Join("assets", "lambda", "revalidator"))
 	return nil
 }
 
@@ -216,6 +218,35 @@ func Deps() error {
 // Build builds both the CLI and daemon for the current platform.
 func Build() error {
 	mg.Deps(BuildCLI, BuildDaemon)
+	return nil
+}
+
+// BuildLambdas compiles the auxiliary AWS Lambda binaries (imgopt, revalidator)
+// into assets/lambda/*/bootstrap for embedding into the CLI.
+func BuildLambdas() error {
+	lambdas := []struct {
+		name string
+		pkg  string
+	}{
+		{"imgopt", "./cmd/imgopt"},
+		{"revalidator", "./cmd/revalidator"},
+	}
+	env := map[string]string{
+		"GOOS":        "linux",
+		"GOARCH":      "amd64",
+		"CGO_ENABLED": "0",
+	}
+	for _, l := range lambdas {
+		dir := filepath.Join("assets", "lambda", l.name)
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return err
+		}
+		out := filepath.Join(dir, "bootstrap")
+		fmt.Printf("Building Lambda %s -> %s\n", l.name, out)
+		if err := sh.RunWithV(env, "go", "build", "-trimpath", "-ldflags", "-s -w", "-o", out, l.pkg); err != nil {
+			return fmt.Errorf("failed building %s lambda: %w", l.name, err)
+		}
+	}
 	return nil
 }
 
@@ -273,6 +304,7 @@ func BuildDaemonDev() error {
 
 // CrossBuildCLI cross-compiles the CLI for all supported platforms into dist/.
 func CrossBuildCLI() error {
+	mg.Deps(BuildLambdas)
 	if err := os.MkdirAll(distDir, 0o750); err != nil {
 		return err
 	}
