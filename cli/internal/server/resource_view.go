@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/aynaash/nextdeploy/shared"
@@ -316,17 +317,22 @@ func GenerateVPSResourceView(appCfg *config.AppConfig, resMap VPSResourceMap) (s
 		resMap.DeploymentTime.Format("Mon Jan 2 15:04:05 MST 2006"),
 	)
 
-	// Save in current working directory as requested
-	timestamp := resMap.DeploymentTime.Format("20060102-150405")
-	reportPath := fmt.Sprintf("%s-vps-%s-report.html", resMap.AppName, timestamp)
+	// Save inside gitignored .nextdeploy/reports so deploys never pollute git status.
+	reportsDir := filepath.Join(".nextdeploy", "reports")
+	if err := os.MkdirAll(reportsDir, 0o750); err != nil {
+		return "", fmt.Errorf("failed to create reports directory: %w", err)
+	}
 
-	if err := os.WriteFile(reportPath, []byte(htmlContent), 0644); err != nil {
+	timestamp := resMap.DeploymentTime.Format("20060102-150405")
+	reportPath := filepath.Join(reportsDir, fmt.Sprintf("%s-vps-%s-report.html", resMap.AppName, timestamp))
+
+	if err := os.WriteFile(reportPath, []byte(htmlContent), 0o600); err != nil {
 		return "", err
 	}
 
-	// Latest copy in project root
-	latestPath := fmt.Sprintf("%s-vps-latest.html", resMap.AppName)
-	_ = os.WriteFile(latestPath, []byte(htmlContent), 0644)
+	// Latest copy alongside timestamped report
+	latestPath := filepath.Join(reportsDir, fmt.Sprintf("%s-vps-latest.html", resMap.AppName))
+	_ = os.WriteFile(latestPath, []byte(htmlContent), 0o600)
 
 	return reportPath, nil
 }

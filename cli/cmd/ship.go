@@ -55,7 +55,8 @@ var shipCmd = &cobra.Command{
 
 		// Environment override (preview / staging stacks). Applied before any
 		// provider is initialized so every derived resource name is namespaced.
-		if err := applyEnvironmentOverride(cfg, shipEnvironment); err != nil {
+		err = applyEnvironmentOverride(cfg, shipEnvironment)
+		if err != nil {
 			log.Error("%v", err)
 			os.Exit(1)
 		}
@@ -165,7 +166,7 @@ func shipVPS(ctx context.Context, log *shared.Logger, cfg *config.NextDeployConf
 		if err := dns.GenerateVPSGuide(cfg.App.Domain.Name, serverHost); err != nil {
 			log.Warn("Failed to generate DNS guide: %v", err)
 		} else {
-			log.Info("   DNS Guide Generated: dns.md (Point %s to %s)", cfg.App.Domain.Name, serverHost)
+			log.Info("   DNS Guide Generated: %s (Point %s to %s)", dns.GuidePath, cfg.App.Domain.Name, serverHost)
 		}
 	}
 

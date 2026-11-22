@@ -143,21 +143,21 @@ func (p *AWSProvider) printDNSValidationRecordsWithCF(ctx context.Context, clien
 	}
 
 	if err := dns.GenerateServerlessGuide(domain, cfDomain, records); err != nil {
-		p.log.Warn("Could not generate dns.md: %v", err)
+		p.log.Warn("Could not generate %s: %v", dns.GuidePath, err)
 	}
 
 	// High visibility CLI banner
 	p.log.Info("════════════ ACTION REQUIRED: DNS SETUP ════════════")
 	p.log.Info("SSL Validation and CloudFront setup required.")
 	wd, _ := os.Getwd()
-	p.log.Info("Detailed Guide Generated: %s/dns.md", wd)
+	p.log.Info("Detailed Guide Generated: %s/%s", wd, dns.GuidePath)
 	p.log.Info("Open this file to see exact CNAME records for your provider.")
 	p.log.Info("═════════════════════════════════════════════════════")
 }
 
 func (p *AWSProvider) writeDNSFileCloudFrontOnly(domain, cfDomain string) {
 	if err := dns.GenerateServerlessGuide(domain, cfDomain, nil); err != nil {
-		p.log.Warn("Could not generate dns.md: %v", err)
+		p.log.Warn("Could not generate %s: %v", dns.GuidePath, err)
 	}
 
 	// Apex (zone root) records cannot be CNAMEs per RFC 1034 §3.6.2; most
@@ -178,7 +178,7 @@ func (p *AWSProvider) writeDNSFileCloudFrontOnly(domain, cfDomain string) {
 	} else {
 		p.log.Info("  CNAME  %s  →  %s", domain, cfDomain)
 	}
-	p.log.Info("Detailed Guide: dns.md")
+	p.log.Info("Detailed Guide: %s", dns.GuidePath)
 	p.log.Info("════════════════════════════════════════════")
 }
 

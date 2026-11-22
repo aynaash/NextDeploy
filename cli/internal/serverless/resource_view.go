@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -809,17 +810,22 @@ func GenerateResourceView(appCfg *config.AppConfig, resMap ServerlessResourceMap
 
 	htmlContent := buf.Bytes()
 
-	// ── Write files ────────────────────────────────────────────────────────────
-	timestamp := resMap.DeploymentTime.Format("20060102-150405")
-	reportPath := fmt.Sprintf("%s-%s-report.html", resMap.AppName, timestamp)
+	// ── Write files inside gitignored .nextdeploy/reports ─────────────────────
+	reportsDir := filepath.Join(".nextdeploy", "reports")
+	if err := os.MkdirAll(reportsDir, 0o750); err != nil {
+		return "", fmt.Errorf("failed to create reports directory: %w", err)
+	}
 
-	if err := os.WriteFile(reportPath, htmlContent, 0644); err != nil {
+	timestamp := resMap.DeploymentTime.Format("20060102-150405")
+	reportPath := filepath.Join(reportsDir, fmt.Sprintf("%s-%s-report.html", resMap.AppName, timestamp))
+
+	if err := os.WriteFile(reportPath, htmlContent, 0o600); err != nil {
 		return "", fmt.Errorf("failed to write report: %w", err)
 	}
 
 	// Also keep a "latest" copy
-	latestPath := fmt.Sprintf("%s-latest.html", resMap.AppName)
-	_ = os.WriteFile(latestPath, htmlContent, 0644)
+	latestPath := filepath.Join(reportsDir, fmt.Sprintf("%s-latest.html", resMap.AppName))
+	_ = os.WriteFile(latestPath, htmlContent, 0o600)
 
 	return reportPath, nil
 }

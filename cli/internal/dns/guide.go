@@ -3,11 +3,16 @@ package dns
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
 const (
+	// GuidePath is where generated DNS setup guides are written (inside
+	// gitignored .nextdeploy/ so deploys never dirty the project root).
+	GuidePath = ".nextdeploy/dns.md"
+
 	mdTableHeader = "| Type | Host (Name) | Target (Value) |\n"
 	mdTableSep    = "| :--- | :--- | :--- |\n"
 	docsURL       = "https://hersi.dev/nextdeploy"
@@ -84,11 +89,22 @@ var (
 	}
 )
 
-// GenerateServerlessGuide creates a comprehensive dns.md file for AWS Serverless deployments.
-func GenerateServerlessGuide(domain string, cfDomain string, records []ValidationRecord) error {
-	f, err := os.Create("dns.md")
+func createGuideFile() (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(GuidePath), 0o750); err != nil {
+		return nil, fmt.Errorf("failed to create DNS guide directory: %w", err)
+	}
+	f, err := os.OpenFile(GuidePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return fmt.Errorf("failed to create DNS guide: %w", err)
+		return nil, fmt.Errorf("failed to create DNS guide: %w", err)
+	}
+	return f, nil
+}
+
+// GenerateServerlessGuide creates a comprehensive .nextdeploy/dns.md file for AWS Serverless deployments.
+func GenerateServerlessGuide(domain string, cfDomain string, records []ValidationRecord) error {
+	f, err := createGuideFile()
+	if err != nil {
+		return err
 	}
 	defer f.Close()
 
@@ -117,11 +133,11 @@ func GenerateServerlessGuide(domain string, cfDomain string, records []Validatio
 	return nil
 }
 
-// GenerateVPSGuide creates a dns.md file for VPS deployments.
+// GenerateVPSGuide creates a .nextdeploy/dns.md file for VPS deployments.
 func GenerateVPSGuide(domain string, serverIP string) error {
-	f, err := os.Create("dns.md")
+	f, err := createGuideFile()
 	if err != nil {
-		return fmt.Errorf("failed to create DNS guide: %w", err)
+		return err
 	}
 	defer f.Close()
 
