@@ -2,6 +2,12 @@ version: 2
 
 project_name: nextdeploy
 
+before:
+  hooks:
+    # Compile auxiliary AWS Lambda binaries (imgopt, revalidator) from the
+    # release commit so //go:embed always bundles fresh, patched binaries.
+    - ./build-lambdas.sh
+
 builds:
   - id: nextdeploy
     main: ./cli

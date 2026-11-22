@@ -65,6 +65,8 @@ jobs:
           cache-dependency-path: go.sum
       - name: Install mage
         run: go install github.com/magefile/mage@latest
+      - name: Build auxiliary Lambdas
+        run: mage buildLambdas
       - name: Build CLI
         run: mage buildCLI
       - name: Build Daemon
@@ -144,6 +146,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - name: Validate hook syntax
         run: bash -n .githooks/pre-commit
       - name: Run hook against HEAD
@@ -151,7 +155,7 @@ jobs:
           # Stage everything from the last commit so the hook has something
           # to inspect, then run it. Catches accidental binaries on main.
           git -c user.email=ci@example.com -c user.name=ci \
-            reset --soft HEAD~1 || true
+            reset --soft HEAD~1
           ./.githooks/pre-commit || (echo "Hook failed on HEAD"; exit 1)
 
   quality:
