@@ -62,8 +62,8 @@ func TestRuntimeSourceFiles_ExcludesDevModules(t *testing.T) {
 			t.Errorf("dev-only module leaked into runtime source list: %s", f)
 		}
 	}
-	if containsPath(files, "runtime_src/ssr_streaming.dev.mjs") {
-		t.Error("ssr_streaming.dev.mjs must not be a shipped runtime file")
+	if !isDevOnlyRuntimeFile("runtime_src/example.dev.mjs") {
+		t.Error("isDevOnlyRuntimeFile must exclude *.dev.mjs files")
 	}
 }
 

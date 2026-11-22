@@ -42,9 +42,10 @@ export async function loadSSRDeps() {
   if (ssrDeps) return ssrDeps;
   if (ssrLoadError) return null;
   try {
-    const [client, dom] = await Promise.all([
+    const [client, dom, reactMod] = await Promise.all([
       import("./vendor/react-server-dom-webpack/client.edge.mjs"),
       import("./vendor/react-dom/server.edge.mjs"),
+      import("./vendor/react/index.mjs").catch(() => null),
     ]);
     if (typeof client?.createFromReadableStream !== "function") {
       throw new TypeError(
@@ -56,7 +57,15 @@ export async function loadSSRDeps() {
         "vendored react-dom/server.edge exports no renderToReadableStream",
       );
     }
-    ssrDeps = { client, dom };
+    const React = reactMod?.default || reactMod;
+    ssrDeps = {
+      client,
+      dom,
+      React:
+        typeof React?.use === "function" && typeof React?.createElement === "function"
+          ? React
+          : null,
+    };
     return ssrDeps;
   } catch (err) {
     ssrLoadError = err;
@@ -353,6 +362,40 @@ export function composeHtmlWithFlight(htmlStream, flightStream, opts = {}) {
   });
 }
 
+/**
+ * Wrap a pending Flight root so Fizz suspends on it instead of awaiting the
+ * full Flight stream before rendering starts (M3 progressive streaming).
+ */
+export function createStreamingRoot(React, rootPromise) {
+  if (!React || typeof React.use !== "function" || typeof React.createElement !== "function") {
+    throw new TypeError(
+      "createStreamingRoot needs a vendored standard-condition React with use() and createElement()",
+    );
+  }
+  const Root = () => React.use(rootPromise);
+  return React.createElement(Root);
+}
+
+/**
+ * Progressive streaming SSR pass (M3): passes the pending Flight root promise
+ * directly to Fizz via React.use() so <Suspense> fallbacks and loading.js flush
+ * as soon as the shell is ready.
+ */
+export async function renderToHtmlStreaming(deps, React, flightForSSR, bootstrap, reqCtx) {
+  const rootPromise = deps.client.createFromReadableStream(flightForSSR, {
+    ssrManifest: bootstrap.ssrManifest || { moduleMap: {}, moduleLoading: null },
+    nonce: bootstrap.nonce,
+  });
+
+  return deps.dom.renderToReadableStream(createStreamingRoot(React, rootPromise), {
+    bootstrapScripts: bootstrap.scripts?.length ? bootstrap.scripts : undefined,
+    bootstrapScriptContent: bootstrap.flightInit,
+    nonce: bootstrap.nonce,
+    signal: reqCtx?.abortSignal,
+    onError: bootstrap.onError,
+  });
+}
+
 // --- the SSR entry point ----------------------------------------------------
 
 /**
@@ -384,27 +427,36 @@ export async function renderToHtml(flightStream, bootstrap = {}, reqCtx = undefi
   // lets both read it without re-rendering the RSC pass.
   const [forSSR, forInline] = flightStream.tee();
 
-  // M1 resolves the tree fully before rendering. The streaming form wraps the
-  // pending root in a component that calls React's use() hook so Suspense
-  // boundaries flush progressively — that needs `react` itself vendored into
-  // the SSR (non-react-server) condition, which is M3's scope. Awaiting here
-  // is correct-but-unstreamed, and keeps M1 free of a second React vendoring.
-  const element = await deps.client.createFromReadableStream(forSSR, {
-    ssrManifest: bootstrap.ssrManifest || { moduleMap: {}, moduleLoading: null },
-    nonce: bootstrap.nonce,
-  });
-
-  const htmlStream = await deps.dom.renderToReadableStream(element, {
-    // React emits these as <script src async> in the shell, in array order.
-    // Order is load-bearing: polyfills → webpack → framework → main-app →
-    // page chunks, exactly as app-build-manifest.json lists them. A wrong
-    // order surfaces as ChunkLoadError, not a silent degradation.
-    bootstrapScripts: bootstrap.scripts && bootstrap.scripts.length ? bootstrap.scripts : undefined,
-    bootstrapScriptContent: FLIGHT_INIT,
-    nonce: bootstrap.nonce,
-    signal: reqCtx?.abortSignal,
-    onError,
-  });
+  const ssrManifest = bootstrap.ssrManifest || { moduleMap: {}, moduleLoading: null };
+  let htmlStream;
+  if (deps.React) {
+    // M3 progressive streaming: suspend on rootPromise via React.use() so
+    // <Suspense> fallbacks and loading.js flush before async RSCs settle.
+    htmlStream = await renderToHtmlStreaming(
+      deps,
+      deps.React,
+      forSSR,
+      { ...bootstrap, ssrManifest, flightInit: FLIGHT_INIT, onError },
+      reqCtx,
+    );
+  } else {
+    // Backward-compatible M1 fallback for bundles predating standard-react vendoring.
+    const element = await deps.client.createFromReadableStream(forSSR, {
+      ssrManifest,
+      nonce: bootstrap.nonce,
+    });
+    htmlStream = await deps.dom.renderToReadableStream(element, {
+      // React emits these as <script src async> in the shell, in array order.
+      // Order is load-bearing: polyfills → webpack → framework → main-app →
+      // page chunks, exactly as app-build-manifest.json lists them. A wrong
+      // order surfaces as ChunkLoadError, not a silent degradation.
+      bootstrapScripts: bootstrap.scripts && bootstrap.scripts.length ? bootstrap.scripts : undefined,
+      bootstrapScriptContent: FLIGHT_INIT,
+      nonce: bootstrap.nonce,
+      signal: reqCtx?.abortSignal,
+      onError,
+    });
+  }
 
   return composeHtmlWithFlight(htmlStream, forInline, {
     nonce: bootstrap.nonce,

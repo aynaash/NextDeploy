@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert";
 
-import { createStreamingRoot, renderToHtmlStreaming } from "./ssr_streaming.dev.mjs";
+import { createStreamingRoot, renderToHtmlStreaming } from "./ssr.mjs";
 
 function fakeReact() {
   return {
