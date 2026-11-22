@@ -118,17 +118,36 @@ func smokeTargets(cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) 
 
 	urls := []string{base + "/"}
 	if meta != nil {
-		for i, path := range meta.RouteInfo.StaticRoutes {
-			if i >= 3 {
+		added := 0
+		for _, path := range meta.RouteInfo.StaticRoutes {
+			if added >= 3 {
 				break
 			}
-			if path == "" || path == "/" {
+			if isSkippableSmokeRoute(path) {
 				continue
 			}
 			urls = append(urls, base+path)
+			added++
 		}
 	}
 	return urls
+}
+
+// isSkippableSmokeRoute excludes root (already probed first) and Next.js
+// internal/error routes (/_not-found, /_global-error, /_error, /404, /500)
+// whose expected status codes are 404/500 rather than 2xx.
+func isSkippableSmokeRoute(path string) bool {
+	if path == "" || path == "/" {
+		return true
+	}
+	if strings.HasPrefix(path, "/_") {
+		return true
+	}
+	switch path {
+	case "/404", "/500":
+		return true
+	}
+	return false
 }
 
 // probeOnce does up to MaxAttempts GETs against url. Returns on first

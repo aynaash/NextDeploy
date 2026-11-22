@@ -102,15 +102,22 @@ func TestSmokeTargets_PrefersRootPlusFewStatics(t *testing.T) {
 	cfg.App.Domain = config.DomainConfig{Name: "example.com"}
 	meta := &nextcore.NextCorePayload{
 		RouteInfo: nextcore.RouteInfo{
-			StaticRoutes: []string{"/", "/about", "/contact", "/docs", "/pricing"},
+			StaticRoutes: []string{"/", "/_global-error", "/_not-found", "/404", "/500", "/about", "/contact", "/docs", "/pricing"},
 		},
 	}
 	urls := smokeTargets(cfg, meta)
-	// Root + at most 3 statics (skipping "/")
-	if len(urls) < 2 || len(urls) > 4 {
-		t.Errorf("expected 2-4 urls, got %v", urls)
+	want := []string{
+		"https://example.com/",
+		"https://example.com/about",
+		"https://example.com/contact",
+		"https://example.com/docs",
 	}
-	if urls[0] != "https://example.com/" {
-		t.Errorf("first URL should be root, got %s", urls[0])
+	if len(urls) != len(want) {
+		t.Fatalf("got %v, want %v", urls, want)
+	}
+	for i := range want {
+		if urls[i] != want[i] {
+			t.Errorf("urls[%d] = %q, want %q", i, urls[i], want[i])
+		}
 	}
 }
