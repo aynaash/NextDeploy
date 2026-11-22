@@ -122,11 +122,26 @@ export async function isStale(path, tags, env) {
 }
 
 /**
- * unstable_cache is Next's memoization primitive. Our implementation is a
- * straight pass-through with an in-memory per-isolate Map keyed on the
- * caller's cache key. Tags are recorded so revalidateTag can clear the
- * entry. Matches the public surface; a real persistent cache is a
- * follow-up tied to ISR's KV story.
+ * clearStale removes the in-memory and KV stale markers after an ISR route
+ * has been re-rendered and written back to R2.
+ */
+export async function clearStale(path, tags, env) {
+  staleRoutes.delete(path);
+  if (Array.isArray(tags)) {
+    for (const t of tags) staleTags.delete(t);
+  }
+  if (env?.NEXTCOMPILE_CACHE) {
+    try {
+      await env.NEXTCOMPILE_CACHE.delete(`rev:${path}`);
+    } catch {
+      // Non-fatal
+    }
+  }
+}
+
+/**
+ * unstable_cache is Next's memoization primitive. Uses an in-memory per-isolate
+ * Map with optional Cloudflare KV persistence via env.NEXTCOMPILE_CACHE.
  */
 const memoCache = new Map();
 
@@ -139,10 +154,42 @@ export function unstable_cache(fn, key, opts) {
     const fullKey = keyHash + "|" + JSON.stringify(args);
     const hit = memoCache.get(fullKey);
     if (isCacheHitUsable(hit, revalidate, tags)) return hit.value;
+
+    const ctx = safeContext();
+    const kv = ctx?.env?.NEXTCOMPILE_CACHE;
+    const kvKey = `uc:${fullKey}`;
+    if (kv && !(await anyTagStaleInKV(tags, kv))) {
+      try {
+        const raw = await kv.get(kvKey, "json");
+        if (raw && isCacheHitUsable(raw, revalidate, tags)) {
+          memoCache.set(fullKey, raw);
+          return raw.value;
+        }
+      } catch {
+        // Recompute on KV error
+      }
+    }
+
     const value = await fn(...args);
-    memoCache.set(fullKey, { value, at: Date.now() });
+    const entry = { value, at: Date.now() };
+    memoCache.set(fullKey, entry);
+
+    if (kv) {
+      // Cloudflare KV enforces a minimum TTL of 60 seconds.
+      const ttl = revalidate && revalidate >= 60 ? revalidate : 3600;
+      const write = kv.put(kvKey, JSON.stringify(entry), { expirationTtl: ttl }).catch(() => {});
+      ctx?.workerCtx?.waitUntil?.(write);
+    }
     return value;
   };
+}
+
+async function anyTagStaleInKV(tags, kv) {
+  if (!Array.isArray(tags) || tags.length === 0) return false;
+  for (const t of tags) {
+    if (await kv.get(`revTag:${t}`)) return true;
+  }
+  return false;
 }
 
 /**

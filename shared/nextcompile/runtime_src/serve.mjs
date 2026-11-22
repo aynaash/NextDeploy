@@ -114,6 +114,36 @@ export async function serveSSGFromR2(env, htmlKey, manifest) {
   return new Response(obj.body, { headers });
 }
 
+/**
+ * Serve an ISR pre-rendered HTML file from R2 while enforcing time-based
+ * `revalidate` intervals from manifest.isr.intervals.
+ * @returns {Promise<{ response: Response|null, expired: boolean }>}
+ */
+export async function serveISRFromR2(env, htmlKey, manifest, revalidateSeconds = 0) {
+  if (!env.ASSETS) return { response: null, expired: false };
+  const key = versionedKey(htmlKey.replace(/^\/+/, ""), manifest?.assetVersion);
+  const obj = await env.ASSETS.get(key);
+  if (!obj) return { response: null, expired: false };
+
+  if (revalidateSeconds > 0) {
+    const stamped = Number(obj.customMetadata?.revalidatedAt) ||
+      (obj.uploaded instanceof Date ? obj.uploaded.getTime() : 0);
+    if (stamped > 0 && Date.now() - stamped > revalidateSeconds * 1000) {
+      return { response: null, expired: true };
+    }
+  }
+
+  const headers = new Headers();
+  obj.writeHttpMetadata?.(headers);
+  if (!headers.has("content-type")) {
+    headers.set("content-type", "text/html; charset=utf-8");
+  }
+  if (!headers.has("cache-control")) {
+    headers.set("cache-control", "public, max-age=0, must-revalidate");
+  }
+  return { response: new Response(obj.body, { headers }), expired: false };
+}
+
 function r2KeyForStatic(pathname, assetVersion) {
   let key;
   if (pathname.startsWith("/_next/static/")) {
@@ -137,7 +167,7 @@ function r2KeyForStatic(pathname, assetVersion) {
     : versionedKey(decoded, assetVersion);
 }
 
-function versionedKey(key, assetVersion) {
+export function versionedKey(key, assetVersion) {
   return assetVersion
     ? `_nextdeploy/releases/${assetVersion}/${key}`
     : key;
