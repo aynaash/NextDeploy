@@ -18,6 +18,7 @@ func TestRuntimeSourceFiles_IncludesMVP(t *testing.T) {
 		"runtime_src/dispatcher.mjs",
 		"runtime_src/serve.mjs",
 		"runtime_src/route_match.mjs",
+		"runtime_src/route_trie.mjs",
 		"runtime_src/errors.mjs",
 		"runtime_src/context.mjs",
 		"runtime_src/rsc.mjs",
@@ -61,9 +62,8 @@ func TestRuntimeSourceFiles_ExcludesDevModules(t *testing.T) {
 			t.Errorf("dev-only module leaked into runtime source list: %s", f)
 		}
 	}
-	// The trie example specifically must stay out of the shipped runtime.
-	if containsPath(files, "runtime_src/route_trie.dev.mjs") {
-		t.Error("route_trie.dev.mjs must not be a shipped runtime file")
+	if containsPath(files, "runtime_src/ssr_streaming.dev.mjs") {
+		t.Error("ssr_streaming.dev.mjs must not be a shipped runtime file")
 	}
 }
 

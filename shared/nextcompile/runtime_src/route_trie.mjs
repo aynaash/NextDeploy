@@ -1,19 +1,9 @@
-// Segment-trie alternative to the linear regex scan in route_match.mjs.
+// Segment-trie router for dynamic routes in dispatcher.mjs.
 //
-// matchDynamic() walks the whole dynamicTable once per request — O(routes).
-// This builds a radix/segment trie keyed on path parts, so matching is
-// O(path depth × local branching) instead. For the few-hundred-route apps
-// this codebase targets the wall-clock win is microseconds (see the note in
-// route_match.mjs), so this is NOT wired into the dispatcher by default — it
-// exists as a verified, drop-in-compatible alternative and as a worked
-// example of turning a linear scan into a trie. route_trie.test.mjs proves
-// it returns the same { entry, params } as matchDynamic for an unambiguous
-// route corpus.
-//
-// The `.dev.mjs` suffix marks it dev-only: it is embedded for tests but never
-// extracted into a deployed Worker or counted in the runtime content hash
-// (see isDevOnlyRuntimeFile in runtime.go). Promote to a plain `.mjs` and
-// import it from dispatcher.mjs to actually adopt it.
+// Replaces the O(routes) linear regex scan in route_match.mjs with a
+// radix/segment trie keyed on path parts, so matching is
+// O(path depth × local branching). route_trie.test.mjs proves it returns
+// the same { entry, params } as matchDynamic across an unambiguous corpus.
 //
 // Priority at each node mirrors build-time specificity ordering:
 //   literal  >  [dyn]  >  [...catchAll]  >  [[...optCatchAll]]

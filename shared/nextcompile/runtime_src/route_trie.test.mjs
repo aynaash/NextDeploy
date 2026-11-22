@@ -13,7 +13,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { matchDynamic } from "./route_match.mjs";
-import { buildRouteTrie, matchTrie } from "./route_trie.dev.mjs";
+import { buildRouteTrie, matchTrie } from "./route_trie.mjs";
 
 // --- faithful JS ports of dispatch.go ---------------------------------------
 

@@ -25,7 +25,8 @@
 // Router + simple App Router pages).
 
 import { serveStaticFromR2, serveSSGFromR2, serveRootPublicFromR2 } from "./serve.mjs";
-import { matchDynamic, buildRouteContext } from "./route_match.mjs";
+import { buildRouteContext } from "./route_match.mjs";
+import { buildRouteTrie, matchTrie } from "./route_trie.mjs";
 import { notFound, serverError } from "./errors.mjs";
 import { runWithContext, createRequestContext } from "./context.mjs";
 import { renderRSC } from "./rsc.mjs";
@@ -172,7 +173,10 @@ async function tryRouteDispatch(request, env, ctx, url, pathname, tables) {
     return invokeCompiled(staticEntry, request, env, ctx, { params: {} }, url, tables.manifest);
   }
 
-  const dyn = matchDynamic(pathname, tables.dynamicTable);
+  if (!tables._routeTrie) {
+    tables._routeTrie = buildRouteTrie(tables.dynamicTable || []);
+  }
+  const dyn = matchTrie(pathname, tables._routeTrie);
   if (dyn) {
     const routeCtx = buildRouteContext(url, dyn.params);
     return invokeCompiled(dyn.entry, request, env, ctx, routeCtx, url, tables.manifest);
