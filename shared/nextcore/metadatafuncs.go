@@ -19,7 +19,7 @@ func CollectBuildMetadata(buildCmd string) (*NextBuildMetadata, error) {
 	}
 	NextCoreLogger.Debug("Building Next.js app to generate build metadata")
 
-	if err := os.MkdirAll(".nextdeploy", 0750); err != nil {
+	if err := os.MkdirAll(".nextdeploy", 0o750); err != nil {
 		return nil, fmt.Errorf("failed to create .nextdeploy directory: %w", err)
 	}
 
@@ -32,7 +32,21 @@ func CollectBuildMetadata(buildCmd string) (*NextBuildMetadata, error) {
 		return nil, fmt.Errorf("build failed: %w", err)
 	}
 
-	nextDir := filepath.Join(projectDir, ".next")
+	return ReadBuildMetadata(projectDir, ".next")
+}
+
+// ReadBuildMetadata reads Next.js build manifests from an existing distDir
+// without re-running `next build`. Used on incremental skips and right after
+// buildflow's ensureNextBuild has already produced a fresh build.
+func ReadBuildMetadata(projectDir, distDir string) (*NextBuildMetadata, error) {
+	if distDir == "" {
+		distDir = ".next"
+	}
+	if err := os.MkdirAll(".nextdeploy", 0o750); err != nil {
+		return nil, fmt.Errorf("failed to create .nextdeploy directory: %w", err)
+	}
+
+	nextDir := filepath.Join(projectDir, distDir)
 	// #nosec G304
 	buildID, err := os.ReadFile(filepath.Join(nextDir, "BUILD_ID"))
 	if err != nil {

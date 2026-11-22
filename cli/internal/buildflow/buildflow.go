@@ -73,10 +73,14 @@ func Run(ctx context.Context, opts Opts) (*Result, error) {
 	}
 
 	// ── 1. Incremental skip ────────────────────────────────────────────
-	if !opts.Force {
+	skipAllowed := !opts.Force
+	if skipAllowed && opts.Cfg.Serverless != nil && opts.Cfg.Serverless.Provider == "cloudflare" && nextbuild.IsTurbopackOutput(".") {
+		skipAllowed = false
+	}
+	if skipAllowed {
 		if err := nextcore.ValidateBuildState(opts.Cfg); err == nil {
 			opts.Log.Info("Compile inputs unchanged — reusing build, refreshing artifact metadata.")
-			payload, mErr := nextcore.GenerateMetadata()
+			payload, mErr := nextcore.RefreshMetadata()
 			if mErr != nil {
 				return nil, fmt.Errorf("regenerate metadata after incremental skip: %w", mErr)
 			}
@@ -123,8 +127,8 @@ func Run(ctx context.Context, opts Opts) (*Result, error) {
 		return nil, err
 	}
 	if rebuilt {
-		// Manifests changed underneath us — refresh.
-		payload, err = nextcore.GenerateMetadata()
+		// Manifests changed underneath us — refresh without re-running `next build`.
+		payload, err = nextcore.RefreshMetadata()
 		if err != nil {
 			return nil, fmt.Errorf("regenerate metadata after build: %w", err)
 		}
