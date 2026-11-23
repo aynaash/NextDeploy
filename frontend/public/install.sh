@@ -1,335 +1,211 @@
-#!/bin/bash
-# NextDeploy Installation Script
-# Secure, defensive, and production-ready
+#!/bin/sh
+# NextDeploy CLI installer — POSIX sh compatible (works with `| sh` and `| bash`).
+#
+# Usage:
+#   curl -fsSL https://nextdeploy.org/install.sh | sh
+#   NEXTDEPLOY_VERSION=v0.20.2 curl -fsSL https://nextdeploy.org/install.sh | sh
+#   NEXTDEPLOY_INSTALL_DIR=/usr/local/bin curl -fsSL https://nextdeploy.org/install.sh | sh
 
-set -euo pipefail
+set -eu
 
-# ─── Colors ───────────────────────────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
-
-# ─── Configuration ─────────────────────────────────────────────────────────────
 REPO="aynaash/NextDeploy"
-BIN_NAME="nextdeploy"
-INSTALL_DIR="/usr/local/bin"
-DOWNLOAD_DIR="${HOME}/.nextdeploy/downloads"
-GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
+BINARY_NAME="nextdeploy"
+TMP_DIR=""
+INSTALL_SUCCESS=0
 
-# ─── Argument Parsing ──────────────────────────────────────────────────────────
-TARGET_VERSION="${1:-}"
+say() {
+  printf '%s\n' "$1"
+}
 
-if [[ -n "$TARGET_VERSION" ]] && [[ ! "$TARGET_VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
-    echo -e "${RED}Error: Invalid version format. Use: vX.Y.Z or X.Y.Z${NC}" >&2
-    echo "Usage: $0 [version]" >&2
-    exit 1
-fi
+err() {
+  printf 'Error: %s\n' "$1" >&2
+}
 
-# ─── Cleanup ───────────────────────────────────────────────────────────────────
 cleanup() {
-    local exit_code=$?
-    if [[ -n "${TMP_DIR:-}" ]] && [[ -d "${TMP_DIR}" ]]; then
-        rm -rf "${TMP_DIR}"
-    fi
-    if [[ $exit_code -ne 0 ]]; then
-        echo -e "${RED}❌ Installation failed (exit code: $exit_code)${NC}" >&2
-    fi
-    exit $exit_code
-}
-trap cleanup EXIT INT TERM
-
-# ─── Helpers ───────────────────────────────────────────────────────────────────
-
-# Verify required tools are available
-check_dependencies() {
-    local missing=()
-
-    if command -v curl >/dev/null 2>&1; then
-        DOWNLOADER="curl"
-    elif command -v wget >/dev/null 2>&1; then
-        DOWNLOADER="wget"
-    else
-        missing+=("curl or wget")
-    fi
-
-    if command -v sha256sum >/dev/null 2>&1; then
-        CHECKSUM_TOOL="sha256sum"
-    elif command -v shasum >/dev/null 2>&1; then
-        CHECKSUM_TOOL="shasum"
-    else
-        missing+=("sha256sum or shasum")
-    fi
-
-    if command -v tar >/dev/null 2>&1; then
-        : # tar is available
-    else
-        missing+=("tar")
-    fi
-
-    if [[ ! -w "$INSTALL_DIR" ]] && ! command -v sudo >/dev/null 2>&1; then
-        missing+=("sudo (required to write to $INSTALL_DIR)")
-    fi
-
-    if [[ ${#missing[@]} -gt 0 ]]; then
-        echo -e "${RED}Error: Missing required dependencies:${NC}" >&2
-        printf '  - %s\n' "${missing[@]}" >&2
-        exit 1
-    fi
+  exit_code=$?
+  if [ -n "$TMP_DIR" ] && [ -d "$TMP_DIR" ]; then
+    rm -rf "$TMP_DIR"
+  fi
+  if [ "$exit_code" -ne 0 ] && [ "$INSTALL_SUCCESS" -eq 0 ]; then
+    printf 'Installation failed (exit code: %d)\n' "$exit_code" >&2
+  fi
 }
 
-# Unified download wrapper for curl/wget
-download_file() {
-    local url="$1"
-    local output="${2:-}"
+trap cleanup EXIT
 
-    if [[ "$DOWNLOADER" == "curl" ]]; then
-        if [[ -n "$output" ]]; then
-            curl -fsSL --connect-timeout 30 --retry 3 --retry-delay 2 -o "$output" "$url"
-        else
-            curl -fsSL "$url"
-        fi
-    else
-        if [[ -n "$output" ]]; then
-            wget -q --timeout=30 --tries=3 --retry-connrefused -O "$output" "$url"
-        else
-            wget -q -O - "$url"
-        fi
-    fi
+detect_os() {
+  os=$(uname -s | tr '[:upper:]' '[:lower:]')
+  case "$os" in
+    darwin|linux) printf '%s' "$os" ;;
+    *)
+      err "Unsupported operating system: $os"
+      exit 1
+      ;;
+  esac
 }
 
-# Compute sha256 checksum of a file
-compute_checksum() {
-    local file="$1"
-    if [[ "$CHECKSUM_TOOL" == "sha256sum" ]]; then
-        sha256sum "$file" | cut -d' ' -f1
-    else
-        shasum -a 256 "$file" | cut -d' ' -f1
-    fi
+detect_arch() {
+  arch=$(uname -m)
+  case "$arch" in
+    x86_64|amd64) printf 'amd64' ;;
+    arm64|aarch64) printf 'arm64' ;;
+    *)
+      err "Unsupported architecture: $arch"
+      exit 1
+      ;;
+  esac
 }
 
-# Fetch the latest release tag from GitHub
-get_latest_version() {
-    local api_response tag
-
-    echo -e "${BLUE}📡 Fetching latest release info...${NC}" >&2
-
-    if ! api_response=$(download_file "$GITHUB_API" ""); then
-        echo -e "${RED}Error: Failed to reach GitHub API${NC}" >&2
-        exit 1
-    fi
-
-    tag=$(echo "$api_response" | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
-
-    if [[ -z "$tag" ]]; then
-        echo -e "${RED}Error: Could not parse version from GitHub response${NC}" >&2
-        exit 1
-    fi
-
-    echo "$tag"  # Only this line goes to stdout — the caller captures just the tag
+fetch_latest_version() {
+  api_url="https://api.github.com/repos/${REPO}/releases/latest"
+  tag=$(curl -fsSL "$api_url" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+  if [ -z "$tag" ]; then
+    err "Could not determine latest release version from GitHub"
+    exit 1
+  fi
+  printf '%s' "$tag"
 }
 
-# Download and return the checksums file for a given release version
-get_checksums() {
-    local version="$1"
-    local clean_version="${version#v}"
-    local checksums_url="https://github.com/${REPO}/releases/download/${version}/nextdeploy_${clean_version}_checksums.txt"
-    local checksums_file="${DOWNLOAD_DIR}/checksums-${version}.txt"
+verify_checksum() {
+  archive_path=$1
+  archive_name=$2
+  checksums_path=$3
 
-    mkdir -p "$DOWNLOAD_DIR"
+  expected=$(awk -v f="$archive_name" '$2 == f { print $1; exit }' "$checksums_path")
+  if [ -z "$expected" ]; then
+    err "Archive ${archive_name} not found in checksums.txt"
+    exit 1
+  fi
 
-    # Return cached copy if available
-    if [[ -f "$checksums_file" ]]; then
-        cat "$checksums_file"
-        return 0
-    fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$archive_path" | awk '{ print $1 }')
+  elif command -v shasum >/dev/null 2>&1; then
+    actual=$(shasum -a 256 "$archive_path" | awk '{ print $1 }')
+  else
+    say "Warning: neither sha256sum nor shasum found — skipping checksum verification"
+    return 0
+  fi
 
-    echo -e "${BLUE}📋 Downloading checksums...${NC}" >&2
-    if download_file "$checksums_url" "$checksums_file"; then
-        cat "$checksums_file"
-    else
-        echo -e "${YELLOW}⚠️  Could not download checksums — skipping verification${NC}" >&2
-        return 1
-    fi
+  if [ "$actual" != "$expected" ]; then
+    err "Checksum mismatch for ${archive_name} (expected ${expected}, got ${actual})"
+    exit 1
+  fi
 }
 
-# Install a file to INSTALL_DIR, using sudo if required
-install_file() {
-    local src="$1"
-    local dest="$2"
-
-    if [[ -w "$INSTALL_DIR" ]]; then
-        mv "$src" "$dest"
-        chmod 755 "$dest"
-    else
-        echo -e "${YELLOW}⚠️  Sudo required to install to $INSTALL_DIR${NC}"
-        sudo mv "$src" "$dest"
-        sudo chmod 755 "$dest"
+choose_install_dir() {
+  if [ -n "${NEXTDEPLOY_INSTALL_DIR:-}" ]; then
+    printf '%s' "$NEXTDEPLOY_INSTALL_DIR"
+    return
+  fi
+  # Prefer an existing user-writable bin directory on PATH (no sudo needed).
+  for dir in /opt/homebrew/bin /usr/local/bin; do
+    if [ -d "$dir" ] && [ -w "$dir" ]; then
+      printf '%s' "$dir"
+      return
     fi
+  done
+  printf '%s' "$HOME/.local/bin"
 }
 
-# ─── Main ──────────────────────────────────────────────────────────────────────
+ensure_in_path() {
+  dir=$1
+  case ":${PATH:-}:" in
+    *":${dir}:"*) return 0 ;;
+  esac
+
+  shell_name=$(basename "${SHELL:-sh}")
+  case "$shell_name" in
+    zsh)  rc_file="$HOME/.zshrc" ;;
+    bash)
+      if [ -f "$HOME/.bash_profile" ] && [ "$(detect_os)" = "darwin" ]; then
+        rc_file="$HOME/.bash_profile"
+      else
+        rc_file="$HOME/.bashrc"
+      fi
+      ;;
+    *)    rc_file="$HOME/.profile" ;;
+  esac
+
+  export_line="export PATH=\"${dir}:\$PATH\""
+  if [ ! -f "$rc_file" ] || ! grep -F "$dir" "$rc_file" >/dev/null 2>&1; then
+    printf '\n# NextDeploy CLI\n%s\n' "$export_line" >> "$rc_file"
+    say "Added ${dir} to PATH in ${rc_file}"
+  fi
+  say "Run 'export PATH=\"${dir}:\$PATH\"' or restart your shell to use '${BINARY_NAME}'."
+}
+
 main() {
-    echo -e "${BLUE}===========================================${NC}"
-    echo -e "${GREEN}   Installing NextDeploy CLI${NC}"
-    echo -e "${BLUE}===========================================${NC}"
-    echo ""
+  if ! command -v curl >/dev/null 2>&1; then
+    err "curl is required to install ${BINARY_NAME}"
+    exit 1
+  fi
+  if ! command -v tar >/dev/null 2>&1; then
+    err "tar is required to install ${BINARY_NAME}"
+    exit 1
+  fi
 
-    check_dependencies
+  say "==========================================="
+  say "   Installing NextDeploy CLI"
+  say "==========================================="
+  say ""
 
-    # ── Detect platform ───────────────────────────────────────────────────────
-    local os arch os_title
-    os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-    arch="$(uname -m)"
+  OS=$(detect_os)
+  ARCH=$(detect_arch)
+  say "Platform: ${OS}/${ARCH}"
 
-    case "$arch" in
-        x86_64|amd64)   arch="amd64" ;;
-        aarch64|arm64)  arch="arm64" ;;
-        *)
-            echo -e "${RED}Unsupported architecture: $arch${NC}" >&2
-            exit 1
-            ;;
-    esac
+  if [ -n "${NEXTDEPLOY_VERSION:-}" ]; then
+    VERSION="$NEXTDEPLOY_VERSION"
+  else
+    say "Fetching latest release info..."
+    VERSION=$(fetch_latest_version)
+  fi
+  VERSION_NUM="${VERSION#v}"
+  say "Version: ${VERSION}"
 
-    # Prefer native arm64 when running under Rosetta 2
-    if [[ "$os" == "darwin" && "$arch" == "amd64" ]]; then
-        if [[ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" == "1" ]]; then
-            echo -e "${YELLOW}⚠️  Rosetta 2 detected — downloading native arm64 binary${NC}"
-            arch="arm64"
-        fi
+  ARCHIVE="${BINARY_NAME}_${VERSION_NUM}_${OS}_${ARCH}.tar.gz"
+  BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+
+  TMP_DIR=$(mktemp -d)
+  ARCHIVE_PATH="${TMP_DIR}/${ARCHIVE}"
+  CHECKSUMS_PATH="${TMP_DIR}/checksums.txt"
+
+  say "Downloading ${ARCHIVE}..."
+  curl -fsSL "${BASE_URL}/${ARCHIVE}" -o "$ARCHIVE_PATH"
+
+  say "Verifying checksum..."
+  curl -fsSL "${BASE_URL}/checksums.txt" -o "$CHECKSUMS_PATH"
+  verify_checksum "$ARCHIVE_PATH" "$ARCHIVE" "$CHECKSUMS_PATH"
+  say "Checksum OK"
+
+  say "Extracting binary..."
+  tar -xzf "$ARCHIVE_PATH" -C "$TMP_DIR"
+  BIN_SRC="${TMP_DIR}/${BINARY_NAME}"
+  if [ ! -f "$BIN_SRC" ]; then
+    err "Binary '${BINARY_NAME}' not found in archive"
+    exit 1
+  fi
+  chmod +x "$BIN_SRC"
+
+  INSTALL_DIR=$(choose_install_dir)
+  TARGET="${INSTALL_DIR}/${BINARY_NAME}"
+  say "Installing to ${TARGET}..."
+
+  if mkdir -p "$INSTALL_DIR" 2>/dev/null && [ -w "$INSTALL_DIR" ]; then
+    mv "$BIN_SRC" "$TARGET"
+  else
+    if [ ! -r /dev/tty ]; then
+      err "No write permission to ${INSTALL_DIR} and no interactive terminal for sudo. Re-run with NEXTDEPLOY_INSTALL_DIR=\$HOME/.local/bin"
+      exit 1
     fi
+    say "Elevated permissions required for ${INSTALL_DIR} (set NEXTDEPLOY_INSTALL_DIR=\$HOME/.local/bin to avoid sudo)..."
+    sudo mkdir -p "$INSTALL_DIR" </dev/tty
+    sudo mv "$BIN_SRC" "$TARGET" </dev/tty
+  fi
 
-    # Title-case the OS name to match GoReleaser archive naming
-    case "$os" in
-        darwin)  os_title="Darwin" ;;
-        linux)   os_title="Linux" ;;
-        *)
-            echo -e "${RED}Unsupported OS: $os. Use install.bat on Windows.${NC}" >&2
-            exit 1
-            ;;
-    esac
-
-    echo -e "${GREEN}✓ Platform:${NC} ${os_title}/${arch}"
-
-    # ── Resolve version ───────────────────────────────────────────────────────
-    local version
-    if [[ -n "$TARGET_VERSION" ]]; then
-        # Normalise to vX.Y.Z
-        version="v${TARGET_VERSION#v}"
-        echo -e "${GREEN}✓ Target version:${NC} $version"
-    else
-        version="$(get_latest_version)"
-        echo -e "${GREEN}✓ Latest version:${NC} $version"
-    fi
-
-    local clean_version="${version#v}"
-
-    # ── Download archive ─────────────────────────────────────────────────────
-    local archive_name download_url
-    archive_name="nextdeploy_${clean_version}_${os_title}_${arch}.tar.gz"
-    download_url="https://github.com/${REPO}/releases/download/${version}/${archive_name}"
-
-    mkdir -p "$DOWNLOAD_DIR"
-    TMP_DIR="$(mktemp -d "${DOWNLOAD_DIR}/install-XXXXXX")"
-    local archive_path="${TMP_DIR}/${archive_name}"
-
-    echo -e "${BLUE}📥 Downloading ${archive_name}...${NC}"
-    if ! download_file "$download_url" "$archive_path"; then
-        echo -e "${RED}Error: Download failed${NC}" >&2
-        exit 1
-    fi
-
-    if [[ ! -s "$archive_path" ]]; then
-        echo -e "${RED}Error: Downloaded file is empty${NC}" >&2
-        exit 1
-    fi
-
-    # ── Verify checksum ───────────────────────────────────────────────────────
-    local checksums
-    if checksums="$(get_checksums "$version")"; then
-        echo -e "${BLUE}🔒 Verifying checksum...${NC}"
-        local expected actual
-        expected="$(echo "$checksums" | grep "$archive_name" | awk '{print $1}')"
-
-        if [[ -n "$expected" ]]; then
-            actual="$(compute_checksum "$archive_path")"
-            if [[ "$actual" != "$expected" ]]; then
-                echo -e "${RED}Error: Checksum mismatch${NC}" >&2
-                echo "  Expected: $expected" >&2
-                echo "  Actual:   $actual" >&2
-                exit 1
-            fi
-            echo -e "${GREEN}✓ Checksum verified${NC}"
-        else
-            echo -e "${YELLOW}⚠️  No checksum entry for $archive_name — skipping${NC}" >&2
-        fi
-    fi
-
-    # ── Extract binary from archive ──────────────────────────────────────────
-    echo -e "${BLUE}📦 Extracting binary...${NC}"
-    tar -xzf "$archive_path" -C "$TMP_DIR"
-
-    local extracted_bin="${TMP_DIR}/${BIN_NAME}"
-    if [[ ! -f "$extracted_bin" ]]; then
-        echo -e "${RED}Error: Binary '${BIN_NAME}' not found in archive${NC}" >&2
-        exit 1
-    fi
-
-    # ── Validate binary ───────────────────────────────────────────────────────
-    chmod +x "$extracted_bin"
-    echo -e "${BLUE}🔍 Validating binary...${NC}"
-
-    local reported_version
-    reported_version="$("$extracted_bin" version 2>/dev/null || true)"
-
-    if echo "$reported_version" | grep -qF "$clean_version"; then
-        echo -e "${GREEN}✓ Binary OK${NC}"
-    else
-        echo -e "${YELLOW}⚠️  Version mismatch — binary reports: ${reported_version:-unknown}${NC}" >&2
-    fi
-
-    # ── Install ───────────────────────────────────────────────────────────────
-    local dest="${INSTALL_DIR}/${BIN_NAME}"
-
-    # Back up any existing installation
-    if [[ -f "$dest" ]]; then
-        local backup="${dest}.backup.$(date +%Y%m%d_%H%M%S)"
-        echo -e "${YELLOW}⚠️  Backing up existing binary → $backup${NC}"
-        if [[ -w "$INSTALL_DIR" ]]; then
-            mv "$dest" "$backup"
-        else
-            sudo mv "$dest" "$backup"
-        fi
-    fi
-
-    echo -e "${BLUE}📦 Installing to ${dest}...${NC}"
-    install_file "$extracted_bin" "$dest"
-
-    # Bust shell command cache so the new binary is found immediately
-    hash -r 2>/dev/null || true
-
-    # ── Final check ───────────────────────────────────────────────────────────
-    local installed_version
-    installed_version="$("$dest" version 2>/dev/null || echo "unknown")"
-
-    echo ""
-    echo -e "${GREEN}===========================================${NC}"
-    echo -e "${GREEN}✅ NextDeploy ${installed_version} installed successfully!${NC}"
-    echo -e "${GREEN}===========================================${NC}"
-    echo ""
-    echo -e "  Run:  ${YELLOW}nextdeploy --help${NC}"
-    echo -e "  Docs: ${BLUE}https://nextdeploy.org/docs${NC}"
-    echo ""
-
-    if ! command -v "$BIN_NAME" >/dev/null 2>&1; then
-        echo -e "${YELLOW}⚠️  '$BIN_NAME' is not in your PATH. To fix:${NC}"
-        echo "   export PATH=\"\$PATH:${INSTALL_DIR}\""
-        echo "   (Add this to ~/.bashrc or ~/.zshrc to make it permanent)"
-    else
-        echo -e "${GREEN}✓ '$BIN_NAME' is available in PATH${NC}"
-        echo -e "${YELLOW}💡 If it still shows an old version, run: hash -r${NC}"
-    fi
+  INSTALL_SUCCESS=1
+  say ""
+  say "Installed ${BINARY_NAME} ${VERSION} to ${TARGET}"
+  ensure_in_path "$INSTALL_DIR"
 }
 
 main "$@"
