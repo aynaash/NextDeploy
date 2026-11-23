@@ -15,6 +15,7 @@ import (
 	"github.com/aynaash/nextdeploy/cli/internal/server"
 	"github.com/aynaash/nextdeploy/cli/internal/serverless"
 	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/agenttrace"
 	"github.com/aynaash/nextdeploy/shared/caddy"
 	"github.com/aynaash/nextdeploy/shared/config"
 	"github.com/aynaash/nextdeploy/shared/git"
@@ -69,6 +70,21 @@ var shipCmd = &cobra.Command{
 			log.Warn("   Commit before shipping for cleaner deployment provenance.")
 		}
 
+		if agenttrace.DetectHandoff(".") {
+			if cp, err := agenttrace.ReadLatestCheckpoint("."); err == nil && cp != nil {
+				log.Info("🔍 Agent Trace Active: Session %s (%s / %s)", cp.SessionID, cp.Agent, cp.Model)
+				if cp.Objective != "" {
+					log.Info("   Intent: %q", cp.Objective)
+				}
+			}
+			_ = agenttrace.RecordEvent(".", agenttrace.HandoffEvent{
+				Type:        "nextdeploy_ship_start",
+				Target:      cfg.TargetType,
+				Environment: cfg.App.Environment,
+				Details:     fmt.Sprintf("Initiated deployment for %s", cfg.App.Name),
+			})
+		}
+
 		result, err := buildflow.Run(ctx, buildflow.Opts{
 			ProjectDir: ".",
 			Cfg:        cfg,
@@ -76,6 +92,15 @@ var shipCmd = &cobra.Command{
 			Log:        log,
 		})
 		if err != nil {
+			if agenttrace.DetectHandoff(".") {
+				_ = agenttrace.RecordEvent(".", agenttrace.HandoffEvent{
+					Type:        "nextdeploy_build_error",
+					Target:      cfg.TargetType,
+					Environment: cfg.App.Environment,
+					ErrorMsg:    err.Error(),
+				})
+				_ = agenttrace.UpdateTakeoverBrief(".", cfg.TargetType, cfg.App.Environment, "BUILD_FAILED", "", err)
+			}
 			log.Error("Build flow failed: %v", err)
 			os.Exit(1)
 		}
@@ -98,6 +123,15 @@ func shipServerless(ctx context.Context, log *shared.Logger, cfg *config.NextDep
 		os.Exit(1)
 	}
 	if err := serverless.Deploy(ctx, cfg, meta, shipVerbose, !shipNoProvision, shipVerify); err != nil {
+		if agenttrace.DetectHandoff(".") {
+			_ = agenttrace.RecordEvent(".", agenttrace.HandoffEvent{
+				Type:        "nextdeploy_deploy_error",
+				Target:      "serverless/" + cfg.Serverless.Provider,
+				Environment: cfg.App.Environment,
+				ErrorMsg:    err.Error(),
+			})
+			_ = agenttrace.UpdateTakeoverBrief(".", "serverless/"+cfg.Serverless.Provider, cfg.App.Environment, "DEPLOY_FAILED", "", err)
+		}
 		if ctx.Err() != nil {
 			log.Warn("Deploy interrupted — state may be partial. Re-run `nextdeploy ship` " +
 				"to converge (steps are idempotent).")
@@ -106,16 +140,22 @@ func shipServerless(ctx context.Context, log *shared.Logger, cfg *config.NextDep
 		os.Exit(1)
 	}
 
-	// Emit the Worker script name on stdout in a stable, greppable form so CI
-	// can compose the deployment URL (https://<worker>.<subdomain>.workers.dev)
-	// without the CLI having to call the Workers Subdomains API — that would
-	// without the CLI having to call the Workers Subdomains API — that would
-	// add SDK surface and another token scope to print something the account
-	// already knows. Cloudflare-only; other providers name resources
-	// differently.
+	liveURL := ""
 	if strings.EqualFold(cfg.Serverless.Provider, "cloudflare") {
-		fmt.Printf("NEXTDEPLOY_WORKER_NAME=%s\n",
-			serverless.CloudflareWorkerName(cfg.App.Name, cfg.App.Environment))
+		workerName := serverless.CloudflareWorkerName(cfg.App.Name, cfg.App.Environment)
+		fmt.Printf("NEXTDEPLOY_WORKER_NAME=%s\n", workerName)
+		liveURL = fmt.Sprintf("https://%s.workers.dev", workerName)
+	}
+
+	if agenttrace.DetectHandoff(".") {
+		_ = agenttrace.RecordEvent(".", agenttrace.HandoffEvent{
+			Type:        "nextdeploy_ship_success",
+			Target:      "serverless/" + cfg.Serverless.Provider,
+			Environment: cfg.App.Environment,
+			LiveURL:     liveURL,
+			Details:     fmt.Sprintf("Serverless deployment succeeded for %s", cfg.App.Name),
+		})
+		_ = agenttrace.UpdateTakeoverBrief(".", "serverless/"+cfg.Serverless.Provider, cfg.App.Environment, "SUCCESS", liveURL, nil)
 	}
 }
 
@@ -220,6 +260,15 @@ func shipVPS(ctx context.Context, log *shared.Logger, cfg *config.NextDeployConf
 	defer cancel()
 
 	if err := srv.UploadFile(ctx, deploymentServer, tarballName, remotePath); err != nil {
+		if agenttrace.DetectHandoff(".") {
+			_ = agenttrace.RecordEvent(".", agenttrace.HandoffEvent{
+				Type:        "nextdeploy_deploy_error",
+				Target:      "vps",
+				Environment: cfg.App.Environment,
+				ErrorMsg:    err.Error(),
+			})
+			_ = agenttrace.UpdateTakeoverBrief(".", "vps", cfg.App.Environment, "DEPLOY_FAILED", "", err)
+		}
 		log.Error("Failed to upload tarball: %v", err)
 		os.Exit(1)
 	}
@@ -229,8 +278,32 @@ func shipVPS(ctx context.Context, log *shared.Logger, cfg *config.NextDeployConf
 	daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd ship --tarball=%s --socket-path=/run/nextdeployd/nextdeployd.sock", shellQuote(remotePath))
 	output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, os.Stdout)
 	if err != nil {
+		if agenttrace.DetectHandoff(".") {
+			_ = agenttrace.RecordEvent(".", agenttrace.HandoffEvent{
+				Type:        "nextdeploy_deploy_error",
+				Target:      "vps",
+				Environment: cfg.App.Environment,
+				ErrorMsg:    fmt.Sprintf("%v: %s", err, output),
+			})
+			_ = agenttrace.UpdateTakeoverBrief(".", "vps", cfg.App.Environment, "DEPLOY_FAILED", "", err)
+		}
 		log.Error("Failed to trigger daemon (ensure nextdeployd is in PATH): %v\nOutput: %s", err, output)
 		os.Exit(1)
+	}
+
+	liveVPSURL := ""
+	if cfg.App.Domain.Name != "" {
+		liveVPSURL = "https://" + cfg.App.Domain.Name
+	}
+	if agenttrace.DetectHandoff(".") {
+		_ = agenttrace.RecordEvent(".", agenttrace.HandoffEvent{
+			Type:        "nextdeploy_ship_success",
+			Target:      "vps",
+			Environment: cfg.App.Environment,
+			LiveURL:     liveVPSURL,
+			Details:     fmt.Sprintf("VPS deployment succeeded to server %s", deploymentServer),
+		})
+		_ = agenttrace.UpdateTakeoverBrief(".", "vps", cfg.App.Environment, "SUCCESS", liveVPSURL, nil)
 	}
 
 	log.Info("Ship successful! Deployment instructions relayed to the daemon.")

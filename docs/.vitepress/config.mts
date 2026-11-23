@@ -21,6 +21,7 @@ export default defineConfig({
 
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
+      { text: 'Agent Trace', link: '/guide/agent-first-infra' },
       { text: 'Targets', link: '/targets/vps' },
       { text: 'CLI Reference', link: '/cli/overview' },
       { text: 'Configuration', link: '/guide/configuration' },
@@ -41,7 +42,9 @@ export default defineConfig({
           items: [
             { text: 'Quickstart', link: '/guide/getting-started' },
             { text: 'Core Architecture', link: '/guide/architecture' },
-            { text: 'Configuration Reference', link: '/guide/configuration' }
+            { text: 'Configuration Reference', link: '/guide/configuration' },
+            { text: 'Agent-First Infra & Handoff', link: '/guide/agent-first-infra' },
+            { text: 'Multi-Server Stress Testing', link: '/guide/multiserver-stress-testing' }
           ]
         },
         {
@@ -80,7 +83,8 @@ export default defineConfig({
             { text: 'nextdeploy secrets', link: '/cli/secrets' },
             { text: 'nextdeploy prepare', link: '/cli/prepare' },
             { text: 'nextdeploy inspect', link: '/cli/inspect' },
-            { text: 'nextdeploy generate-ci', link: '/cli/ci-cd' }
+            { text: 'nextdeploy generate-ci', link: '/cli/ci-cd' },
+            { text: 'nextdeploy trace & takeover', link: '/cli/trace' }
           ]
         }
       ],
@@ -93,6 +97,7 @@ export default defineConfig({
             { text: 'Zero-Downtime Cutover', link: '/internals/atomic-cutover' },
             { text: 'Cumulative Chunk Pooling', link: '/internals/chunk-pooling' },
             { text: 'Go High-Performance Sidecar', link: '/internals/go-sidecar' },
+            { text: 'Agent Trace & Handoff', link: '/internals/agent-trace' },
             { text: 'Local Development & Mage', link: '/internals/local-development' }
           ]
         }

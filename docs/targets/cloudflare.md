@@ -77,6 +77,7 @@ serverless:
 | **Custom Domains** | ✅ **Production-ready** | Automatic SSL and edge route binding with environment isolation safeguards. |
 | **Edge Protection** | ✅ **Production-ready** | Built-in IP allow/deny rules, KV rate limiting, and HMAC session cookie verification ahead of Next.js. |
 | **Custom `not-found.tsx` & `error.tsx`** | ✅ **Production-ready** | Full Next.js error boundaries with preserved HTTP status codes (e.g. true 404). |
+| **Automated CI/CD Pipelines (`generate-ci`)** | ✅ **Production-ready** | Target-aware GitHub Actions workflow with dry-run planning on PRs (`--detailed-exitcode`), ephemeral preview stacks (`--preview`), cleanup on PR close, and atomic deployments on push to `main`. |
 
 ---
 

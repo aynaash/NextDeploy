@@ -2,7 +2,7 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  cmd = "mkdir -p \"$HOME/.nextdeploy/bin\" && go build -o tmp/nextdeploy ./cli && cp tmp/nextdeploy \"$HOME/.nextdeploy/bin/.nextdeploy.tmp\" && mv -f \"$HOME/.nextdeploy/bin/.nextdeploy.tmp\" \"$HOME/.nextdeploy/bin/nextdeploy\""
+  cmd = 'set -e; mkdir -p tmp "$HOME/.nextdeploy/bin"; t="$HOME/.nextdeploy/bin/.nextdeploy.$$"; u="tmp/nextdeploy.$$"; trap "rm -f \"$t\" \"$u\"" EXIT; go build -o "$t" ./cli; cp "$t" "$u" && mv -f "$u" tmp/nextdeploy; mv -f "$t" "$HOME/.nextdeploy/bin/nextdeploy"'
   entrypoint = ["tmp/nextdeploy", "version"]
   include_ext = ["go", "toml", "js", "ts", "tmpl"]
   exclude_dir = ["tmp", "bin", "dist", "vendor", "daemon", "docs", "test-serverless-app", "node_modules"]

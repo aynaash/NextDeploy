@@ -3,6 +3,8 @@
 /dist/
 /nextdeploy
 /nextdeployd
+/test/stress/bin/
+/test/stress/test_ed25519*
 *.exe
 *.test
 *.out
@@ -37,6 +39,8 @@ out/
 # ── Tooling / IDE / OS ───────────────────────────────────────────
 .idea/
 .vscode/
+.cursor/
+.antigravity/
 *.swp
 *.swo
 *~
@@ -60,11 +64,18 @@ test_src_dir/
 !CODE_QUALITY.md
 !CHANGELOG.md
 !CONTRIBUTING.md
+!ARCHITECTURE.md
+!DOCS_INDEX.md
+!TODOS.md
 !cli/internal/serverless/REVIEW.md
 !**/README.md
 !CLOUDFLARE_PARITY.md
+!VPS_MULTISERVER_PLAN.md
 !docs/*.md
 !docs/**/*.md
+!agentrace.md
+!frontend/*.md
+!frontend/**/*.md
 /.vitepress/
 docs/.vitepress/dist/
 docs/.vitepress/cache/

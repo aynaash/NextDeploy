@@ -1,0 +1,9 @@
+-- Your D1 schema goes here. `nextdeploy ship` applies each *.sql in this dir
+-- once, in filename order (tracked in _nextdeploy_migrations). Bring whatever
+-- tooling you like (drizzle-kit, raw SQL, etc.) — NextDeploy just applies it.
+--
+-- Example:
+-- CREATE TABLE IF NOT EXISTS items (
+--   id   TEXT PRIMARY KEY,
+--   name TEXT NOT NULL
+-- );

@@ -14,8 +14,8 @@ nextdeploy plan [flags]
 
 | Flag | Type | Description |
 | :--- | :--- | :--- |
-| `--detailed-exitcode` | boolean | Exit with status code `2` if infrastructure drift is detected (ideal for CI pipelines). |
-| `--refresh` | boolean | Refresh target resource state from the cloud provider before planning (default: `true`). |
+| `--detailed-exitcode` | boolean | Exit with status code `2` if infrastructure drift or changes are detected (ideal for CI pipelines). |
+| `--only` | string | Scope plan to module(s): comma-separated list of `{dataplane,edge}`. |
 
 ---
 

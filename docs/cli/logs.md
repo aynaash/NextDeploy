@@ -12,24 +12,27 @@ nextdeploy logs [flags]
 
 ### Flags
 
-| Flag | Shorthand | Type | Description |
-| :--- | :--- | :--- | :--- |
-| `--follow` | `-f` | boolean | Continuously tail and stream log output in real time. |
-| `--lines` | `-n` | integer | Number of recent lines to display (default: `100`). |
-| `--filter` | | string | Case-insensitive regex pattern or string filter for log entries. |
-| `--timestamps` | | boolean | Prepend ISO 8601 timestamps to each log line. |
+| Flag | Type | Description |
+| :--- | :--- | :--- |
+| `--route` | string | Filter logs by a specific route (e.g. `/api/upload`). |
+| `--audit` | boolean | Stream the daemon audit log. |
+| `--daemon` | boolean | Stream the daemon process log. |
+| `--all` | boolean | Stream everything simultaneously (App + Audit + Daemon). |
 
 ---
 
 ## Examples
 
 ```bash
-# Stream live logs
-nextdeploy logs -f
+# Stream live application logs
+nextdeploy logs
 
-# Show last 250 log entries
-nextdeploy logs -n 250
+# Filter application logs for a specific route
+nextdeploy logs --route /api/webhooks
 
-# Filter for error logs
-nextdeploy logs --filter "ERROR"
+# Stream the daemon audit log
+nextdeploy logs --audit
+
+# Stream all logs
+nextdeploy logs --all
 ```

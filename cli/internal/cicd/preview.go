@@ -75,6 +75,7 @@ jobs:
       - name: Deploy preview
         id: deploy
         env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -84,8 +85,16 @@ jobs:
         run: |
           set -o pipefail
           ENV_NAME="pr-${{ github.event.number }}"
-          nextdeploy apply --environment "$ENV_NAME" --yes
-          nextdeploy ship --environment "$ENV_NAME" --no-provision --verify | tee ship.log
+          RUN_PREFIX=""
+          if [ -n "${DOPPLER_TOKEN:-}" ]; then
+            if ! command -v doppler >/dev/null 2>&1; then
+              (curl -Ls --tlsv1.2 --proto "=https" --retry 3 https://cli.doppler.com/install.sh || wget -t 3 -qO- https://cli.doppler.com/install.sh) | sudo sh
+            fi
+            RUN_PREFIX="doppler run --"
+            SUBDOMAIN=$(doppler secrets get CLOUDFLARE_WORKERS_SUBDOMAIN --plain 2>/dev/null || echo "$SUBDOMAIN")
+          fi
+          $RUN_PREFIX nextdeploy apply --environment "$ENV_NAME" --yes
+          $RUN_PREFIX nextdeploy ship --environment "$ENV_NAME" --no-provision --verify | tee ship.log
           WORKER=$(grep -oE 'NEXTDEPLOY_WORKER_NAME=[^[:space:]]+' ship.log | tail -1 | cut -d= -f2)
           if [ -z "$WORKER" ]; then
             echo "::error::ship did not report NEXTDEPLOY_WORKER_NAME"; exit 1
@@ -159,9 +168,18 @@ jobs:
 
       - name: Destroy preview stack
         env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           NEXTDEPLOY_CF_STATE_KEY: ${{ secrets.NEXTDEPLOY_CF_STATE_KEY }}
-        run: nextdeploy destroy --environment "pr-${{ github.event.number }}" --yes --force
+        run: |
+          RUN_PREFIX=""
+          if [ -n "${DOPPLER_TOKEN:-}" ]; then
+            if ! command -v doppler >/dev/null 2>&1; then
+              (curl -Ls --tlsv1.2 --proto "=https" --retry 3 https://cli.doppler.com/install.sh || wget -t 3 -qO- https://cli.doppler.com/install.sh) | sudo sh
+            fi
+            RUN_PREFIX="doppler run --"
+          fi
+          $RUN_PREFIX nextdeploy destroy --environment "pr-${{ github.event.number }}" --yes --force
 `
 }

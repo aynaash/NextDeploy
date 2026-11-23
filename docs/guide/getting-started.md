@@ -144,6 +144,28 @@ Rollbacks execute in milliseconds by flipping the active deployment symlink or W
 
 ---
 
+## Agent Trace & Human Takeover
+
+When collaborating with AI coding agents (such as Google Antigravity, Claude Code, Cursor, or Windsurf), NextDeploy acts as your continuity and deployment engine:
+
+```bash
+# Take over from an agent and open all touched files in $EDITOR
+nextdeploy takeover -o
+
+# Launch the interactive local dashboard on port 4044
+nextdeploy trace ui
+
+# Snapshot agent intent and diffs to .nextdeploy/trace/
+nextdeploy trace checkpoint -m "Implement Stripe Server Actions"
+
+# Seamlessly resume the session in Claude Code or another agent
+nextdeploy trace resume --agent claude
+```
+
+Read the full guide: [Agent-First Infrastructure & Handoff](/guide/agent-first-infra).
+
+---
+
 ## Next Steps
 
 - Explore [Core Architecture](/guide/architecture) to see how zero-downtime cutover works under the hood.

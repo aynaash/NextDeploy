@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /app/
+
+Sitemap: https://nextdeploy.org/sitemap.xml
+Host: https://nextdeploy.org

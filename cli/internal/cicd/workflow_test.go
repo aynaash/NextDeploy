@@ -92,9 +92,31 @@ func TestRenderDeployWorkflow_IsValidYAML(t *testing.T) {
 // deploy, not just CI ones. The old scaffold template wired AUTH_SECRET here.
 func TestRenderDeployWorkflow_CarriesNoAppSecrets(t *testing.T) {
 	yml := RenderDeployWorkflow()
-	for _, leaked := range []string{"AUTH_SECRET", "DATABASE_URL", "DOPPLER_TOKEN"} {
+	for _, leaked := range []string{"AUTH_SECRET", "DATABASE_URL"} {
 		if strings.Contains(yml, leaked) {
 			t.Errorf("workflow wires app secret %s — it belongs in nextdeploy.yml", leaked)
+		}
+	}
+}
+
+func TestRenderDeployWorkflow_DopplerFirst(t *testing.T) {
+	yml := RenderDeployWorkflow()
+
+	// DOPPLER_TOKEN must be mapped in env for all deploy targets
+	if n := strings.Count(yml, "DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}"); n != 3 {
+		t.Errorf("want DOPPLER_TOKEN mapped in all 3 deploy steps, got %d", n)
+	}
+
+	// Must contain Doppler installation and fallback execution
+	for _, want := range []string{
+		"cli.doppler.com/install.sh",
+		`RUN_PREFIX="doppler run --"`,
+		"$RUN_PREFIX nextdeploy apply --yes",
+		"$RUN_PREFIX nextdeploy ship --no-provision --verify",
+		"$RUN_PREFIX nextdeploy ship --verify",
+	} {
+		if !strings.Contains(yml, want) {
+			t.Errorf("workflow missing Doppler-first pattern %q", want)
 		}
 	}
 }
@@ -181,5 +203,54 @@ func TestPreviewCleanup_IsEnvironmentScoped(t *testing.T) {
 	}
 	if !strings.Contains(cleanup, "--environment") {
 		t.Error("cleanup destroy is not environment-scoped")
+	}
+}
+
+func TestRenderDeployWorkflow_VPSSSHHardening(t *testing.T) {
+	yml := RenderDeployWorkflow()
+
+	for _, want := range []string{
+		"mkdir -p ~/.ssh",
+		"chmod 700 ~/.ssh",
+		"chmod 600 ~/.ssh/id_ed25519",
+		"cp ~/.ssh/id_ed25519 ~/.ssh/id_rsa",
+		"chmod 600 ~/.ssh/id_rsa",
+		"SSH_KNOWN_HOSTS",
+		"chmod 600 ~/.ssh/known_hosts",
+		"SSH_KEY_PASSPHRASE",
+		"NEXTDEPLOY_STRICT_HOST_KEY",
+	} {
+		if !strings.Contains(yml, want) {
+			t.Errorf("VPS deploy step missing hardening assertion %q", want)
+		}
+	}
+}
+
+func TestRenderDeployWorkflow_TargetDetectionPatterns(t *testing.T) {
+	yml := RenderDeployWorkflow()
+
+	for _, want := range []string{
+		`nextdeploy target`,
+		`NEXTDEPLOY_TARGET_TYPE`,
+		`NEXTDEPLOY_DEPLOYMENT_TYPE`,
+		`grep -qE '^[[:space:]]*provider:[[:space:]]*["'\'']?cloudflare["'\'']?' nextdeploy.yml`,
+		`grep -qE '^[[:space:]]*(target_type|target):[[:space:]]*["'\'']?vps["'\'']?' nextdeploy.yml`,
+		`grep -qE '^[[:space:]]*(deployment|server|servers):' nextdeploy.yml`,
+	} {
+		if !strings.Contains(yml, want) {
+			t.Errorf("Detect step missing pattern %q", want)
+		}
+	}
+}
+
+func TestRenderDeployWorkflow_WithKnownTarget(t *testing.T) {
+	cfYml := RenderDeployWorkflow("cloudflare")
+	if !strings.Contains(cfYml, `NEXTDEPLOY_TARGET_TYPE: "cloudflare"`) {
+		t.Errorf("expected workflow to embed NEXTDEPLOY_TARGET_TYPE: \"cloudflare\"")
+	}
+
+	vpsYml := RenderDeployWorkflow("vps")
+	if !strings.Contains(vpsYml, `NEXTDEPLOY_TARGET_TYPE: "vps"`) {
+		t.Errorf("expected workflow to embed NEXTDEPLOY_TARGET_TYPE: \"vps\"")
 	}
 }

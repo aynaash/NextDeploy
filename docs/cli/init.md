@@ -14,10 +14,10 @@ nextdeploy init [flags]
 
 | Flag | Type | Description |
 | :--- | :--- | :--- |
-| `--target` | string | Target type to scaffold directly (`vps` or `serverless`). |
-| `--provider` | string | Serverless provider (`cloudflare` or `aws`). |
-| `--domain` | string | Application domain name (e.g. `app.example.com`). |
-| `--non-interactive` | boolean | Generate config non-interactively using defaults and provided flags. |
+| `--target` | string | Deploy target to scaffold: `vps`, `aws`, or `cloudflare` (skips the interactive prompt). |
+| `--platform` | string | Alias for `--target`. |
+| `--mode` | string | Cloudflare only: `scaffold` or `sniff` (skips the interactive prompt). |
+| `--db` | string | Cloudflare scaffold only: `d1`, `byo`, or `none` (skips the interactive prompt). |
 
 ---
 

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -12,7 +13,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var planOnlyFlag string
+var (
+	planOnlyFlag         string
+	planDetailedExitCode bool
+	planJSONFlag         bool
+)
 
 var planCmd = &cobra.Command{
 	Use:   "plan",
@@ -64,9 +69,18 @@ time and are not part of the plan.`,
 			result = filtered
 		}
 
-		renderPlan(result)
+		if planJSONFlag {
+			data, err := json.MarshalIndent(result, "", "  ")
+			if err != nil {
+				log.Error("JSON marshal failed: %v", err)
+				os.Exit(1)
+			}
+			fmt.Println(string(data))
+		} else {
+			renderPlan(result)
+		}
 
-		if result.HasDrift() {
+		if result.HasDrift() || (planDetailedExitCode && result.HasChanges()) {
 			os.Exit(2)
 		}
 	},
@@ -179,5 +193,7 @@ func filterPlanByModules(r *serverless.PlanResult, only string) (*serverless.Pla
 
 func init() {
 	planCmd.Flags().StringVar(&planOnlyFlag, "only", "", "Scope plan to module(s): comma-separated list of {dataplane,edge}")
+	planCmd.Flags().BoolVar(&planDetailedExitCode, "detailed-exitcode", false, "Exit code 2 when drift or infrastructure changes are detected (for CI/CD pipelines)")
+	planCmd.Flags().BoolVar(&planJSONFlag, "json", false, "Output machine-readable JSON plan for AI agents and scripts")
 	rootCmd.AddCommand(planCmd)
 }

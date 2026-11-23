@@ -9,16 +9,19 @@ nextdeploy <command> explain
 
 ---
 
-## Global Flags
+## Configuration & Help
 
-The following flags can be passed to any `nextdeploy` command:
+NextDeploy automatically reads its configuration from `nextdeploy.yml` in the project root.
 
-| Flag | Shorthand | Type | Description |
-| :--- | :--- | :--- | :--- |
-| `--config` | `-c` | string | Path to configuration file (default: `./nextdeploy.yml`). |
-| `--verbose` | `-v` | boolean | Enable verbose debug output. |
-| `--json` | | boolean | Output results in machine-readable JSON format. |
-| `--help` | `-h` | boolean | Display help information for the command. |
+To view help for any command:
+```bash
+nextdeploy <command> --help
+```
+
+To view built-in deep architectural explanations:
+```bash
+nextdeploy <command> explain
+```
 
 ---
 
@@ -26,16 +29,18 @@ The following flags can be passed to any `nextdeploy` command:
 
 | Command | Alias | Description |
 | :--- | :--- | :--- |
-| [`nextdeploy init`](/cli/init) | | Interactively initialize `nextdeploy.yml` in a project. |
+| [`nextdeploy init`](/cli/init) | | Initialize `nextdeploy.yml` or scaffold a fullstack starter. |
 | [`nextdeploy plan`](/cli/plan) | | Dry-run preflight: detect drift and preview changes without modifying resources. |
-| [`nextdeploy build`](/cli/build) | | Build the Next.js app and run NextCore route introspection. |
+| [`nextdeploy build`](/cli/build) | | Build the Next.js app and prepare deployable standalone artifacts. |
 | [`nextdeploy ship`](/cli/ship) | `deploy` | Build, package, upload, health-check, and cutover with zero downtime. |
 | [`nextdeploy rollback`](/cli/rollback) | | Instantly revert to a previous deployment without rebuilding. |
-| [`nextdeploy status`](/cli/status) | | Inspect deployment health, uptime, and server/container resource usage. |
-| [`nextdeploy logs`](/cli/logs) | | Stream live server logs or query historical deployment logs. |
+| [`nextdeploy status`](/cli/status) | | Inspect deployment health, uptime, and target service state. |
+| [`nextdeploy logs`](/cli/logs) | | Stream live server logs or daemon audit logs. |
 | [`nextdeploy secrets`](/cli/secrets) | | Manage encrypted environment variables and secret stores. |
-| [`nextdeploy prepare`](/cli/prepare) | | Bootstrap server dependencies (Caddy, daemon, systemd, cgroups). |
-| [`nextdeploy inspect`](/cli/inspect) | | Introspect project routes, ISR tags, and build manifests. |
-| [`nextdeploy generate-ci`](/cli/ci-cd) | | Scaffold automated GitHub Actions deployment pipelines. |
+| [`nextdeploy prepare`](/cli/prepare) | | Bootstrap server dependencies (Caddy, daemon, systemd, security hardening). |
+| [`nextdeploy inspect`](/cli/inspect) | | Introspect standalone bundle size and top dependency weights. |
+| [`nextdeploy generate-ci`](/cli/ci-cd) | | Scaffold automated GitHub Actions or GitLab CI pipelines. |
+| [`nextdeploy trace`](/cli/trace) | `takeover` | AI agent continuity layer and developer takeover briefs. |
+| `nextdeploy target` | `target-type` | Print resolved deployment target (e.g. `cloudflare`, `vps`, `aws`). |
 | `nextdeploy update` | | Self-update the `nextdeploy` CLI binary to the latest release. |
 | `nextdeploy version` | | Print current CLI version, commit hash, and build timestamp. |
