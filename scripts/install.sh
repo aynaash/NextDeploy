@@ -57,10 +57,16 @@ detect_arch() {
 }
 
 fetch_latest_version() {
-  api_url="https://api.github.com/repos/${REPO}/releases/latest"
-  tag=$(curl -fsSL "$api_url" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+  # Resolve the latest tag via GitHub's redirect (releases/latest →
+  # releases/tag/<tag>) instead of the REST API. The API is rate-limited to 60
+  # unauthenticated requests/hour per IP and returns 403 once exhausted, which
+  # breaks `curl | sh` installs on shared or CI IPs. The redirect is a plain
+  # github.com page fetch, not subject to the API limit.
+  releases_url="https://github.com/${REPO}/releases/latest"
+  final_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "$releases_url")
+  tag=${final_url##*/}
   if [ -z "$tag" ]; then
-    err "Could not determine latest release version from GitHub"
+    err "Could not resolve latest release version from ${releases_url}"
     exit 1
   fi
   printf '%s' "$tag"
