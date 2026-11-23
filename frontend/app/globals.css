@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import './brand.css';
 @import 'tw-animate-css';
 @import 'highlight.js/styles/github-dark.css';
 
@@ -6,75 +7,46 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Semantic tokens. The app is dark-only, so :root holds the dark palette, each
+ * value pointing at the brand/surface scales defined in brand.css. Change the
+ * scales there and everything below — including the shadcn primitives that read
+ * --primary / --card / --border / etc. — follows.
+ */
 :root {
-  --background: oklch(0.08 0 0);
-  --foreground: oklch(0.97 0 0);
-  --card: oklch(0.12 0 0);
-  --card-foreground: oklch(0.97 0 0);
-  --popover: oklch(0.12 0 0);
-  --popover-foreground: oklch(0.97 0 0);
-  --primary: oklch(0.5 0.15 155);
-  --primary-foreground: oklch(0.97 0 0);
-  --secondary: oklch(0.2 0 0);
-  --secondary-foreground: oklch(0.97 0 0);
-  --muted: oklch(0.2 0 0);
-  --muted-foreground: oklch(0.6 0 0);
-  --accent: oklch(0.6 0.18 155);
-  --accent-foreground: oklch(0.97 0 0);
-  --destructive: oklch(0.55 0.25 25);
-  --destructive-foreground: oklch(0.97 0 0);
-  --border: oklch(0.2 0 0);
-  --input: oklch(0.2 0 0);
-  --ring: oklch(0.5 0.15 155);
-  --chart-1: oklch(0.5 0.15 155);
-  --chart-2: oklch(0.55 0.18 140);
-  --chart-3: oklch(0.45 0.15 170);
-  --chart-4: oklch(0.65 0.2 145);
-  --chart-5: oklch(0.7 0.15 160);
+  --background: var(--color-surface-950);
+  --foreground: var(--color-surface-100);
+  --card: var(--color-surface-900);
+  --card-foreground: var(--color-surface-100);
+  --popover: var(--color-surface-900);
+  --popover-foreground: var(--color-surface-100);
+  --primary: var(--color-brand-500);
+  --primary-foreground: var(--color-surface-950);
+  --secondary: var(--color-surface-800);
+  --secondary-foreground: var(--color-surface-100);
+  --muted: var(--color-surface-800);
+  --muted-foreground: var(--color-muted-400);
+  --accent: var(--color-brand-400);
+  --accent-foreground: var(--color-surface-950);
+  --destructive: var(--color-danger-500);
+  --destructive-foreground: var(--color-danger-500);
+  --border: var(--color-surface-800);
+  --input: var(--color-surface-800);
+  --ring: var(--color-brand-500);
+  --chart-1: var(--color-brand-500);
+  --chart-2: var(--color-accent-500);
+  --chart-3: var(--color-info-500);
+  --chart-4: var(--color-warning-500);
+  --chart-5: var(--color-danger-500);
   --radius: 0.625rem;
-  --sidebar: oklch(0.12 0 0);
-  --sidebar-foreground: oklch(0.97 0 0);
-  --sidebar-primary: oklch(0.5 0.15 155);
-  --sidebar-primary-foreground: oklch(0.97 0 0);
-  --sidebar-accent: oklch(0.2 0 0);
-  --sidebar-accent-foreground: oklch(0.97 0 0);
-  --sidebar-border: oklch(0.2 0 0);
-  --sidebar-ring: oklch(0.5 0.15 155);
-}
-
-.dark {
-  --background: oklch(0.08 0 0);
-  --foreground: oklch(0.97 0 0);
-  --card: oklch(0.12 0 0);
-  --card-foreground: oklch(0.97 0 0);
-  --popover: oklch(0.12 0 0);
-  --popover-foreground: oklch(0.97 0 0);
-  --primary: oklch(0.5 0.15 155);
-  --primary-foreground: oklch(0.97 0 0);
-  --secondary: oklch(0.2 0 0);
-  --secondary-foreground: oklch(0.97 0 0);
-  --muted: oklch(0.2 0 0);
-  --muted-foreground: oklch(0.6 0 0);
-  --accent: oklch(0.6 0.18 155);
-  --accent-foreground: oklch(0.97 0 0);
-  --destructive: oklch(0.55 0.25 25);
-  --destructive-foreground: oklch(0.97 0 0);
-  --border: oklch(0.2 0 0);
-  --input: oklch(0.2 0 0);
-  --ring: oklch(0.5 0.15 155);
-  --chart-1: oklch(0.5 0.15 155);
-  --chart-2: oklch(0.55 0.18 140);
-  --chart-3: oklch(0.45 0.15 170);
-  --chart-4: oklch(0.65 0.2 145);
-  --chart-5: oklch(0.7 0.15 160);
-  --sidebar: oklch(0.12 0 0);
-  --sidebar-foreground: oklch(0.97 0 0);
-  --sidebar-primary: oklch(0.5 0.15 155);
-  --sidebar-primary-foreground: oklch(0.97 0 0);
-  --sidebar-accent: oklch(0.2 0 0);
-  --sidebar-accent-foreground: oklch(0.97 0 0);
-  --sidebar-border: oklch(0.2 0 0);
-  --sidebar-ring: oklch(0.5 0.15 155);
+  --sidebar: var(--color-surface-900);
+  --sidebar-foreground: var(--color-surface-100);
+  --sidebar-primary: var(--color-brand-500);
+  --sidebar-primary-foreground: var(--color-surface-950);
+  --sidebar-accent: var(--color-surface-800);
+  --sidebar-accent-foreground: var(--color-surface-100);
+  --sidebar-border: var(--color-surface-800);
+  --sidebar-ring: var(--color-brand-500);
 }
 
 @theme inline {

@@ -6,7 +6,7 @@ import Logo from "./logo";
 
 export default function Navbar() {
   return (
-    <nav className="sticky top-0 z-50 w-full border-b border-slate-800 bg-slate-950/80 backdrop-blur-md">
+    <nav className="sticky top-0 z-50 w-full border-b border-surface-800 bg-surface-950/80 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-8">
           <Link href="/" className="flex items-center group transition-transform hover:scale-[1.02]">
@@ -16,7 +16,7 @@ export default function Navbar() {
           <div className="hidden md:flex items-center gap-6">
             <Link
               href="/docs"
-              className="text-sm font-medium text-gray-400 hover:text-white transition-colors"
+              className="text-sm font-medium text-muted-400 hover:text-white transition-colors"
             >
               Documentation
             </Link>
@@ -24,7 +24,7 @@ export default function Navbar() {
               href="https://github.com/aynaash/NextDeploy"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-sm font-medium text-gray-400 hover:text-white transition-colors"
+              className="text-sm font-medium text-muted-400 hover:text-white transition-colors"
             >
               GitHub
             </a>
@@ -35,7 +35,7 @@ export default function Navbar() {
           <div className="hidden sm:block">
             <Suspense
               fallback={
-                <div className="w-32 h-9 bg-slate-800 rounded-lg animate-pulse" />
+                <div className="w-32 h-9 bg-surface-800 rounded-lg animate-pulse" />
               }
             >
               <GitHubStarButton />
@@ -44,7 +44,7 @@ export default function Navbar() {
 
           <Link
             href="/docs"
-            className="hidden sm:flex items-center justify-center px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm font-semibold transition-colors"
+            className="hidden sm:flex items-center justify-center px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-400 text-surface-950 text-sm font-semibold transition-colors"
           >
             Get Started
           </Link>

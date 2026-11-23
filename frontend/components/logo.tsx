@@ -58,26 +58,26 @@ export function LogoIcon({ className = "w-8 h-8" }: { className?: string }) {
         <linearGradient id="logo-icon-bg" x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stopColor="#0b1329" />
           <stop offset="50%" stopColor="#050a17" />
-          <stop offset="100%" stopColor="#020617" />
+          <stop offset="100%" stopColor="var(--color-surface-950)" />
         </linearGradient>
         <linearGradient id="logo-icon-border" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#34d399" stopOpacity="0.7" />
-          <stop offset="45%" stopColor="#06b6d4" stopOpacity="0.4" />
-          <stop offset="100%" stopColor="#1e293b" stopOpacity="0.8" />
+          <stop offset="0%" stopColor="var(--color-brand-400)" stopOpacity="0.7" />
+          <stop offset="45%" stopColor="var(--color-cyan-500)" stopOpacity="0.4" />
+          <stop offset="100%" stopColor="var(--color-surface-800)" stopOpacity="0.8" />
         </linearGradient>
         <linearGradient id="logo-icon-frame" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#10b981" />
-          <stop offset="100%" stopColor="#059669" />
+          <stop offset="0%" stopColor="var(--color-brand-500)" />
+          <stop offset="100%" stopColor="var(--color-brand-600)" />
         </linearGradient>
         <linearGradient id="logo-icon-bolt" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#a7f3d0" />
-          <stop offset="25%" stopColor="#34d399" />
-          <stop offset="70%" stopColor="#10b981" />
-          <stop offset="100%" stopColor="#06b6d4" />
+          <stop offset="0%" stopColor="var(--color-brand-200)" />
+          <stop offset="25%" stopColor="var(--color-brand-400)" />
+          <stop offset="70%" stopColor="var(--color-brand-500)" />
+          <stop offset="100%" stopColor="var(--color-cyan-500)" />
         </linearGradient>
         <linearGradient id="logo-icon-inner" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#0f172a" stopOpacity="0.95" />
-          <stop offset="100%" stopColor="#020617" stopOpacity="0.98" />
+          <stop offset="0%" stopColor="var(--color-surface-900)" stopOpacity="0.95" />
+          <stop offset="100%" stopColor="var(--color-surface-950)" stopOpacity="0.98" />
         </linearGradient>
         <filter id="logo-icon-glow" x="-20%" y="-20%" width="140%" height="140%">
           <feGaussianBlur stdDeviation="8" result="blur" />
@@ -110,9 +110,9 @@ export function LogoIcon({ className = "w-8 h-8" }: { className?: string }) {
       />
 
       {/* Server Status LEDs */}
-      <circle cx="148" cy="148" r="10" fill="#34d399" />
-      <circle cx="180" cy="148" r="10" fill="#38bdf8" />
-      <rect x="300" y="143" width="64" height="10" rx="5" fill="#334155" />
+      <circle cx="148" cy="148" r="10" fill="var(--color-brand-400)" />
+      <circle cx="180" cy="148" r="10" fill="var(--color-sky-400)" />
+      <rect x="300" y="143" width="64" height="10" rx="5" fill="var(--color-surface-700)" />
 
       {/* High-Energy Deploy Lightning Bolt */}
       <path
@@ -154,14 +154,14 @@ export default function Logo({
             className={`font-extrabold tracking-tight text-white ${cfg.textSize} ${textClassName}`}
           >
             Next
-            <span className="bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-brand-400 via-accent-400 to-cyan-400 bg-clip-text text-transparent">
               Deploy
             </span>
           </span>
 
           {badge && (
             <span
-              className={`rounded-full font-mono font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 ${cfg.badgeSize}`}
+              className={`rounded-full font-mono font-semibold bg-brand-500/10 text-brand-400 border border-brand-500/20 ${cfg.badgeSize}`}
             >
               {badge}
             </span>
@@ -170,7 +170,7 @@ export default function Logo({
 
         {(variant === "full" || subtitle) && (
           <span
-            className={`font-mono text-gray-400 tracking-wider uppercase ${cfg.subtextSize}`}
+            className={`font-mono text-muted-400 tracking-wider uppercase ${cfg.subtextSize}`}
           >
             {subtitle || "Self-Hosted Next.js Engine"}
           </span>

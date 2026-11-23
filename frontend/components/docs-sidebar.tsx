@@ -32,7 +32,7 @@ function SidebarNav({
           <div key={category.title}>
             <button
               onClick={() => toggle(category.title)}
-              className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-gray-300 hover:text-white transition-colors"
+              className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-muted-300 hover:text-white transition-colors"
             >
               {category.title}
               <ChevronDown
@@ -49,8 +49,8 @@ function SidebarNav({
                     href={item.href}
                     onClick={onNavigate}
                     className={`block px-3 py-2 rounded text-sm transition-colors ${isActive(item.href)
-                        ? 'bg-emerald-600/20 text-emerald-400 font-medium'
-                        : 'text-gray-400 hover:text-gray-200 hover:bg-slate-800/50'
+                        ? 'bg-brand-600/20 text-brand-400 font-medium'
+                        : 'text-muted-400 hover:text-muted-200 hover:bg-surface-800/50'
                       }`}
                   >
                     {item.title}
@@ -92,20 +92,20 @@ export default function DocsSidebar() {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="hidden lg:block w-64 bg-slate-900/50 border-r border-slate-800 p-6 sticky top-0 h-screen overflow-y-auto flex-shrink-0">
+      <aside className="hidden lg:block w-64 bg-surface-900/50 border-r border-surface-800 p-6 sticky top-0 h-screen overflow-y-auto flex-shrink-0">
         <SidebarNav pathname={pathname} expanded={expanded} toggle={toggle} />
       </aside>
 
       {/* Mobile docs sub-bar (sits below global Navbar) */}
-      <div className="lg:hidden sticky top-16 z-30 flex items-center justify-between px-4 h-12 bg-slate-950/90 backdrop-blur-md border-b border-slate-800">
-        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+      <div className="lg:hidden sticky top-16 z-30 flex items-center justify-between px-4 h-12 bg-surface-950/90 backdrop-blur-md border-b border-surface-800">
+        <span className="text-xs font-semibold text-muted-400 uppercase tracking-wider">
           Documentation
         </span>
         <button
           type="button"
           onClick={() => setOpen(true)}
           aria-label="Open documentation menu"
-          className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm text-gray-300 hover:text-white hover:bg-slate-800 transition-colors border border-slate-700"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm text-muted-300 hover:text-white hover:bg-surface-800 transition-colors border border-surface-700"
         >
           <Menu className="w-4 h-4" />
           Menu
@@ -115,22 +115,22 @@ export default function DocsSidebar() {
       {/* Mobile drawer */}
       {open && (
         <div
-          className="lg:hidden fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm"
+          className="lg:hidden fixed inset-0 z-50 bg-surface-950/70 backdrop-blur-sm"
           onClick={() => setOpen(false)}
         >
           <aside
-            className="absolute top-0 left-0 h-full w-[85%] max-w-xs bg-slate-950 border-r border-slate-800 p-6 overflow-y-auto"
+            className="absolute top-0 left-0 h-full w-[85%] max-w-xs bg-surface-950 border-r border-surface-800 p-6 overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-6">
-              <span className="text-sm font-semibold text-gray-400 uppercase tracking-wider">
+              <span className="text-sm font-semibold text-muted-400 uppercase tracking-wider">
                 Navigation
               </span>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="Close menu"
-                className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-slate-800 transition-colors"
+                className="p-1.5 rounded-md text-muted-400 hover:text-white hover:bg-surface-800 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>

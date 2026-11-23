@@ -1,0 +1,132 @@
+/*
+ * NextDeploy brand palette — single source of truth.
+ *
+ * Every color the UI uses is defined here as a Tailwind v4 @theme scale, so it
+ * generates utilities that support shades, opacity modifiers (/10, /20, ...) and
+ * gradient stops (from-*, via-*, to-*):
+ *
+ *   bg-brand-500   text-brand-400/80   border-accent-500/20   from-surface-950
+ *
+ * The shadcn semantic tokens in globals.css (--background, --primary, --border,
+ * ...) are expressed in terms of these scales, so the whole system re-themes from
+ * one place. Values mirror the palette the site was built on so nothing shifts.
+ */
+
+@theme {
+  /* Brand — emerald (primary accent + success) */
+  --color-brand-50: #ecfdf5;
+  --color-brand-100: #d1fae5;
+  --color-brand-200: #a7f3d0;
+  --color-brand-300: #6ee7b7;
+  --color-brand-400: #34d399;
+  --color-brand-500: #10b981;
+  --color-brand-600: #059669;
+  --color-brand-700: #047857;
+  --color-brand-800: #065f46;
+  --color-brand-900: #064e3b;
+  --color-brand-950: #022c22;
+
+  /* Accent — teal (brand gradient companion) */
+  --color-accent-50: #f0fdfa;
+  --color-accent-100: #ccfbf1;
+  --color-accent-200: #99f6e4;
+  --color-accent-300: #5eead4;
+  --color-accent-400: #2dd4bf;
+  --color-accent-500: #14b8a6;
+  --color-accent-600: #0d9488;
+  --color-accent-700: #0f766e;
+  --color-accent-800: #115e59;
+  --color-accent-900: #134e4a;
+  --color-accent-950: #042f2e;
+
+  /* Surface — slate (neutral base: background, card, border, text) */
+  --color-surface-50: #f8fafc;
+  --color-surface-100: #f1f5f9;
+  --color-surface-200: #e2e8f0;
+  --color-surface-300: #cbd5e1;
+  --color-surface-400: #94a3b8;
+  --color-surface-500: #64748b;
+  --color-surface-600: #475569;
+  --color-surface-700: #334155;
+  --color-surface-800: #1e293b;
+  --color-surface-900: #0f172a;
+  --color-surface-950: #020617;
+
+  /* Muted — gray (neutral text) */
+  --color-muted-50: #f9fafb;
+  --color-muted-100: #f3f4f6;
+  --color-muted-200: #e5e7eb;
+  --color-muted-300: #d1d5db;
+  --color-muted-400: #9ca3af;
+  --color-muted-500: #6b7280;
+  --color-muted-600: #4b5563;
+  --color-muted-700: #374151;
+  --color-muted-800: #1f2937;
+  --color-muted-900: #111827;
+  --color-muted-950: #030712;
+
+  /* Info — blue */
+  --color-info-50: #eff6ff;
+  --color-info-100: #dbeafe;
+  --color-info-200: #bfdbfe;
+  --color-info-300: #93c5fd;
+  --color-info-400: #60a5fa;
+  --color-info-500: #3b82f6;
+  --color-info-600: #2563eb;
+  --color-info-700: #1d4ed8;
+  --color-info-800: #1e40af;
+  --color-info-900: #1e3a8a;
+  --color-info-950: #172554;
+
+  /* Warning — amber */
+  --color-warning-50: #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-200: #fde68a;
+  --color-warning-300: #fcd34d;
+  --color-warning-400: #fbbf24;
+  --color-warning-500: #f59e0b;
+  --color-warning-600: #d97706;
+  --color-warning-700: #b45309;
+  --color-warning-800: #92400e;
+  --color-warning-900: #78350f;
+  --color-warning-950: #451a03;
+
+  /* Danger — red (destructive) */
+  --color-danger-50: #fef2f2;
+  --color-danger-100: #fee2e2;
+  --color-danger-200: #fecaca;
+  --color-danger-300: #fca5a5;
+  --color-danger-400: #f87171;
+  --color-danger-500: #ef4444;
+  --color-danger-600: #dc2626;
+  --color-danger-700: #b91c1c;
+  --color-danger-800: #991b1b;
+  --color-danger-900: #7f1d1d;
+  --color-danger-950: #450a0a;
+
+  /* Code — purple (syntax / serverless) */
+  --color-code-50: #faf5ff;
+  --color-code-100: #f3e8ff;
+  --color-code-200: #e9d5ff;
+  --color-code-300: #d8b4fe;
+  --color-code-400: #c084fc;
+  --color-code-500: #a855f7;
+  --color-code-600: #9333ea;
+  --color-code-700: #7e22ce;
+  --color-code-800: #6b21a8;
+  --color-code-900: #581c87;
+  --color-code-950: #3b0764;
+
+  /* Highlight — yellow */
+  --color-highlight-50: #fefce8;
+  --color-highlight-100: #fef9c3;
+  --color-highlight-200: #fef08a;
+  --color-highlight-300: #fde047;
+  --color-highlight-400: #facc15;
+  --color-highlight-500: #eab308;
+  --color-highlight-600: #ca8a04;
+  --color-highlight-700: #a16207;
+  --color-highlight-800: #854d0e;
+  --color-highlight-900: #713f12;
+  --color-highlight-950: #422006;
+}

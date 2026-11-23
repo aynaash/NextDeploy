@@ -22,7 +22,7 @@ export default function DocsLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="min-h-screen bg-slate-950 lg:flex">
+    <div className="min-h-screen bg-surface-950 lg:flex">
       <DocsSidebar />
       <main className="flex-1 min-w-0 relative">
         <div className="py-8 sm:py-10 px-4 sm:px-6 lg:px-12 max-w-4xl">

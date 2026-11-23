@@ -34,14 +34,14 @@ export default function DocsFooter() {
     }
 
     return (
-        <div className="mt-16 pt-8 border-t border-slate-800 pb-12">
+        <div className="mt-16 pt-8 border-t border-surface-800 pb-12">
             <div className="flex justify-center pt-8">
                 <button
                     onClick={copyAsMarkdown}
-                    className="flex items-center gap-2 text-xs font-medium bg-slate-800/50 hover:bg-slate-800 text-gray-300 hover:text-emerald-400 px-4 py-2 border border-slate-700/50 rounded-md transition-all group"
+                    className="flex items-center gap-2 text-xs font-medium bg-surface-800/50 hover:bg-surface-800 text-muted-300 hover:text-brand-400 px-4 py-2 border border-surface-700/50 rounded-md transition-all group"
                 >
                     {copied ? (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                        <CheckCircle2 className="w-3.5 h-3.5 text-brand-400" />
                     ) : (
                         <Copy className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
                     )}

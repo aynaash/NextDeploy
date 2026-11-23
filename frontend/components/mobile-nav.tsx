@@ -25,14 +25,14 @@ export default function MobileNav() {
         aria-label={open ? "Close menu" : "Open menu"}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="p-2 -mr-2 rounded-md text-gray-300 hover:text-white hover:bg-slate-800 transition-colors"
+        className="p-2 -mr-2 rounded-md text-muted-300 hover:text-white hover:bg-surface-800 transition-colors"
       >
         {open ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
       </button>
 
       {open && (
         <div
-          className="fixed inset-0 top-16 z-40 bg-slate-950/95 backdrop-blur-md border-t border-slate-800"
+          className="fixed inset-0 top-16 z-40 bg-surface-950/95 backdrop-blur-md border-t border-surface-800"
           onClick={() => setOpen(false)}
         >
           <nav
@@ -42,7 +42,7 @@ export default function MobileNav() {
             <Link
               href="/docs"
               onClick={() => setOpen(false)}
-              className="px-4 py-3 rounded-lg text-base font-medium text-gray-200 hover:bg-slate-800 hover:text-white transition-colors"
+              className="px-4 py-3 rounded-lg text-base font-medium text-muted-200 hover:bg-surface-800 hover:text-white transition-colors"
             >
               Documentation
             </Link>
@@ -51,14 +51,14 @@ export default function MobileNav() {
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => setOpen(false)}
-              className="px-4 py-3 rounded-lg text-base font-medium text-gray-200 hover:bg-slate-800 hover:text-white transition-colors flex items-center gap-2"
+              className="px-4 py-3 rounded-lg text-base font-medium text-muted-200 hover:bg-surface-800 hover:text-white transition-colors flex items-center gap-2"
             >
               <Github className="w-4 h-4" /> GitHub
             </a>
             <Link
               href="/docs"
               onClick={() => setOpen(false)}
-              className="mt-3 px-4 py-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-base font-bold text-center transition-colors"
+              className="mt-3 px-4 py-3 rounded-lg bg-brand-500 hover:bg-brand-400 text-surface-950 text-base font-bold text-center transition-colors"
             >
               Get Started
             </Link>
