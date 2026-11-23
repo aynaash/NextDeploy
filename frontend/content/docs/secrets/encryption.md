@@ -62,11 +62,15 @@ In automated CI/CD pipelines (GitHub Actions, GitLab CI), add `NEXTDEPLOY_ENCRYP
 
 ---
 
-## Key Rotation
+## Key Updates & Secret Synchronization
 
-Rotate your vault's encryption key with zero downtime:
+To update your deployment keys or re-sync encrypted values across targets:
 
 ```bash
-nextdeploy secrets rotate --new-key <hex_key>
+# Load updated variables from a secure .env file
+nextdeploy secrets load .env.production
+
+# Synchronize secrets to the active target
+nextdeploy secrets sync
 ```
-NextDeploy decrypts the existing vault using the current master key, re-derives a new key with fresh salt, and re-encrypts all secrets with a new nonce.
+NextDeploy securely writes secrets into memory or provider vaults and updates remote daemon / worker state.

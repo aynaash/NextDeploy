@@ -11,12 +11,12 @@ Here is how NextDeploy achieves true zero-downtime cutover without container vir
 In Linux filesystems (ext4, XFS, Btrfs), the `renameat` syscall provides an atomic directory swap guarantee:
 
 ```c
-rename("/var/www/apps/my-app/current.tmp", "/var/www/apps/my-app/current");
+rename("/opt/nextdeploy/apps/my-app/current.tmp", "/opt/nextdeploy/apps/my-app/current");
 ```
 
 1. **Release Isolation**: Every deployment builds into a brand new directory:
    ```
-   /var/www/apps/my-app/releases/2026-11-20_20-15-00/
+   /opt/nextdeploy/apps/my-app/releases/2026-11-20_20-15-00/
    ```
 2. **Ephemeral Port Allocation**: `nextdeployd` assigns an idle internal loopback port (e.g. `127.0.0.1:3002`) to the incoming release.
 3. **Cgroup Isolation**: The new release is launched inside its own systemd scope under a strict `memory.max` cgroup slice.

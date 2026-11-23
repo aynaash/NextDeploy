@@ -72,7 +72,7 @@ Requires=caddy.service
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/bin/nextdeployd run --config /etc/nextdeploy/daemon.yml
+ExecStart=/usr/local/bin/nextdeployd --foreground=true
 Restart=always
 RestartSec=5s
 LimitNOFILE=65536

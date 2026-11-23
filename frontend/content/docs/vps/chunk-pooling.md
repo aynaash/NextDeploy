@@ -88,15 +88,6 @@ flowchart TD
 
 ---
 
-## Pruning Historical Chunks (`nextdeploy cleanup`)
+## Historical Retention & Ring Buffer Garbage Collection
 
-Because hashed chunks are retained cumulatively, daily deployments over months will slowly accumulate disk space. NextDeploy provides an automated pruning command:
-
-```bash
-# Preview historical chunks older than 90 days
-nextdeploy cleanup --dry-run
-
-# Prune historical chunks unreferenced by active or retained releases
-nextdeploy cleanup --days 90
-```
-NextDeploy checks active and retained release manifests, safely removing orphaned chunks that are no longer referenced by any active browser session.
+To ensure disk usage remains bounded, `nextdeployd` maintains an immutable ring buffer of the 5 most recent releases in `/opt/nextdeploy/apps/<app>/releases/`. Older release directories are automatically retired and cleaned up during atomic cutover, while active chunks in `shared_static` remain available to avoid missing chunk 404s.

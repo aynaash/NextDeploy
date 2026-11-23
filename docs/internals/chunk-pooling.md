@@ -31,7 +31,7 @@ If User A loaded your app during Release 1, their browser has the old manifest i
 Instead of isolating static assets inside each individual release directory, NextDeploy routes all static requests to a shared cumulative directory:
 
 ```
-/var/www/apps/my-app/
+/opt/nextdeploy/apps/my-app/
 ├── releases/
 │   ├── 2026-11-20_v1/
 │   └── 2026-11-20_v2/
@@ -45,14 +45,14 @@ Instead of isolating static assets inside each individual release directory, Nex
 ```
 
 ### 1. Cumulative Asset Merge
-During each deployment, `nextdeploy ship` rsyncs all content-hashed static files into `/var/www/apps/my-app/shared_static/`. Existing files are never overwritten or deleted during the deploy.
+During each deployment, `nextdeploy ship` rsyncs all content-hashed static files into `/opt/nextdeploy/apps/my-app/shared_static/`. Existing files are never overwritten or deleted during the deploy.
 
 ### 2. Immediate NVMe Serving via Caddy
 Caddy maps `/_next/static/*` directly to `shared_static`:
 
 ```nginx
 handle /_next/static/* {
-    root * /var/www/apps/my-app/shared_static
+    root * /opt/nextdeploy/apps/my-app/shared_static
     file_server
     header Cache-Control "public, max-age=31536000, immutable"
 }

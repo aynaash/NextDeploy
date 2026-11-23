@@ -58,17 +58,17 @@ nextdeploy secrets list
 # Retrieve a secret value
 nextdeploy secrets get DATABASE_URL
 
-# Import all variables from a .env file
-nextdeploy secrets import --file .env.production
+# Load variables from a .env file into the secret store
+nextdeploy secrets load .env.production
 
-# Export encrypted secrets to decrypted .env file
-nextdeploy secrets export --output .env.decrypted
+# Remove a secret permanently
+nextdeploy secrets unset OLD_TOKEN
 
-# Delete a secret
-nextdeploy secrets delete OLD_TOKEN
+# Sync secrets to the remote daemon or cloud provider
+nextdeploy secrets sync
 
-# Rotate encryption key
-nextdeploy secrets rotate
+# Preview or remove orphaned remote secrets
+nextdeploy secrets prune --apply
 ```
 
 ---

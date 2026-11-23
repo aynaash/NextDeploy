@@ -23,7 +23,7 @@ Before choosing a deployment target, review the architectural boundaries and con
 | **Bundle Size Ceiling** | Unlimited (Constrained only by disk) | 10MB compressed (3MB on Free plan) | 250MB uncompressed / 50MB zipped |
 | **WebSockets Support** | Full bidirectional persistent WebSockets | Supported via WebSocket Hibernation API | Supported via API Gateway WebSockets |
 | **Node.js Native C++ Addons (`.node`)** | Full support (compiled on host Linux) | Not supported (`workerd` / Wasm only) | Supported (compiled for `amzn2` / `al2023`) |
-| **Persistent Disk Storage** | Local NVMe SSD / `/var/www` | None (Ephemeral memory; use R2/KV) | 512MB–10GB ephemeral `/tmp` or EFS mount |
+| **Persistent Disk Storage** | Local NVMe SSD / `/opt/nextdeploy` | None (Ephemeral memory; use R2/KV) | 512MB–10GB ephemeral `/tmp` or EFS mount |
 | **Zero-Downtime Rollbacks** | Instant (POSIX symlink swap in <10ms) | Instant (Worker script alias flip) | Instant (Lambda function alias routing) |
 | **Cold Starts** | 0ms (Always-on hot process) | <5ms global edge cold start | 150ms–400ms (Reduced with ARM64 + provisioned) |
 
@@ -60,5 +60,5 @@ NextDeploy packages the Next.js standalone server into an AWS Lambda function wi
 Running on Linux VPS bare metal provides complete freedom without serverless restrictions, with the following operational considerations:
 
 - **Single Host by Default:** Standard `nextdeploy.yml` configurations target a single server IP. While single NVMe VPS instances easily handle thousands of requests per second, multi-region high availability requires deploying to multiple server targets behind an external DNS load balancer (such as Cloudflare Load Balancing).
-- **Static Chunk Disk Accumulation:** NextDeploy's Cumulative Static Chunk Pooling (`shared_static`) intentionally retains old hashed JavaScript chunks across releases to prevent client-side `ChunkLoadError` 404 crashes. Over hundreds of deployments, old chunks can consume several gigabytes of disk space. Run `nextdeploy cleanup` periodically to prune chunks older than 90 days.
+- **Static Chunk Disk Accumulation:** NextDeploy's Cumulative Static Chunk Pooling (`shared_static`) intentionally retains old hashed JavaScript chunks across releases to prevent client-side `ChunkLoadError` 404 crashes. The daemon automatically limits release directories to the last 5 builds via an immutable ring buffer.
 - **Server Maintenance:** Unlike serverless platforms where underlying OS security patches are managed by the cloud provider, you are responsible for Linux kernel updates and security patches (`apt update && apt upgrade`).

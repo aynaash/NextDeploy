@@ -47,23 +47,17 @@ app:
     isr_cache: true
     max_image_workers: 4
 
-deployment:
-  server:
+servers:
+  - name: prod-01
     host: 203.0.113.10
-    user: ubuntu
-    ssh_key: ~/.ssh/id_ed25519
-    use_sudo: true
-  healthcheck:
-    path: /api/health
-    timeout: 5s
-    retries: 3
-  resources:
-    memory_max: 1024M
+    username: ubuntu
+    key_path: ~/.ssh/id_ed25519
+    port: 22
 ```
 
 ## 3. Bootstrap the Server (`prepare`)
 
-Run once per VPS to install Caddy, `nextdeployd`, systemd units, cgroup v2 limits, and `/var/www/apps/<app-name>`:
+Run once per VPS to install Caddy, `nextdeployd`, systemd units, security hardening, and `/opt/nextdeploy/apps/<app-name>`:
 
 ```bash
 nextdeploy prepare
