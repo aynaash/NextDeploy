@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Community Support & Design Discussion (Discord)
+    url: https://discord.gg/xd9Cub9fm
+    about: Ask questions, troubleshoot setups, or discuss ideas before opening a PR.
+  - name: Documentation
+    url: https://aynaash.github.io/NextDeploy/
+    about: Browse guides, CLI references, and target documentation.
+  - name: Report a Security Vulnerability
+    url: https://github.com/aynaash/NextDeploy/security/advisories/new
+    about: Privately report security bugs instead of opening a public issue.

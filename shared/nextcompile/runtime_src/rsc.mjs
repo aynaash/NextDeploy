@@ -317,7 +317,7 @@ export function describeMissingComponent(mod, entry) {
       "plain component. nextcompile's renderer composes layouts itself and needs a\n" +
       "component on `default`; it cannot drive Next's route module yet.\n\n" +
       "This is a known architectural gap, not a misconfiguration — see\n" +
-      "yussuf.md §6(a).\n";
+      "CLOUDFLARE_PARITY.md.\n";
   } else {
     body +=
       "Expected a component on `default` (or `Page` / `Component`).\n" +

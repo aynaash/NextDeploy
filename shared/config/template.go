@@ -79,7 +79,7 @@ app:
   #   allowed  : lowercase letters, digits, hyphens  (^[a-z0-9-]+$), 3-63 chars
   #   forbidden: dots, uppercase, spaces, underscores
   #   Your DOMAIN goes in app.domain below — do not put it here.
-  #   e.g. name: ressencesystems  (domain: ressencesystems.com)
+  #   e.g. name: example-app  (domain: example.com)
   name: example-app # [REQUIRED] Unique app name used for identification
   environment: production # [REQUIRED] production | staging | development
   # domain can be a bare hostname, or a block recording the registrar and how
@@ -106,7 +106,7 @@ app:
 # -----
 servers:
   - name: "production-01" # [REQUIRED] Friendly name for the server
-    host: 1.2.3.4 # [REQUIRED] IP or hostname of the server
+    host: 203.0.113.10 # [REQUIRED] IP or hostname of the server
     username: ubuntu # [REQUIRED] SSH user (e.g., ubuntu, debian, root)
     key_path: ~/.ssh/id_rsa  # [REQUIRED] Path to your private SSH key
     # password: "" # Optional: SSH password (key_path takes precedence)
@@ -126,7 +126,7 @@ app:
   #   allowed  : lowercase letters, digits, hyphens  (^[a-z0-9-]+$), 3-63 chars
   #   forbidden: dots, uppercase, spaces, underscores
   #   Your DOMAIN goes in app.domain below — do not put it here.
-  #   e.g. name: ressencesystems  (domain: ressencesystems.com)
+  #   e.g. name: example-app  (domain: example.com)
   name: example-app # [REQUIRED] Unique app name used for identification
   environment: production # [REQUIRED] production | staging | development
   # domain can be a bare hostname, or a block recording the registrar and how
@@ -181,7 +181,7 @@ app:
   #   allowed  : lowercase letters, digits, hyphens  (^[a-z0-9-]+$), 3-63 chars
   #   forbidden: dots, uppercase, spaces, underscores
   #   Your DOMAIN goes in app.domain below — do not put it here.
-  #   e.g. name: ressencesystems  (domain: ressencesystems.com)
+  #   e.g. name: example-app  (domain: example.com)
   name: example-app # [REQUIRED] Unique app name used for identification
   environment: production # [REQUIRED] production | staging | development
   # domain can be a bare hostname, or a block recording the registrar and how

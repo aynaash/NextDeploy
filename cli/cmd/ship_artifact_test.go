@@ -51,7 +51,7 @@ func TestTarballAppNameReadsMetadata(t *testing.T) {
 		"./metadata.json",
 	} {
 		p := makeTarball(t, map[string]string{
-			entry:            `{"app_name":"ressencesystems","domain":"ressencesystems.com"}`,
+			entry:            `{"app_name":"exampleapp","domain":"example.com"}`,
 			"server.js":      "console.log(1)",
 			"public/x.txt":   "x",
 			"other/note.txt": "n",
@@ -61,27 +61,27 @@ func TestTarballAppNameReadsMetadata(t *testing.T) {
 			t.Errorf("entry %q: %v", entry, err)
 			continue
 		}
-		if got != "ressencesystems" {
-			t.Errorf("entry %q: got %q, want ressencesystems", entry, got)
+		if got != "exampleapp" {
+			t.Errorf("entry %q: got %q, want exampleapp", entry, got)
 		}
 	}
 }
 
 func TestTarballAppNameStaleArtifactIsDetectable(t *testing.T) {
-	// The failure this guards: config says "ressencesystems", the cached
+	// The failure this guards: config says "exampleapp", the cached
 	// tarball still carries the old domain-shaped name the daemon rejects.
 	p := makeTarball(t, map[string]string{
-		".nextdeploy/metadata.json": `{"app_name":"ressencesystems.com"}`,
+		".nextdeploy/metadata.json": `{"app_name":"example.com"}`,
 	})
 	got, err := tarballAppName(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got == "ressencesystems" {
+	if got == "exampleapp" {
 		t.Fatal("stale name was not surfaced")
 	}
-	if got != "ressencesystems.com" {
-		t.Errorf("got %q, want ressencesystems.com", got)
+	if got != "example.com" {
+		t.Errorf("got %q, want example.com", got)
 	}
 }
 

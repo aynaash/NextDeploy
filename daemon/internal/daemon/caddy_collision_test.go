@@ -151,19 +151,19 @@ func TestFragmentsClaimingNamesTheConflict(t *testing.T) {
 	// This is what turns the opaque "ambiguous site definition" JSON dump into
 	// an answer: the daemon already knows which app owns the domain.
 	cm := newTestCaddyManager(t)
-	writeFragment(t, cm, "ressencesystems-old", "ressencesystems.com {\n}\n")
-	writeFragment(t, cm, "elsewhere", "other.com {\n}\n")
+	writeFragment(t, cm, "exampleapp-old", "example.com {\n}\n")
+	writeFragment(t, cm, "elsewhere", "other.example.com {\n}\n")
 
-	claiming, err := cm.fragmentsClaiming([]string{"ressencesystems.com"}, "ressencesystems")
+	claiming, err := cm.fragmentsClaiming([]string{"example.com"}, "exampleapp")
 	if err != nil {
 		t.Fatalf("fragmentsClaiming: %v", err)
 	}
-	if !reflect.DeepEqual(claiming, []string{"ressencesystems-old"}) {
-		t.Fatalf("claiming = %v, want [ressencesystems-old]", claiming)
+	if !reflect.DeepEqual(claiming, []string{"exampleapp-old"}) {
+		t.Fatalf("claiming = %v, want [exampleapp-old]", claiming)
 	}
 
 	// And the name is what an operator would search for.
-	if !strings.Contains(strings.Join(claiming, ","), "ressencesystems-old") {
+	if !strings.Contains(strings.Join(claiming, ","), "exampleapp-old") {
 		t.Error("conflict name not usable in an error message")
 	}
 }

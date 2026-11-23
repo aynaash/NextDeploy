@@ -22,8 +22,8 @@ jobs:
     name: Modules
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -38,8 +38,8 @@ jobs:
     name: Format Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -57,14 +57,16 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
       - name: Install mage
         run: go install github.com/magefile/mage@latest
+      - name: Build auxiliary Lambdas
+        run: mage buildLambdas
       - name: Build CLI
         run: mage buildCLI
       - name: Build Daemon
@@ -76,8 +78,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [modules]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -91,7 +93,7 @@ jobs:
       - name: Coverage ratchet (floor must not regress; target 45% by 2026-09-02)
         run: mage coverRatchet
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.out
@@ -110,8 +112,8 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -119,7 +121,7 @@ jobs:
       - name: golangci-lint
         # v7 is required for golangci-lint v2.x (v6 only supports v1.x and
         # errors with `invalid version string 'v2.5.0'`).
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           args: --timeout 10m
@@ -132,7 +134,7 @@ jobs:
     name: Vulnerability Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: govulncheck
         uses: golang/govulncheck-action@v1
         with:
@@ -143,7 +145,9 @@ jobs:
     name: Pre-commit Hook Smoke Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
       - name: Validate hook syntax
         run: bash -n .githooks/pre-commit
       - name: Run hook against HEAD
@@ -151,17 +155,17 @@ jobs:
           # Stage everything from the last commit so the hook has something
           # to inspect, then run it. Catches accidental binaries on main.
           git -c user.email=ci@example.com -c user.name=ci \
-            reset --soft HEAD~1 || true
+            reset --soft HEAD~1
           ./.githooks/pre-commit || (echo "Hook failed on HEAD"; exit 1)
 
   quality:
     name: Code Quality (informational)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true

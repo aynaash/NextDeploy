@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 echo "🔨 Building NextDeploy Auxiliary Lambdas..."
 
@@ -8,14 +8,16 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+mkdir -p assets/lambda/imgopt assets/lambda/revalidator
+
 # Build imgopt Lambda
 echo -e "${BLUE}Building imgopt Lambda...${NC}"
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o assets/lambda/imgopt/bootstrap ./cmd/imgopt/main.go
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o assets/lambda/imgopt/bootstrap ./cmd/imgopt
 echo -e "${GREEN}✓ imgopt Lambda built${NC}"
 
 # Build revalidator Lambda
 echo -e "${BLUE}Building revalidator Lambda...${NC}"
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o assets/lambda/revalidator/bootstrap ./cmd/revalidator/main.go
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o assets/lambda/revalidator/bootstrap ./cmd/revalidator
 echo -e "${GREEN}✓ revalidator Lambda built${NC}"
 
 # Verify binaries exist and are not empty

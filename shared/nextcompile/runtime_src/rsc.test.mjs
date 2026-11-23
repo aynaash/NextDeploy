@@ -52,7 +52,7 @@ test("describeMissingComponent identifies Next's internal route module", () => {
   assert.ok(out.includes("routeModule"), out);
   assert.ok(out.includes("tree"), out);
   assert.ok(out.includes("server/app/page.js"), out);
-  assert.ok(out.includes("yussuf.md"), out, "should point at the handoff note");
+  assert.ok(out.includes("CLOUDFLARE_PARITY.md"), out, "should point at the parity doc");
 });
 
 test("describeMissingComponent falls back to a generic explanation", () => {

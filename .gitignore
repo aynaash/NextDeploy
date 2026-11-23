@@ -9,6 +9,7 @@
 *.prof
 coverage.out
 coverage.html
+assets/lambda/*/bootstrap
 
 # ── Secrets and credentials ──────────────────────────────────────
 .env
@@ -24,6 +25,7 @@ coverage.html
 !**/testdata/**/*.key
 credentials.json
 service-account*.json
+dist-config.json
 
 # ── Generated / packaged ─────────────────────────────────────────
 *.tar.gz
@@ -37,6 +39,7 @@ out/
 # ── Tooling / IDE / OS ───────────────────────────────────────────
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 *~
@@ -60,6 +63,9 @@ test_src_dir/
 !CODE_QUALITY.md
 !CHANGELOG.md
 !CONTRIBUTING.md
+!SECURITY.md
+!CODE_OF_CONDUCT.md
+!.github/**/*.md
 !cli/internal/serverless/REVIEW.md
 !**/README.md
 !CLOUDFLARE_PARITY.md

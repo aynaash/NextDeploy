@@ -14,10 +14,10 @@ func fpConfig() *config.NextDeployConfig {
 	return &config.NextDeployConfig{
 		TargetType: "vps",
 		App: config.AppConfig{
-			Name:        "ressencesystems",
+			Name:        "exampleapp",
 			Port:        3000,
 			Environment: "production",
-			Domain:      config.DomainConfig{Name: "ressencesystems.com"},
+			Domain:      config.DomainConfig{Name: "example.com"},
 		},
 	}
 }
