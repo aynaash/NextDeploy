@@ -17,7 +17,7 @@ Incoming Request (:443)
        │
        ▼
  ┌───────────┐       Static File
- │   Caddy   ├──────────────────────────► Disk: /var/www/.../shared_static
+ │   Caddy   ├──────────────────────────► Disk: /opt/nextdeploy/apps/.../shared_static
  └─────┬─────┘
        │ Dynamic / SSR
        ▼
@@ -66,7 +66,7 @@ This command connects via SSH and:
 - Installs and configures **Caddy** with systemd integration.
 - Configures Linux kernel **cgroups v2** memory sandboxing.
 - Installs the matching version of **`nextdeployd`**.
-- Sets up deployment directory structures (`/var/www/apps/<app-name>`).
+- Sets up deployment directory structures (`/opt/nextdeploy/apps/<app-name>`).
 
 ### 3. Configure `nextdeploy.yml`
 
@@ -80,20 +80,18 @@ app:
   name: my-store
   domain: store.example.com
   port: 3000
+  environment: production
   gosidecar:
     enabled: true
     image_optimization: true
     isr_cache: true
 
-deployment:
-  server:
+servers:
+  - name: prod-01
     host: 203.0.113.10
-    user: ubuntu
-    ssh_key: ~/.ssh/id_ed25519
-    use_sudo: true
-  healthcheck:
-    path: /api/health
-    timeout: 5s
+    username: ubuntu
+    key_path: ~/.ssh/id_ed25519
+    port: 22
 ```
 
 ### 4. Deploy (`ship`)
@@ -107,7 +105,7 @@ nextdeploy ship
 NextDeploy will:
 1. Build your Next.js standalone application locally.
 2. Synchronize static assets to the cumulative `shared_static` pool.
-3. Rsync server runtime files to `/var/www/apps/<app>/releases/<timestamp>`.
+3. Rsync server runtime files to `/opt/nextdeploy/apps/<app>/releases/<timestamp>`.
 4. Spawn the new Node.js instance on an isolated port.
 5. Perform dual-stage TCP + HTTP health probing.
 6. Atomically flip the `current` symlink.
@@ -131,6 +129,25 @@ app:
     isr_cache: true
     max_image_workers: 4
 ```
+
+---
+
+## Automated CI/CD for VPS
+
+NextDeploy includes first-class CI/CD generation for VPS deployments with zero vendor lock-in.
+
+Generate the GitHub Actions workflow with:
+
+```bash
+nextdeploy generate-ci
+```
+
+### Production CI/CD Features for VPS:
+- **Target-Aware at Runtime**: The generated workflow detects VPS deployment from `nextdeploy.yml` without needing to re-scaffold CI when retargeting.
+- **SSH Key & Path Hardening**: Securely writes `$SSH_PRIVATE_KEY` (`0600`) to both standard paths (`~/.ssh/id_ed25519` and `~/.ssh/id_rsa`) and enforces directory permissions (`chmod 700 ~/.ssh`).
+- **Host Key Pinning**: Supports `SSH_KNOWN_HOSTS` to verify the VPS public key on ephemeral CI runners and avoid MITM vulnerabilities.
+- **Strict Host Checking**: Pass `NEXTDEPLOY_STRICT_HOST_KEY=1` in GitHub Secrets to fail closed if an unpinned host connects.
+- **Atomic Cutover in CI**: Automatically invokes `nextdeploy ship --verify` to guarantee dual-stage health probing passes before marking the CI job as successful.
 
 ---
 

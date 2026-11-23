@@ -14,8 +14,14 @@ nextdeploy prepare [flags]
 
 | Flag | Type | Description |
 | :--- | :--- | :--- |
-| `--agent-only` | boolean | Install or upgrade only `nextdeployd` without altering host packages or Caddy configuration. |
-| `--caddy-only` | boolean | Reconfigure Caddy reverse proxy without touching system services. |
+| `--server` | string | Prepare a specific server by name; defaults to the first configured server. |
+| `--all` | boolean | Prepare every configured server in `nextdeploy.yml`. |
+| `--allow-root` | boolean | Allow provisioning over a root SSH login (default false, non-root sudo user recommended). |
+| `--skip-runtimes` | boolean | Do not install Node/Corepack (for hosts managing runtimes independently). |
+| `--skip-hardening` | boolean | Do not install logrotate or fail2ban jails. |
+| `--timeout` | duration | Overall timeout for the preparation (default: `10m`). |
+| `--stream` | boolean | Stream raw output without color filtering. |
+| `--verbose` | boolean | Enable verbose Ansible output (`-v`). |
 
 ---
 

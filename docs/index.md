@@ -13,6 +13,9 @@ hero:
       text: Get Started
       link: /guide/getting-started
     - theme: alt
+      text: Agent Trace (AI Agents)
+      link: /guide/agent-first-infra
+    - theme: alt
       text: Why NextDeploy?
       link: /guide/architecture
     - theme: alt
@@ -20,6 +23,9 @@ hero:
       link: https://github.com/aynaash/NextDeploy
 
 features:
+  - title: Native Agent Trace & Takeover
+    details: Provider-independent continuity for AI coding agents (Antigravity, Claude Code, Cursor). Local web dashboard (:4044) and instant developer takeover (`nextdeploy takeover -o`).
+    icon: 🤖
   - title: True Zero-Downtime Cutover
     details: Dual-stage TCP + HTTP health probing with atomic POSIX symlink renames (current.tmp ➔ current). Zero dropped connections during deploys.
     icon: ⚡
@@ -74,8 +80,25 @@ nextdeploy plan
 nextdeploy ship
 
 # 4. Stream real-time production logs
-nextdeploy logs -f
+nextdeploy logs
 ```
+
+## The Era of AI Coding Agents: Agent Trace & Takeover
+
+Your coding agent should be replaceable. Your engineering context and production deployments shouldn't be. NextDeploy includes **Agent Trace**:
+
+```bash
+# Human developer takeover: scan 20-line brief and open touched files in $EDITOR
+nextdeploy takeover -o
+
+# Launch the interactive local web dashboard at http://localhost:4044
+nextdeploy trace ui
+
+# Transfer unfinished work seamlessly to another agent
+nextdeploy trace resume --agent claude
+```
+
+[Read the Agent Trace Guide →](/guide/agent-first-infra)
 
 ## Demo
 

@@ -21,7 +21,7 @@ nextdeploy rollback [flags]
 
 ## How Rollback Operates
 
-- **On VPS**: Re-points the `current` symlink to an older release directory in `/var/www/apps/<app>/releases/`. Because `shared_static` accumulates all historical chunks, the rolled-back app has all necessary static assets available instantly without missing chunk 404s.
+- **On VPS**: Re-points the `current` symlink to an older release directory in `/opt/nextdeploy/apps/<app>/releases/`. Because `shared_static` accumulates all historical chunks, the rolled-back app has all necessary static assets available instantly without missing chunk 404s.
 - **On Cloudflare Workers**: Reverts Worker deployment active version to the designated prior release and preserves matching R2 fingerprint prefixes.
 - **On AWS Lambda**: Updates the CloudFront distribution origin or Lambda function alias to target the prior Lambda version.
 

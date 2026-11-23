@@ -5,6 +5,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -188,6 +189,7 @@ func handleSecretsSubcommand() {
 	appName := ""
 	key := ""
 	value := ""
+	useStdin := false
 	for _, arg := range os.Args[2:] {
 		if after, ok := strings.CutPrefix(arg, "--action="); ok {
 			action = after
@@ -198,6 +200,13 @@ func handleSecretsSubcommand() {
 		} else if after, ok := strings.CutPrefix(arg, "--value="); ok {
 			value = after
 			value = strings.Trim(value, "\"'")
+		} else if arg == "--stdin" || arg == "--value-stdin" {
+			useStdin = true
+		}
+	}
+	if useStdin && value == "" {
+		if data, err := io.ReadAll(os.Stdin); err == nil {
+			value = strings.TrimRight(string(data), "\r\n")
 		}
 	}
 	args := map[string]any{

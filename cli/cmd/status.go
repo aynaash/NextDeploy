@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -14,6 +15,8 @@ import (
 	"github.com/aynaash/nextdeploy/shared/config"
 	"github.com/spf13/cobra"
 )
+
+var statusJSONFlag bool
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
@@ -75,6 +78,19 @@ func statusVPS(ctx context.Context, log *shared.Logger, cfg *config.NextDeployCo
 	output = strings.TrimSpace(output)
 	if idx := strings.Index(output, "Status:"); idx >= 0 {
 		output = output[idx:]
+	}
+
+	if statusJSONFlag {
+		out := map[string]interface{}{
+			"app":         appName,
+			"target":      "vps",
+			"environment": cfg.App.Environment,
+			"raw_status":  output,
+			"probed_at":   time.Now().UTC(),
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Println(string(data))
+		return
 	}
 
 	fmt.Printf("\n🚀 NextDeploy Status: %s\n", appName)
@@ -141,6 +157,25 @@ func statusServerless(ctx context.Context, log *shared.Logger, cfg *config.NextD
 			statusDesc = fmt.Sprintf("Degraded (HTTP %d - %v)", probe.statusCode, probe.duration.Round(time.Millisecond))
 			probeFailed = true
 		}
+	}
+
+	if statusJSONFlag {
+		out := map[string]interface{}{
+			"app":         appName,
+			"target":      "serverless",
+			"provider":    providerName,
+			"environment": cfg.App.Environment,
+			"status":      statusDesc,
+			"live_url":    probeURL,
+			"resources":   resMap,
+			"probed_at":   time.Now().UTC(),
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Println(string(data))
+		if probeFailed || resMap.Status == "Not Deployed" {
+			os.Exit(1)
+		}
+		return
 	}
 
 	fmt.Printf("\n🚀 NextDeploy Status: %s\n", appName)
@@ -256,5 +291,6 @@ func probeEndpoint(ctx context.Context, rawURL string) probeResult {
 }
 
 func init() {
+	statusCmd.Flags().BoolVar(&statusJSONFlag, "json", false, "Output machine-readable JSON status for AI agents and scripts")
 	rootCmd.AddCommand(statusCmd)
 }

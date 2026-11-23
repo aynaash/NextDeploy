@@ -1,0 +1,38 @@
+# NextDeploy config for nextdeploy-frontend — Cloudflare Workers + R2 (no database).
+app:
+  name: nextdeploy-frontend
+  domain: "nextdeploy.org" # optional custom domain, e.g. example.com — attached automatically on ship
+
+serverless:
+  provider: cloudflare
+  cloudflare:
+    compatibility_date: "2025-04-01"
+    compatibility_flags: [nodejs_compat_v2]
+
+    bindings:
+      r2:
+        - { name: ASSETS }
+      ai:
+        - { name: AI }
+      kv:
+        - { name: RATE_LIMIT, ref: nextdeploy-frontend-rate-limit }
+      # Prefer Cloudflare Secret Store over plaintext for production secrets —
+      # the value lives in CF, only a reference ships:
+      # secrets_store:
+      #   - { name: STRIPE_KEY, store_id: <store-id>, secret_name: stripe_live }
+
+    resources:
+      kv:
+        - { name: nextdeploy-frontend-rate-limit }
+
+    # Edge protection guard — runs ahead of the app (auth + KV rate-limit).
+    protection:
+      enabled: true
+      public_paths: ["/", "/login"]
+      auth:
+        secret_env: AUTH_SECRET
+        protected_paths: ["/app/*"]
+        login_path: /login
+      rate_limit:
+        kv_binding: RATE_LIMIT
+        requests_per_minute: 60

@@ -396,6 +396,10 @@ func (s *ServerStruct) BasicCaddySetup(ctx context.Context, serverName string, s
 }
 
 func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command string, stream io.Writer) (string, error) {
+	return s.ExecuteCommandWithStdin(ctx, serverName, command, nil, stream)
+}
+
+func (s *ServerStruct) ExecuteCommandWithStdin(ctx context.Context, serverName, command string, stdin io.Reader, stream io.Writer) (string, error) {
 	client, err := s.getSSHClient(serverName)
 	if err != nil {
 		return "", err
@@ -407,6 +411,18 @@ func (s *ServerStruct) ExecuteCommand(ctx context.Context, serverName, command s
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 	defer session.Close()
+
+	if stdin != nil {
+		stdinPipe, err := session.StdinPipe()
+		if err != nil {
+			return "", fmt.Errorf("failed to get stdin pipe: %w", err)
+		}
+		go func() {
+			defer stdinPipe.Close()
+			_, _ = io.Copy(stdinPipe, stdin)
+		}()
+	}
+
 	stdoutPipe, err := session.StdoutPipe()
 	if err != nil {
 		return "", fmt.Errorf("failed to get stdout pipe: %w", err)

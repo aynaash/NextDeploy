@@ -12,10 +12,9 @@ nextdeploy build [flags]
 
 ### Flags
 
-| Flag | Type | Description |
-| :--- | :--- | :--- |
-| `--skip-next-build` | boolean | Skip running `npm run build` and only perform NextCore introspection on existing `.next` build output. |
-| `--output-dir` | string | Custom destination for NextDeploy build artifacts (default: `.nextdeploy`). |
+| Flag | Shorthand | Type | Description |
+| :--- | :--- | :--- | :--- |
+| `--force` | `-f` | boolean | Force a full rebuild even if the git commit hash is unchanged. |
 
 ---
 

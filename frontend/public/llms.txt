@@ -1,0 +1,123 @@
+# NextDeploy — Agent & LLM Knowledge Specification
+
+> NextDeploy is an open-source, multi-target deployment engine and agent continuity platform for modern Next.js applications (Next.js 14, 15, and 16 with Turbopack or Webpack). It deploys to bare-metal Linux VPS, Cloudflare Workers, and AWS Serverless from a single configuration file (`nextdeploy.yml`) and provides native Model Context Protocol (MCP) tooling and agent tracing.
+
+## Quick Reference for AI Agents
+
+When interacting with a NextDeploy project:
+1. **Pre-flight Planning**: Run `nextdeploy plan --json` or `nextdeploy plan --detailed-exitcode` (exits 0 if clean, exits 2 if drift is detected).
+2. **Autonomous Deployment**: Run `nextdeploy ship --non-interactive --verify`.
+3. **Agent Checkpointing**: Before and after major code changes, run `nextdeploy trace checkpoint -m "<intent>"`.
+4. **Developer Handoff**: When blocked or finishing boilerplate, allow human takeover via `nextdeploy takeover -o`.
+5. **Rollback**: If runtime probes fail, run `nextdeploy rollback` to atomically revert traffic in < 1s.
+
+---
+
+## 1. Core Architecture
+
+- **VPS Target**: Bare-metal Linux (Ubuntu/Debian) running Caddy + `nextdeployd` Go daemon under systemd. Uses atomic POSIX symlink swaps (`current.tmp` -> `current`), `cgroup v2` memory capping (`MemoryMax=1G`), and cumulative chunk pooling in `shared_static` (eliminates `ChunkLoadError` 404s).
+- **Cloudflare Workers Target**: Compiles Next.js standalone via `nextcompile` (`nextserver` engine in pure Go, `nodejs_compat_v2` shims). Offloads static assets to Cloudflare R2 with immutable 1-year cache headers (`Cache-Control: public, max-age=31536000, immutable`). Binds D1 SQL, Hyperdrive, Queues, KV, and Durable Objects.
+- **AWS Serverless Target**: Deploys standalone server to AWS Lambda (`nodejs20.x`, ARM64 Graviton) with custom streaming HTTP bridge. Origin Access Control (OAC) to private S3 bucket. Global CloudFront distribution with automated ACM SSL certificates. Asynchronous SQS ISR revalidation and dedicated Sharp image optimization Lambda.
+- **Agent Trace (`.nextdeploy/trace/`)**: Captures agent intent, mental model, git diffs, and infra execution events in `checkpoint.json`, `events.json`, and `takeover.md`. Serves embedded web UI on `http://localhost:4044` via `nextdeploy trace ui`.
+
+---
+
+## 2. Configuration Schema (`nextdeploy.yml`)
+
+```yaml
+version: 1
+app:
+  name: my-app
+  environment: production
+  domain:
+    name: app.example.com
+
+target:
+  type: cloudflare # 'cloudflare', 'vps', or 'aws'
+
+# Cloudflare Configuration
+serverless:
+  provider: cloudflare
+  cloudflare:
+    custom_domains:
+      - hostname: app.example.com
+    resources:
+      d1:
+        - name: DB
+          database_name: app-db
+      hyperdrive:
+        - name: PROD_DB
+          origin:
+            host: postgres.example.com
+            database: neondb
+            user: app_user
+            password_secret: DB_PASSWORD
+      r2_buckets:
+        - binding: USER_UPLOADS
+          bucket_name: app-user-uploads
+
+# Secrets Management
+secrets:
+  provider: local # 'local', 'doppler', or 'aws'
+  encryption: chacha20 # Authenticated ChaCha20-Poly1305 AEAD
+
+# Health & Self-Healing Sentinel
+health:
+  probes:
+    - path: /
+      expected_status: 200
+      timeout_seconds: 5
+    - path: /api/health
+      expected_status: 200
+      timeout_seconds: 3
+  auto_rollback: true
+```
+
+---
+
+## 3. CLI Command Cheat Sheet for Agents
+
+| Command | Shorthand / Option | Purpose |
+| :--- | :--- | :--- |
+| `nextdeploy init` | `--target <target>` | Initialize `nextdeploy.yml` non-interactively |
+| `nextdeploy plan` | `--detailed-exitcode --json` | Dry-run drift calculation (exit 2 on drift) |
+| `nextdeploy ship` | `--verify --non-interactive` | Build, package, cutover, and verify health |
+| `nextdeploy rollback` | `--steps 1` | Sub-second rollback to previous active release |
+| `nextdeploy status` | `--probe --json` | Probe live endpoints and return JSON status |
+| `nextdeploy logs` | `-f` or `--tail 100` | Stream live production logs |
+| `nextdeploy secrets` | `set KEY=VAL` / `get KEY` | Manage encrypted credentials |
+| `nextdeploy trace checkpoint` | `-m "<objective>"` | Save snapshot of agent thoughts and git diffs |
+| `nextdeploy takeover` | `-o` | Generate 20-line brief & open touched files in editor |
+| `nextdeploy trace ui` | `--port 4044` | Start local embedded trace dashboard |
+| `nextdeploy trace resume` | `--agent <name>` | Generate handoff prompt for next agent |
+| `nextdeploy mcp` | stdio JSON-RPC | Run native Model Context Protocol server |
+| `nextdeploy mcp init` | `--client <cursor\|antigravity\|all>` | Scaffold MCP client configuration file |
+
+---
+
+## 4. Model Context Protocol (MCP) Tool Declarations
+
+NextDeploy exposes native tool schemas for MCP clients (Cursor, Claude Desktop, Antigravity IDE):
+- `nextdeploy_inspect`: Analyzes Next.js AST, route manifests, and detected integrations.
+- `nextdeploy_plan`: Runs preflight validation and emits structured resource diffs.
+- `nextdeploy_ship`: Executes end-to-end compilation, deployment, and live route probing.
+- `nextdeploy_status`: Returns live target health, active release ID, and probe latencies.
+- `nextdeploy_logs`: Queries recent serverless or VPS daemon logs.
+- `nextdeploy_secrets`: Encrypts, updates, or lists application secrets.
+- `nextdeploy_trace`: Snapshots agent checkpoints and updates developer takeover briefs.
+- `nextdeploy_rollback`: Reverts production traffic atomically upon runtime SSR failure.
+
+---
+
+## 5. Documentation URL Index
+
+- Main Documentation: https://nextdeploy.org/docs
+- Agent-First Infrastructure: https://nextdeploy.org/docs/agent-trace/agent-first-infra
+- Agent Trace Architecture: https://nextdeploy.org/docs/agent-trace/architecture
+- CLI & Human Takeover: https://nextdeploy.org/docs/agent-trace/cli-takeover
+- MCP Server & Tools: https://nextdeploy.org/docs/mcp/server
+- Cloudflare Workers Engine: https://nextdeploy.org/docs/cloudflare/overview
+- VPS Bare-Metal Engine: https://nextdeploy.org/docs/vps/overview
+- AWS Serverless Engine: https://nextdeploy.org/docs/aws/lambda
+- Secret Encryption: https://nextdeploy.org/docs/secrets/encryption
+- Full LLM Condensed Manual: https://nextdeploy.org/llms-full.txt

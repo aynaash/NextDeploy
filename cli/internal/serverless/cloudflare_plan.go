@@ -58,6 +58,16 @@ func (r *PlanResult) HasDrift() bool {
 	return false
 }
 
+// HasChanges reports whether the plan includes creates, updates, or immutable drifts.
+func (r *PlanResult) HasChanges() bool {
+	for _, it := range r.Items {
+		if it.Action == PlanCreate || it.Action == PlanUpdate || it.Action == PlanImmutableDrift {
+			return true
+		}
+	}
+	return false
+}
+
 // Plan computes a dry-run diff for every IaC resource declared under
 // cfg.Serverless.Cloudflare.Resources. Read-only: makes GET / List calls
 // against the CF API but no mutations. Caller must have already called

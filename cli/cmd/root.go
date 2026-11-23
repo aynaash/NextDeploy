@@ -69,7 +69,11 @@ Deploy your Next.js app to Serverless (Cloudflare Workers, AWS Lambda) or VPS �
 }
 
 func Execute() {
-	go updater.CheckAndPrint(shared.Version)
+	isMCP := len(os.Args) > 1 && os.Args[1] == "mcp" && (len(os.Args) == 2 || os.Args[2] != "init")
+
+	if !isMCP {
+		go updater.CheckAndPrint(shared.Version)
+	}
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Printf("\n%s %s\n\n",
@@ -78,13 +82,15 @@ func Execute() {
 		os.Exit(1)
 	}
 
-	fmt.Println(strings.Repeat("─", 60))
-	fmt.Printf("%s %s\n",
-		command("Need help?"),
-		warning("Docs: https://nextdeploy.org/docs  ·  Repo: https://github.com/aynaash/NextDeploy"),
-	)
-	fmt.Println(strings.Repeat("─", 60))
-	fmt.Println()
+	if !isMCP {
+		fmt.Println(strings.Repeat("─", 60))
+		fmt.Printf("%s %s\n",
+			command("Need help?"),
+			warning("Docs: https://nextdeploy.org/docs  ·  Repo: https://github.com/aynaash/NextDeploy"),
+		)
+		fmt.Println(strings.Repeat("─", 60))
+		fmt.Println()
+	}
 }
 
 func init() {

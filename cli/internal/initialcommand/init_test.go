@@ -283,3 +283,48 @@ func TestRunInitCommand_NoNextProject_ScaffoldsAWS(t *testing.T) {
 		t.Errorf("expected AWS serverless in nextdeploy.yml:\n%s", string(content))
 	}
 }
+
+func TestRunInitCommand_AutoDetectsWranglerWithoutPrompts(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	// Write a wrangler.json in the project
+	wranglerContent := `{
+  "name": "masomolab-web-dev",
+  "d1_databases": [{ "binding": "DB", "database_name": "app-db", "database_id": "uuid-123" }],
+  "kv_namespaces": [{ "binding": "CACHE", "id": "kv-123" }]
+}`
+	if err := os.WriteFile(filepath.Join(dir, "wrangler.json"), []byte(wranglerContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Also simulate monorepo subfolder with package.json
+	if err := os.MkdirAll(filepath.Join(dir, "apps", "web"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "apps", "web", "package.json"), []byte(`{"name":"masomolab-web","dependencies":{"next":"15.1.0"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("target", "", "")
+	cmd.Flags().String("platform", "", "")
+	cmd.Flags().String("mode", "", "")
+	cmd.Flags().String("db", "", "")
+
+	// Run with NO flags and NO user input — must automatically detect Cloudflare and adopt wrangler
+	if err := RunInitCommand(cmd, nil); err != nil {
+		t.Fatalf("RunInitCommand failed on wrangler project: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "nextdeploy.yml"))
+	if err != nil {
+		t.Fatalf("read generated nextdeploy.yml: %v", err)
+	}
+	s := string(content)
+	if !strings.Contains(s, "provider: cloudflare") {
+		t.Errorf("expected cloudflare provider in nextdeploy.yml:\n%s", s)
+	}
+	if !strings.Contains(s, "uuid-123") || !strings.Contains(s, "kv-123") {
+		t.Errorf("expected sniffed wrangler bindings in nextdeploy.yml:\n%s", s)
+	}
+}

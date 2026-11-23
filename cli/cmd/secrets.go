@@ -344,8 +344,8 @@ func runVPSSecretAction(action string, args []string, appName string, log *share
 				continue
 			}
 			key, value := parts[0], parts[1]
-			daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd secrets --action=set --appName=%s --key=%s --value=%s", shellQuote(appName), shellQuote(key), shellQuote(value))
-			output, err := srv.ExecuteCommand(ctx, deploymentServer, daemonCmd, nil)
+			daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd secrets --action=set --appName=%s --key=%s --stdin", shellQuote(appName), shellQuote(key))
+			output, err := srv.ExecuteCommandWithStdin(ctx, deploymentServer, daemonCmd, strings.NewReader(value), nil)
 			if err != nil {
 				log.Error("Failed to set secret %s: %v\nOutput: %s", key, err, output)
 			} else {
@@ -426,8 +426,49 @@ func runSecretsSync() {
 	}
 
 	target := strings.ToLower(cfg.ResolveTargetType(""))
+	local, err := serverless.LoadLocalSecrets(cfg)
+	if err != nil {
+		log.Error("Failed to load local secrets: %v", err)
+		os.Exit(1)
+	}
+	if len(local) == 0 {
+		log.Warn("No secrets found to sync from local sources or Doppler")
+		return
+	}
+
+	if target == "vps" {
+		log.Info("Syncing %d secret(s) to VPS NextDeploy Daemon...", len(local))
+		srv, err := server.New(server.WithConfig(), server.WithSSH())
+		if err != nil {
+			log.Error("Failed to initialize server connection: %v", err)
+			os.Exit(1)
+		}
+		defer srv.CloseSSHConnection()
+
+		deploymentServer, err := srv.GetDeploymentServer()
+		if err != nil {
+			log.Error("Failed to get deployment server: %v", err)
+			os.Exit(1)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		appName := cfg.App.Name
+		for k, v := range local {
+			daemonCmd := fmt.Sprintf("sudo /usr/local/bin/nextdeployd secrets --action=set --appName=%s --key=%s --stdin", shellQuote(appName), shellQuote(k))
+			if _, err := srv.ExecuteCommandWithStdin(ctx, deploymentServer, daemonCmd, strings.NewReader(v), nil); err != nil {
+				log.Error("Failed to set secret %s: %v", k, err)
+			} else {
+				log.Success("Secret %s synced to VPS", k)
+			}
+		}
+		log.Success("All secrets synced to VPS successfully")
+		return
+	}
+
 	if target != "serverless" {
-		log.Error("`secrets sync` is currently supported for serverless targets (got: %s)", target)
+		log.Error("`secrets sync` is supported for serverless and vps targets (got: %s)", target)
 		os.Exit(1)
 	}
 
@@ -445,16 +486,6 @@ func runSecretsSync() {
 	if err := p.Initialize(ctx, cfg); err != nil {
 		log.Error("Failed to initialize provider: %v", err)
 		os.Exit(1)
-	}
-
-	local, err := serverless.LoadLocalSecrets(cfg)
-	if err != nil {
-		log.Error("Failed to load local secrets: %v", err)
-		os.Exit(1)
-	}
-	if len(local) == 0 {
-		log.Warn("No secrets found to sync from local sources or Doppler")
-		return
 	}
 
 	log.Info("Syncing %d secret(s) to %s...", len(local), providerName)

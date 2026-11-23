@@ -276,7 +276,7 @@ capacity benchmark or a universal performance claim.
 For app logs:
 
 ```bash
-nextdeploy logs -f
+nextdeploy logs
 ```
 
 ## Rollback

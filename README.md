@@ -19,10 +19,12 @@ on [Discord](https://discord.gg/xd9Cub9fm).
 ## Quick start
 
 ```bash
-nextdeploy init     # scaffold nextdeploy.yml in your Next.js repo
-nextdeploy plan     # show what will happen, change nothing
-nextdeploy ship     # build + push + deploy to your target
-nextdeploy logs -f  # tail production logs
+nextdeploy init         # scaffold nextdeploy.yml in your Next.js repo
+nextdeploy plan         # show what will happen, change nothing
+nextdeploy ship         # build + push + deploy to your target
+nextdeploy takeover -o  # human takeover from AI coding agents in your $EDITOR
+nextdeploy trace ui     # launch local trace dashboard at http://localhost:4044
+nextdeploy logs -f      # tail production logs
 ```
 
 `nextdeploy.yml` holds everything — target type, domain, server, secrets
@@ -34,6 +36,8 @@ provider. See `sample.nextdeploy.yml` in this repo for the full schema.
 - **Cumulative Static Chunk Pooling (`shared_static`)**: Eliminates the Next.js `ChunkLoadError` 404s for active user sessions across updates.
 - **Bare-Metal Speed (Go + Caddy + Systemd)**: No Docker daemon overhead. Uses Linux kernel `cgroup v2` memory sandboxing and offloads all static bytes directly to NVMe disk via Caddy.
 - **Multi-Target Portability**: Deploy to a $4 VPS, AWS Lambda, or Cloudflare Workers from a single config file.
+- **Native Agent Trace & Human Takeover**: Track the mental model, prompts, and diffs of AI coding agents (Antigravity, Claude Code, Cursor) with an embedded local dashboard (`nextdeploy trace ui` on `:4044`) and 1-command developer takeover (`nextdeploy takeover -o`).
+- **Zero-Touch CI/CD Automation**: Production-ready GitHub Actions workflows for VPS (hardened SSH, dual-key paths, host-key pinning) and Cloudflare (ephemeral PR previews, remote state encryption, and dry-run IaC planning via `nextdeploy plan --detailed-exitcode`).
 
 ## Targets
 
@@ -77,6 +81,7 @@ sample.nextdeploy.yml      Annotated reference config
 - **VPS Deployment & Go Sidecar**: [`docs/targets/vps.md`](./docs/targets/vps.md)
 - **Cloudflare Workers Target**: [`docs/targets/cloudflare.md`](./docs/targets/cloudflare.md)
 - **AWS Serverless Target**: [`docs/targets/aws.md`](./docs/targets/aws.md)
+- **Multi-Server Stress Testing**: [`docs/guide/multiserver-stress-testing.md`](./docs/guide/multiserver-stress-testing.md) — Local Linux cluster emulation with NGINX load balancing, heavy SSR, and zero-downtime rolling deploys.
 - **Sample Configuration**: [`sample.nextdeploy.yml`](./sample.nextdeploy.yml)
 - **Inline Help**: Each CLI command includes `nextdeploy <cmd> explain` for interactive architecture walk-throughs.
 

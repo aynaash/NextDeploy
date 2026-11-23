@@ -48,12 +48,11 @@ app:
 
 serverless:
   provider: aws
-  aws:
-    region: us-east-1
-    memory_size: 1024         # Lambda memory allocation (MB)
-    timeout: 30               # Lambda execution timeout (seconds)
-    cloudfront:
-      price_class: PriceClass_100 # PriceClass_100 | PriceClass_200 | PriceClass_All
+  region: us-east-1
+  memory_size: 1024         # Lambda memory allocation (MB, default: 1024)
+  timeout: 30               # Lambda execution timeout (seconds, default: 30)
+  isr_revalidation: true    # Deploy ISR Revalidation Lambda + SQS
+  image_optimization: true  # Deploy Image Optimizer Lambda + CloudFront Behavior
 ```
 
 ---

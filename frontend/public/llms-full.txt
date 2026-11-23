@@ -1,0 +1,209 @@
+# NextDeploy Full Technical Manual (LLM Context Edition)
+
+This is the consolidated single-file technical documentation for NextDeploy, formatted specifically for LLM ingestion, autonomous coding agents, and Model Context Protocol (MCP) servers.
+
+---
+
+## Architecture Summary
+
+NextDeploy is a unified deployment engine for Next.js 14, 15, and 16 applications, providing multi-target deployment (Linux VPS, Cloudflare Workers, AWS Serverless) from a single declarative YAML configuration (`nextdeploy.yml`).
+
+### Core Subsystems:
+1. **NextCore (`shared/nextcore`)**: Statically inspects compiled `.next` manifests to classify routes (Static, SSR, ISR, Server Actions, Middleware) and detect external integrations (Stripe, Cloudinary, Prisma, Supabase).
+2. **NextCompile (`shared/nextcompile`)**: Custom pure-Go edge compiler bundling the standalone server with `workerd` VFS runtime shims (`nodejs_compat_v2`) and offloading static assets to Cloudflare R2 with immutable caching headers.
+3. **VPS Daemon (`nextdeployd`)**: Static Go binary running under systemd with `DynamicUser=yes`, `ProtectSystem=strict`, and `cgroup v2` memory capping (`MemoryMax=1G`). Implements atomic POSIX symlink cutover (`current.tmp` -> `current`), cumulative chunk pooling (`shared_static`), and Caddy reverse proxy integration.
+4. **AWS Serverless Engine (`cli/internal/serverless`)**: Deploys standalone server to AWS Lambda (Node.js 20.x, ARM64 Graviton) with custom streaming HTTP bridge, Origin Access Control (OAC) to private S3, CloudFront CDN, SQS-backed ISR revalidation, and Sharp image optimization.
+5. **Agent Trace Engine (`shared/agenttrace`)**: Native context continuity and telemetry layer. Maintains `.nextdeploy/trace/checkpoint.json`, `.nextdeploy/trace/events.json`, and `.nextdeploy/trace/takeover.md`. Serves embedded web UI on port 4044 (`nextdeploy trace ui`).
+6. **Secrets Engine (`shared/secrets`)**: Authenticated encryption (ChaCha20-Poly1305 and AES-256-GCM) with Argon2id key derivation. Supports local encrypted vaults, Doppler, AWS Secrets Manager extension, and Cloudflare Worker secrets.
+
+---
+
+## Configuration Reference (`nextdeploy.yml`)
+
+```yaml
+version: 1
+app:
+  name: my-app
+  environment: production
+  port: 3000
+  domain:
+    name: app.example.com
+    zone_id: Z123456789EXAMPLE # Optional Route53 zone
+
+target:
+  type: cloudflare # 'cloudflare', 'vps', or 'aws'
+
+# ─── VPS Target Configuration ───
+servers:
+  - name: production
+    host: 198.51.100.42
+    user: root # or deploy user with sudo
+    port: 22
+    ssh_key_path: ~/.ssh/id_rsa
+
+# ─── Cloudflare Target Configuration ───
+serverless:
+  provider: cloudflare
+  cloudflare:
+    compatibility_date: "2025-04-01"
+    compatibility_flags: ["nodejs_compat_v2"]
+    custom_domains:
+      - hostname: app.example.com
+        zone_name: example.com
+    resources:
+      d1:
+        - name: DB
+          database_name: app-db
+      hyperdrive:
+        - name: PROD_DB
+          origin:
+            host: ep-cool.us-east-1.neon.tech
+            database: neondb
+            user: app_user
+            password_secret: NEON_DB_PASSWORD
+            scheme: postgres
+      r2_buckets:
+        - binding: USER_UPLOADS
+          bucket_name: app-user-uploads
+      queues:
+        - name: EMAIL_QUEUE
+          queue_name: transactional-emails
+          max_retries: 5
+      durable_objects:
+        - name: CHAT_ROOM
+          class_name: ChatRoom
+          sqlite: true
+    migrations:
+      - tag: v1
+        new_classes: ["ChatRoom"]
+
+# ─── AWS Target Configuration ───
+# serverless:
+#   provider: aws
+#   region: us-east-1
+#   memory_size: 1536
+#   timeout: 30
+#   runtime: nodejs20.x
+#   warmer: true
+#   image_optimization: true
+#   isr_revalidation: true
+#   allow_secrets_in_env: false
+
+# ─── Secrets Management ───
+secrets:
+  provider: local # 'local', 'doppler', or 'aws'
+  encryption: chacha20
+
+# ─── Health Sentinel & Self-Healing ───
+health:
+  probes:
+    - path: /
+      expected_status: 200
+      timeout_seconds: 5
+    - path: /api/health
+      expected_status: 200
+      timeout_seconds: 3
+  auto_rollback: true
+```
+
+---
+
+## Complete CLI Command Reference
+
+### `nextdeploy init`
+Interactive or automated scaffold generator.
+- `--target <vps|cloudflare|aws>`: Pre-select target to run non-interactively.
+- `--force`: Overwrite existing configuration.
+
+### `nextdeploy plan`
+Calculates execution diff and infrastructure drift without making changes.
+- `--detailed-exitcode`: Exits `0` on clean plan, exits `2` on pending infrastructure changes or drift. Essential for CI/CD gates.
+- `--only <modules>`: Filter evaluation to specific resource subsets (e.g. `d1,r2,dns`).
+- `--json`: Output machine-readable JSON plan.
+
+### `nextdeploy build`
+Builds the Next.js standalone application or compiles edge worker bundles.
+- Automatically reuses build cache when `.nextdeploy/build.lock` inputs are unchanged.
+- `--force` / `-f`: Force complete recompilation.
+- `--clean`: Wipe existing `.next` and build caches before building.
+
+### `nextdeploy ship` (Alias: `deploy`)
+End-to-end deployment pipeline: validation, compilation, static asset sync, compute provisioning, health probing, and atomic cutover.
+- `--environment` / `-e <name>`: Deploy to an isolated environment (e.g. `staging`, `pr-42`).
+- `--verify`: Enforce strict post-deploy HTTP smoke checks; rolls back automatically on failure.
+- `--force` / `-f`: Proceed even with dirty git working directory.
+- `--no-provision`: Skip cloud resource reconciliation; update application code only.
+- `--timeout` / `-t <duration>`: Overall deployment timeout (default: `10m`).
+- `--verbose` / `-v`: Print streaming progress for asset uploads and Lambda steps.
+
+### `nextdeploy rollback`
+Reverts production traffic to the previous release in under 1 second without rebuilding.
+- `--steps <n>`: Revert multiple versions back (default: 1).
+- `--release <id>`: Roll back to a specific release timestamp identifier.
+
+### `nextdeploy status`
+Displays live deployment health, active release ID, git provenance, custom domains, and compute status.
+- `--probe`: Actively execute live HTTP GET probes against `/` and `/api/health`.
+- `--json`: Output machine-readable JSON status report.
+
+### `nextdeploy logs`
+Streams real-time production logs from the active deployment target.
+- `-f` / `--follow`: Stream live logs continuously.
+- `--tail <lines>`: Number of recent log lines to display (default: 50).
+
+### `nextdeploy secrets`
+Manages ChaCha20-Poly1305 encrypted environment variables and cloud secret providers.
+- `nextdeploy secrets set KEY=VALUE`: Encrypt and store secret.
+- `nextdeploy secrets get KEY`: Decrypt and view secret value.
+- `nextdeploy secrets list`: List all declared secret keys (values masked).
+- `nextdeploy secrets delete KEY`: Remove secret.
+- `nextdeploy secrets import --file .env.production`: Bulk import from a `.env` file.
+- `nextdeploy secrets export --output .env.decrypted`: Export decrypted secrets.
+- `nextdeploy secrets rotate`: Re-encrypt all secrets with a fresh master key.
+
+### `nextdeploy trace` & `nextdeploy takeover`
+The native Agent Trace continuity subsystem for AI coding agents and human developers.
+- `nextdeploy takeover`: Print 20-line Developer Takeover Brief.
+- `nextdeploy takeover -o`: Print brief AND open all modified files directly in `$EDITOR`.
+- `nextdeploy trace checkpoint -m "<objective>"`: Snapshot current agent thoughts, intent, and git diffs to `.nextdeploy/trace/checkpoint.json`.
+- `nextdeploy trace status`: Print active session state and deployment status.
+- `nextdeploy trace ui --port 4044`: Launch embedded local web dashboard at `http://localhost:4044`.
+- `nextdeploy trace resume --agent <name>`: Format handoff prompt for another AI agent (e.g. Claude Code, Cursor, Antigravity).
+
+### `nextdeploy mcp`
+Native Model Context Protocol (MCP) server over stdio JSON-RPC 2.0.
+- `nextdeploy mcp`: Runs the interactive JSON-RPC 2.0 server exposing all 8 deployment tools.
+- `nextdeploy mcp init --client <cursor|antigravity|all>`: Automatically generates `.cursor/mcp.json` or `.antigravity/mcp_servers.json`.
+
+### `nextdeploy target`
+Inspects or switches the active deployment target in `nextdeploy.yml`.
+- `nextdeploy target switch <vps|cloudflare|aws>`: Update active target cleanly.
+
+### `nextdeploy generate-ci`
+Generates zero-touch CI/CD pipelines with runtime target autodetection.
+- `--provider <github|gitlab>`: Target CI provider.
+- `--preview`: Include ephemeral pull request preview worker deployments.
+
+### `nextdeploy prepare`
+One-time automated bootstrapping for Linux VPS servers over SSH: installs Caddy, configures systemd sandbox services, enables cgroups v2, and prepares `/opt/nextdeploy/`.
+
+### `nextdeploy destroy`
+Tears down provisioned cloud infrastructure cleanly (workers, Lambda functions, S3 buckets, Caddy reverse proxies).
+- `--environment <name>`: Destroy specific preview stack.
+- `--force`: Bypass confirmation prompt.
+
+---
+
+## Agent Integration Rules (`AGENTS.md`)
+
+```markdown
+# Agent Instructions: Continuous Development & Deployment with NextDeploy
+
+1. Context Checkpointing:
+   - Run `nextdeploy trace checkpoint -m "<summary>"` before major refactors and after milestones.
+2. Validating & Deploying:
+   - Verify plan: `nextdeploy plan --json`
+   - Deploy: `nextdeploy ship --non-interactive --verify`
+3. Autonomous Handoff Protocol:
+   - If blocked or failing SSR probes for 2 iterations, save a checkpoint with `nextdeploy trace checkpoint` so the developer can take over via `nextdeploy takeover -o`.
+```

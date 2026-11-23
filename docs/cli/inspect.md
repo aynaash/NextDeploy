@@ -1,46 +1,43 @@
 # `nextdeploy inspect`
 
-Introspect the Next.js compilation artifact to examine route classifications, dynamic dependencies, ISR revalidation timers, and Server Actions.
+Analyze the Next.js standalone build artifact to examine total bundle size, dependency footprints, and identify large dependencies before deployment.
 
 ---
 
 ## Usage
 
 ```bash
-nextdeploy inspect [flags]
+nextdeploy inspect
 ```
-
-### Flags
-
-| Flag | Type | Description |
-| :--- | :--- | :--- |
-| `--routes` | boolean | Print detailed route classification table. |
-| `--actions` | boolean | List detected Server Actions and their unique IDs. |
-| `--json` | boolean | Output analysis in structured JSON for automation. |
 
 ---
 
 ## Output Example
 
 ```text
-NextCore Introspection Report:
-────────────────────────────────────────────────────
-Next.js Version: 15.1.0 (App Router)
-Output Mode:     standalone
+🔍 Inspecting bundle in /project/.next/standalone...
 
-Route Analysis:
-  ┌──────────────────────┬─────────┬──────────────┬──────────────┐
-  │ Route Path           │ Type    │ Revalidation │ Runtime      │
-  ├──────────────────────┼─────────┼──────────────┼──────────────┤
-  │ /                    │ SSG (●) │ 60s (ISR)    │ Node.js      │
-  │ /about               │ Static○ │ -            │ Prerendered  │
-  │ /dashboard           │ Dynamicƒ│ -            │ Node.js      │
-  │ /api/health          │ API (λ) │ -            │ Node.js      │
-  │ /api/webhooks/stripe │ API (λ) │ -            │ Node.js      │
-  └──────────────────────┴─────────┴──────────────┴──────────────┘
+VPS Standalone Bundle Analysis:
+   Total Size:      42.30 MB
+   node_modules:    38.10 MB
+   Server Code:     4.20 MB
 
-Detected Server Actions: 3
-  * $ACTION_ID_8f3a92b (app/actions.ts: createPost)
-  * $ACTION_ID_99e1201 (app/actions.ts: deletePost)
-  * $ACTION_ID_b0337c4 (app/auth/actions.ts: logout)
+Top Dependencies by Size:
+    1. sharp                          14.50 MB
+    2. @prisma/client                 8.20 MB
+    3. next                           6.10 MB
+    4. react-dom                      2.30 MB
+
+Tips to reduce size:
+   - Ensure specific large binaries (sharp, prisma) are only installed if needed.
+   - Use 'next-bundle-analyzer' to find large client-side chunks.
+   - Check for large data files mistakenly included in your source tree.
+```
+
+## Deep Explanation
+
+To inspect the bundle analysis logic and thresholds:
+
+```bash
+nextdeploy inspect explain
 ```

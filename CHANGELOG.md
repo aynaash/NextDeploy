@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.0.0](https://github.com/aynaash/NextDeploy/compare/v0.20.2...v1.0.0) (2026-11-23)
+
+### 🎉 Milestone: Production Parity for VPS and Cloudflare Workers
+
+This v1.0.0 milestone marks production readiness across both standalone self-hosted infrastructure (VPS multi-server clusters with Go sidecar) and edge serverless (Cloudflare Workers + R2 + KV + D1/Hyperdrive).
+
+### Features
+
+* **infrasniff:** complete enterprise Cloudflare Wrangler config sniffer:
+  * Automatically parse `durable_objects` (both bindings object and array formats)
+  * Parse and emit `migrations` (`new_sqlite_classes`, `new_classes`, `deleted_classes`)
+  * Parse queue consumers with `dead_letter_queue` and batch tuning parameters
+  * Parse `triggers.crons` and custom domain routes
+  * Preserve explicit `compatibility_date` and `compatibility_flags` from Wrangler
+  * Walk up parent directories to auto-discover root Wrangler configs from monorepo subprojects (`apps/web`)
+  * Traverse `env.production` / `env.prod` to adopt production custom domains, crons, and resource overrides
+* **init:** zero-prompt auto-init for existing Cloudflare projects:
+  * Automatically detects monorepo Next.js versions (`apps/web`, `web`, `frontend`)
+  * Automatically selects Cloudflare target and sniff mode when `wrangler.json`/`wrangler.toml` is present, bypassing interactive prompts and questionnaires
+* **cloudflare:** end-to-end edge verification:
+  * Resolved zone cache purge authorization and Doppler API token scope handling
+  * Automated custom domain attachment (`nextdeploy.org`, `www.nextdeploy.org`)
+  * Dynamic route handlers for `robots.txt` and `sitemap.xml`
+* **docs:** comprehensive documentation site overhaul, CLI references, and architecture guides
+
+### Bug Fixes
+
+* **infrasniff:** prevent `json.Unmarshal` failures on untyped Wrangler v3 queue and route variations
+* **init:** prevent fall-through to starter app scaffolding quiz when Next.js is installed in monorepo subdirectories
+
 ## [0.20.2](https://github.com/aynaash/NextDeploy/compare/v0.20.1...v0.20.2) (2026-11-21)
 
 

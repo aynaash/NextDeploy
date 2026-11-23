@@ -16,10 +16,10 @@ nextdeploy deploy [flags]
 
 | Flag | Shorthand | Type | Description |
 | :--- | :--- | :--- | :--- |
-| `--skip-build` | | boolean | Reuse existing build metadata from `.nextdeploy/metadata.json` instead of rebuilding. |
-| `--no-provision` | | boolean | Skip Cloudflare resource provisioning and use existing bindings. |
-| `--timeout` | `-t` | duration | Overall deployment timeout (default: `10m`). |
-| `--force` | `-f` | boolean | Proceed even if uncommitted git changes are detected. |
+| `--force` | `-f` | boolean | Force a full rebuild even if incremental build state matches. |
+| `--verify` | | boolean | Fail the deployment if post-deploy smoke checks fail (ideal for CI pipelines). |
+| `--environment` | `-e` | string | Deploy to a named environment (e.g. `staging`, `pr-42`), isolating resources. |
+| `--verbose` | `-v` | boolean | Print detailed deployment logs (S3/R2 uploads, Lambda/Worker steps, CDN status). |
 
 ---
 
