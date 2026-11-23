@@ -20,17 +20,17 @@ echo -e "${GREEN}✓ revalidator Lambda built${NC}"
 
 # Verify binaries exist and are not empty
 if [ ! -s assets/lambda/imgopt/bootstrap ]; then
-    echo "❌ Error: imgopt bootstrap is empty or missing"
+    echo " Error: imgopt bootstrap is empty or missing"
     exit 1
 fi
 
 if [ ! -s assets/lambda/revalidator/bootstrap ]; then
-    echo "❌ Error: revalidator bootstrap is empty or missing"
+    echo " Error: revalidator bootstrap is empty or missing"
     exit 1
 fi
 
 echo ""
-echo -e "${GREEN}✅ All auxiliary Lambdas built successfully!${NC}"
+echo -e "${GREEN} All auxiliary Lambdas built successfully!${NC}"
 echo ""
 echo "Binary sizes:"
 ls -lh assets/lambda/imgopt/bootstrap

@@ -80,7 +80,7 @@ nextdeploy plan
 nextdeploy ship
 
 # 4. Stream real-time production logs
-nextdeploy logs -f
+nextdeploy logs
 ```
 
 ## The Era of AI Coding Agents: Agent Trace & Takeover

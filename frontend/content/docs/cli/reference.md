@@ -53,9 +53,11 @@ nextdeploy init [flags]
 ```
 
 #### Flags
-- `--target <vps|cloudflare|aws>`: Pre-select the deployment target and bypass the interactive prompt.
-- `--force`: Overwrite existing `nextdeploy.yml` without prompting.
-- `--template <minimal|full>`: Select configuration verbosity (default: `minimal`).
+- `--target` / `-t <vps|cloudflare|aws>`: Pre-select the deployment target (`vps`, `cloudflare`, `aws`).
+- `--platform` / `-p <name>`: Framework type (`nextjs`, `remix`, `astro`, `sveltekit`).
+- `--mode` / `-m <name>`: Runtime mode (`serverless`, `container`, `standalone`).
+- `--db` / `-d <name>`: Database template (`postgres`, `mysql`, `sqlite`, `mongodb`, `none`).
+- `--force` / `-f`: Overwrite existing configuration file without confirmation.
 
 ---
 
@@ -69,7 +71,6 @@ nextdeploy plan [flags]
 #### Flags
 - `--detailed-exitcode`: Returns exit code `2` if infrastructure changes or drift are detected. Essential for CI/CD gates.
 - `--only <modules>`: Limit plan evaluation to specific resource subsets (e.g. `d1,r2,dns`).
-- `--refresh`: Force re-fetching remote cloud state before calculating drift.
 
 ---
 
@@ -82,7 +83,6 @@ nextdeploy build [flags]
 
 #### Flags
 - `--force` / `-f`: Force a full re-compilation even if inputs match `.nextdeploy/build.lock`.
-- `--clean`: Remove existing `.next` and build caches before building.
 
 ---
 
@@ -97,10 +97,7 @@ nextdeploy ship [flags]
 - `--environment` / `-e <name>`: Deploy to an isolated named environment (e.g. `staging`, `pr-42`).
 - `--verify`: Enforce strict post-deploy HTTP smoke checks; rolls back automatically on failure.
 - `--force` / `-f`: Rebuild and deploy even if git tree is dirty or cache matches.
-- `--no-provision`: Skip cloud resource reconciliation; deploy only application code.
-- `--skip-build`: Reuse existing `.nextdeploy/metadata.json` without running `next build`.
-- `--timeout` / `-t <duration>`: Overall deployment timeout (default: `10m`).
-- `--verbose` / `-v`: Print streaming progress for asset uploads and Lambda steps.
+- `--verbose` / `-v`: Print streaming progress for asset uploads and deployment steps.
 
 ---
 
@@ -114,9 +111,13 @@ nextdeploy rollback
 # Revert back multiple versions
 nextdeploy rollback --steps 2
 
-# Roll back to specific release identifier
-nextdeploy rollback --release rel_20261123_081904
+# Roll back to a specific commit or release hash
+nextdeploy rollback --to a1b2c3d
 ```
+
+#### Flags
+- `--steps` / `-s <int>`: Number of releases to roll back (default: 1).
+- `--to <string>`: Specific release commit or version hash to target.
 
 ---
 
@@ -124,30 +125,41 @@ nextdeploy rollback --release rel_20261123_081904
 Displays live deployment health, active release ID, git provenance, custom domains, and compute status.
 
 ```bash
-nextdeploy status [flags]
+nextdeploy status
 ```
-
-#### Flags
-- `--probe`: Actively execute live HTTP GET probes against `/` and `/api/health`.
-- `--json`: Output machine-readable JSON status report.
 
 ---
 
 ### `nextdeploy logs`
-Streams real-time production logs from the active deployment target.
+Streams real-time production logs from the active deployment target (live streaming is default).
 
 ```bash
-# Stream live logs (follow mode)
-nextdeploy logs -f
+# Stream live logs
+nextdeploy logs
 
-# Print last 100 log lines
-nextdeploy logs --tail 100
+# Filter by route path
+nextdeploy logs --route /api/webhooks
+
+# Stream security and daemon audit events
+nextdeploy logs --audit
+
+# Stream nextdeployd daemon internal logs
+nextdeploy logs --daemon
+
+# Stream all channels simultaneously
+nextdeploy logs --all
 ```
+
+#### Flags
+- `--route <path>`: Filter logs to requests matching a specific route pattern.
+- `--audit`: Stream security and deployment audit events.
+- `--daemon`: Stream `nextdeployd` system service logs.
+- `--all`: Stream all log channels simultaneously.
 
 ---
 
 ### `nextdeploy secrets`
-Manages ChaCha20-Poly1305 encrypted environment variables and cloud secret providers.
+Manages ChaCha20-Poly1305 encrypted environment variables and remote secret synchronization.
 
 ```bash
 # Set a secret
@@ -159,14 +171,17 @@ nextdeploy secrets get STRIPE_SECRET
 # List all declared secret keys (values masked)
 nextdeploy secrets list
 
-# Delete a secret
-nextdeploy secrets delete STRIPE_SECRET
+# Remove a secret key
+nextdeploy secrets unset STRIPE_SECRET
 
-# Import from a .env file
-nextdeploy secrets import --file .env.production
+# Load secrets from a local .env file
+nextdeploy secrets load .env.production
 
-# Rotate local encryption key
-nextdeploy secrets rotate
+# Re-encrypt and sync declared secrets with remote daemon/target
+nextdeploy secrets sync
+
+# Prune undeclared remote secrets
+nextdeploy secrets prune
 ```
 
 ---
@@ -194,20 +209,14 @@ nextdeploy trace resume --agent claude
 ---
 
 ### `nextdeploy target`
-Inspects or switches the active deployment target in `nextdeploy.yml`.
+Displays the active deployment target configured in `nextdeploy.yml`.
 
 ```bash
 # Display current active target
 nextdeploy target
 
-# Switch target to Cloudflare Workers
-nextdeploy target switch cloudflare
-
-# Switch target to Linux VPS
-nextdeploy target switch vps
-
-# Switch target to AWS Serverless
-nextdeploy target switch aws
+# Output active target as JSON
+nextdeploy target --json
 ```
 
 ---
@@ -232,8 +241,17 @@ nextdeploy generate-ci --provider github --preview
 One-time automated bootstrapping for Linux VPS servers over SSH: installs Caddy, configures systemd sandbox services, enables cgroups v2, and prepares `/opt/nextdeploy/`.
 
 ```bash
-nextdeploy prepare
+nextdeploy prepare [flags]
 ```
+
+#### Flags
+- `--server` / `-s <name>`: Target specific server defined in `nextdeploy.yml`.
+- `--all`: Prepare all configured servers sequentially.
+- `--allow-root`: Allow running setup under root account.
+- `--skip-runtimes`: Skip Node.js/Bun runtime installation.
+- `--skip-hardening`: Skip UFW firewall and SSH hardening rules.
+- `--stream`: Stream raw remote SSH output directly to terminal.
+- `--verbose` / `-v`: Enable detailed diagnostic output.
 
 ---
 
@@ -265,9 +283,6 @@ Checks for and updates the local NextDeploy CLI binary directly from GitHub Rele
 ```bash
 # Check and upgrade binary
 nextdeploy update
-
-# Check for updates without installing
-nextdeploy update --check
 ```
 
 ---

@@ -107,5 +107,5 @@ nextdeploy ship
 To tail live edge logs:
 
 ```bash
-nextdeploy logs -f
+nextdeploy logs
 ```

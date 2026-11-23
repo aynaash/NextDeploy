@@ -61,4 +61,4 @@ nextdeploy plan   # Preview resources, bindings, and drift
 nextdeploy ship   # Build, compile worker.mjs (~1.60 MB gzipped), sync R2, deploy, smoke verify
 ```
 
-Deployment reports are saved to `.nextdeploy/reports/` (gitignored), and live logs can be tailed with `nextdeploy logs -f`.
+Deployment reports are saved to `.nextdeploy/reports/` (gitignored), and live logs can be tailed with `nextdeploy logs`.

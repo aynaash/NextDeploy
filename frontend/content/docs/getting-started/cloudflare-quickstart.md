@@ -77,5 +77,5 @@ NextDeploy:
 ## 5. Tail Live Edge Logs
 
 ```bash
-nextdeploy logs -f
+nextdeploy logs
 ```

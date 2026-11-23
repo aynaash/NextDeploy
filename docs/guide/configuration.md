@@ -25,25 +25,26 @@ app:
     max_image_workers: 4
 
 # ── VPS Deployment Target ───────────────────────────────────────
-deployment:
-  server:
-    host: 203.0.113.10          # Server IPv4 or hostname
-    user: deploy                # SSH deployment user
-    ssh_key: ~/.ssh/id_ed25519  # Local path to private SSH key
-    use_sudo: true              # Execute system commands with sudo
-  healthcheck:
-    path: /api/health           # Healthcheck endpoint
-    interval: 30s
-    timeout: 5s
-    retries: 3
   resources:
     memory_max: 1024M           # Linux cgroup v2 memory limit
-    cpu_quota: 150%
+    cpu_quota: 150%             # systemd CPUQuota limit
+
+servers:
+  - name: primary
+    host: 203.0.113.10          # Server IPv4 or hostname
+    username: deploy            # SSH deployment user
+    key_path: ~/.ssh/id_ed25519 # Local path to private SSH key
+    port: 22
 
 # ── Serverless Deployment Target (Optional) ─────────────────────
 # Used when target_type is set to "serverless"
 serverless:
   provider: cloudflare          # "cloudflare" | "aws"
+  region: us-east-1             # AWS region (when provider is aws)
+  memory_size: 1024             # Lambda memory in MB (when provider is aws)
+  timeout: 30                   # Lambda timeout in seconds (when provider is aws)
+  isr_revalidation: true        # Enable ISR revalidation Lambda (AWS)
+  image_optimization: true      # Enable image optimization Lambda (AWS)
   cloudflare:
     account_id: ${CLOUDFLARE_ACCOUNT_ID}
     api_token: ${CLOUDFLARE_API_TOKEN}
@@ -58,10 +59,6 @@ serverless:
       queues:
         - name: email-queue
           binding: QUEUE
-  aws:
-    region: us-east-1
-    memory_size: 1024           # Lambda memory in MB
-    timeout: 30                 # Timeout in seconds
 
 # ── Database & Migrations ───────────────────────────────────────
 database:

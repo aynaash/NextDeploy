@@ -45,12 +45,10 @@ app:
 
 serverless:
   provider: aws
-  aws:
-    region: us-east-1
-    memory_size: 1024
-    timeout: 30
-    cloudfront:
-      price_class: PriceClass_100
+  region: us-east-1
+  memory_size: 1024
+  timeout: 30
+  cloudfront_id: ${CLOUDFRONT_DISTRIBUTION_ID}
 ```
 
 ## 3. Plan and Ship
@@ -72,6 +70,6 @@ During `ship`, NextDeploy:
 
 ```bash
 nextdeploy status
-nextdeploy logs -f
+nextdeploy logs
 nextdeploy destroy   # tears down provisioned AWS resources
 ```

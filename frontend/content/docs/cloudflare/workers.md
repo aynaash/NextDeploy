@@ -70,7 +70,7 @@ String secrets and env vars folded into the Worker upload are automatically mirr
 Stream live edge logs from your deployed Worker:
 
 ```bash
-nextdeploy logs -f
+nextdeploy logs
 ```
 
 Post-deploy `SmokeVerify` probes your custom domain root and up to 3 public static routes (automatically skipping Next.js internal `/_not-found` and `/_global-error` routes) and reports exact status codes and latencies.

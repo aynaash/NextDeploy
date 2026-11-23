@@ -48,7 +48,7 @@ func LoadConfig(filePath string) (*types.DaemonConfig, error) {
 		if err == nil {
 			defer file.Close()
 			decoder := json.NewDecoder(file)
-			if err := decoder.Decode(config); err != nil {
+			if err = decoder.Decode(config); err != nil {
 				return nil, err
 			}
 		} else if !os.IsNotExist(err) {
@@ -99,7 +99,7 @@ func ReadConfigInServer(path string) (*config.NextDeployConfig, error) {
 	// #nosec G304
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("Config file not found: %w", err)
+		return nil, fmt.Errorf("config file not found: %w", err)
 	}
 	var cfg config.NextDeployConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {

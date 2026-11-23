@@ -37,6 +37,22 @@ func RunInitCommand(cmd *cobra.Command, _ []string) error {
 
 	nextVersion, _ := nextcore.GetNextJsVersion("package.json")
 	if nextVersion == "" {
+		for _, sub := range []string{"apps/web", "web", "frontend", "packages/web"} {
+			if v, _ := nextcore.GetNextJsVersion(filepath.Join(sub, "package.json")); v != "" {
+				nextVersion = v
+				log.Info("Next.js %s detected in %s", v, sub)
+				break
+			}
+		}
+	}
+
+	hasWrangler := hasWranglerConfig(cwd)
+	if hasWrangler && nextVersion == "" {
+		log.Info("Cloudflare Wrangler configuration detected.")
+		return runSniffExisting(log, appName)
+	}
+
+	if nextVersion == "" {
 		if flags.mode != "" && strings.ToLower(strings.TrimSpace(flags.mode)) != "scaffold" {
 			return fmt.Errorf("--mode=%s requires an existing Next.js project in this directory", flags.mode)
 		}
@@ -138,6 +154,18 @@ func detectAppName(cwd string) string {
 	return "my-app"
 }
 
+func hasWranglerConfig(dir string) bool {
+	checkDirs := []string{dir, filepath.Join(dir, "apps", "web"), filepath.Join(dir, "web"), filepath.Join(dir, "frontend")}
+	for _, d := range checkDirs {
+		for _, name := range []string{"wrangler.jsonc", "wrangler.json", "wrangler.toml"} {
+			if info, err := os.Stat(filepath.Join(d, name)); err == nil && !info.IsDir() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func selectExistingProjectTarget(log *shared.Logger, flagTarget string) (string, error) {
 	if flagTarget != "" {
 		targetType := normalizeInitTarget(flagTarget)
@@ -146,6 +174,11 @@ func selectExistingProjectTarget(log *shared.Logger, flagTarget string) (string,
 		}
 		log.Info("Target: %s (from --target flag)", targetType)
 		return targetType, nil
+	}
+
+	if hasWranglerConfig(".") {
+		log.Info("Target: cloudflare (automatically detected from wrangler config)")
+		return "cloudflare", nil
 	}
 
 	prompt := &survey.Select{
@@ -348,6 +381,9 @@ func runCloudflareInit(log *shared.Logger, appName, flagMode, flagDB, nextVersio
 			return fmt.Errorf("--mode must be one of: scaffold, sniff (got %q)", flagMode)
 		}
 		log.Info("Mode: %s (from --mode flag)", flagMode)
+	} else if hasWranglerConfig(".") {
+		log.Info("Mode: sniff (automatically adopting declared infrastructure from wrangler config)")
+		choice = "Use my existing app in this directory"
 	} else {
 		if err := survey.AskOne(&survey.Select{
 			Message: "Cloudflare deployment — how do you want to start?",

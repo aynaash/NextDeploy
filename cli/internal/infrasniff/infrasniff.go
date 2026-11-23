@@ -31,6 +31,7 @@ const (
 	ResHyperdrive Resource = "hyperdrive"
 	ResVectorize  Resource = "vectorize"
 	ResQueue      Resource = "queue"
+	ResDO         Resource = "durable_object"
 )
 
 // Signal is one detected resource need with the evidence behind it.
@@ -109,6 +110,8 @@ var sourceSignals = []struct {
 	{regexp.MustCompile(`@cf/[a-z0-9-]+/`), ResAI, "Workers AI model id (@cf/...)"},
 	{regexp.MustCompile(`env\.AI\b`), ResAI, "env.AI usage"},
 	{regexp.MustCompile(`\bQueue<|env\.QUEUE\b`), ResQueue, "Queue binding usage"},
+	{regexp.MustCompile(`\bextends\s+DurableObject\b`), ResDO, "class extends DurableObject"},
+	{regexp.MustCompile(`\bDurableObjectNamespace\b`), ResDO, "type DurableObjectNamespace"},
 }
 
 // envRef matches process.env.X and env.X identifiers (uppercase snake names).
@@ -213,6 +216,12 @@ func Sniff(projectDir string) (*Result, error) {
 		}
 		for _, b := range w.Queues {
 			addSignal(ResQueue, "wrangler queues["+b.Name+"]")
+		}
+		for _, b := range w.QueueConsumers {
+			addSignal(ResQueue, "wrangler queues.consumers["+b.Queue+"]")
+		}
+		for _, b := range w.DurableObjects {
+			addSignal(ResDO, "wrangler durable_objects["+b.Name+"]")
 		}
 		if w.AI != "" {
 			addSignal(ResAI, "wrangler ai["+w.AI+"]")

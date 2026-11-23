@@ -27,19 +27,18 @@ related:
 | `app.gosidecar.isr_cache` | boolean | Serve prerendered HTML/RSC directly from Go sidecar memory. |
 | `app.gosidecar.max_image_workers` | integer | Concurrent Go image worker pool size (default: `4`). |
 
-## VPS Target (`deployment.*`)
+## VPS Target (`servers` & `app.resources`)
 
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `deployment.server.host` | string | — | VPS IPv4 address or hostname. |
-| `deployment.server.user` | string | — | SSH username (e.g. `ubuntu`, `deploy`). |
-| `deployment.server.ssh_key` | string | — | Local path to SSH private key (`~/.ssh/id_ed25519`). |
-| `deployment.server.use_sudo` | boolean | `false` | Execute privileged VPS bootstrap commands via `sudo`. |
-| `deployment.healthcheck.path` | string | `"/api/health"` | HTTP 200 endpoint probed before atomic cutover. |
-| `deployment.healthcheck.timeout` | duration | `5s` | Per-probe HTTP timeout. |
-| `deployment.healthcheck.retries` | integer | `3` | Retry count before aborting cutover. |
-| `deployment.resources.memory_max` | string | — | Linux `cgroup v2` memory cap (e.g. `1024M`). |
-| `deployment.resources.cpu_quota` | string | — | systemd `CPUQuota` limit (e.g. `150%`). |
+| `servers[].name` | string | — | Identifier for the VPS server. |
+| `servers[].host` | string | — | VPS IPv4 address or hostname. |
+| `servers[].username` | string | — | SSH username (e.g. `ubuntu`, `deploy`). |
+| `servers[].key_path` | string | — | Local path to SSH private key (`~/.ssh/id_ed25519`). |
+| `servers[].port` | integer | `22` | SSH port. |
+| `app.resources.memory_max` | string | — | Linux `cgroup v2` memory cap (e.g. `1024M`). |
+| `app.resources.memory_high` | string | — | systemd `MemoryHigh` soft throttle (e.g. `800M`). |
+| `app.resources.cpu_quota` | string | — | systemd `CPUQuota` limit (e.g. `150%`). |
 
 ## Cloudflare Target (`serverless.cloudflare.*`)
 
@@ -55,14 +54,18 @@ related:
 | `serverless.cloudflare.resources` | object | — | Declarative `kv`, `d1`, `r2`, `queues`, and `hyperdrive` resources. |
 | `serverless.cloudflare.protection` | object | — | Edge guard: IP allow/deny CIDRs, KV rate limits, HMAC cookie auth. |
 
-## AWS Target (`serverless.aws.*`)
+## AWS Target (`serverless.*`)
 
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `serverless.aws.region` | string | `"us-east-1"` | AWS deployment region. |
-| `serverless.aws.memory_size` | integer | `1024` | Lambda memory allocation in MB. |
-| `serverless.aws.timeout` | integer | `30` | Lambda timeout in seconds. |
-| `serverless.aws.cloudfront.price_class` | string | `"PriceClass_100"` | CloudFront edge price class. |
+| `serverless.provider` | string | — | Set to `"aws"`. |
+| `serverless.region` | string | `"us-east-1"` | AWS deployment region. |
+| `serverless.memory_size` | integer | `1024` | Lambda memory allocation in MB. |
+| `serverless.timeout` | integer | `30` | Lambda timeout in seconds. |
+| `serverless.cloudfront_id` | string | — | CloudFront distribution ID for cache invalidation. |
+| `serverless.isr_revalidation` | boolean | `false` | Enable ISR revalidation SQS and worker Lambda. |
+| `serverless.image_optimization` | boolean | `false` | Enable image optimization Lambda. |
+| `serverless.warmer` | boolean | `false` | Deploy EventBridge warmer cron. |
 
 ## Environment Variable Interpolation
 

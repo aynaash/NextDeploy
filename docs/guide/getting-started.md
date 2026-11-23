@@ -123,7 +123,7 @@ Verify your live deployment and stream runtime logs:
 nextdeploy status
 
 # Tail real-time production logs
-nextdeploy logs -f
+nextdeploy logs
 ```
 
 ---

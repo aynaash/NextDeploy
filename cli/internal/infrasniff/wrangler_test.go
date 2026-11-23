@@ -1,6 +1,7 @@
 package infrasniff
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -125,6 +126,118 @@ func TestReadWrangler_AbsentIsNil(t *testing.T) {
 	}
 	if res.Wrangler != nil {
 		t.Errorf("expected nil wrangler, got %+v", res.Wrangler)
+	}
+}
+
+func TestReadWrangler_FullEnterpriseMonorepoAndEnv(t *testing.T) {
+	rootDir := t.TempDir()
+	// Place wrangler.json at root
+	write(t, rootDir, "wrangler.json", `{
+  "name": "masomolab-web-dev",
+  "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{ "name": "COURSE_AUTHORING", "class_name": "CourseAuthoringDO" }]
+  },
+  "ai": { "binding": "AI" },
+  "vectorize": [{ "binding": "VECTORIZE", "index_name": "masomolab-rag-dev" }],
+  "kv_namespaces": [{ "binding": "RATE_LIMITS_KV", "id": "kv-id-dev" }],
+  "r2_buckets": [{ "binding": "MEDIA_BUCKET", "bucket_name": "masomolab-media-dev" }],
+  "queues": {
+    "producers": [{ "binding": "INGEST_Q", "queue": "masomolab-processing-dev" }],
+    "consumers": [
+      {
+        "queue": "masomolab-processing-dev",
+        "max_batch_size": 10,
+        "max_batch_timeout": 30,
+        "max_retries": 3,
+        "dead_letter_queue": "masomolab-processing-dev-dlq"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["CourseAuthoringDO"]
+    }
+  ],
+  "env": {
+    "production": {
+      "routes": [
+        { "pattern": "masomolab.com", "custom_domain": true },
+        { "pattern": "www.masomolab.com", "custom_domain": true }
+      ],
+      "triggers": {
+        "crons": ["0 2 * * *"]
+      }
+    }
+  }
+}`)
+
+	// Simulate running inside monorepo child app: apps/web
+	appDir := rootDir + "/apps/web"
+	write(t, appDir, "app/page.tsx", `export default function Home() { return <div>Masomo</div>; }`)
+
+	res, err := Sniff(appDir)
+	if err != nil {
+		t.Fatalf("Sniff failed: %v", err)
+	}
+
+	w := res.Wrangler
+	if w == nil {
+		t.Fatal("wrangler config not found via parent directory traversal")
+	}
+
+	if w.Name != "masomolab-web-dev" {
+		t.Errorf("worker name: got %q", w.Name)
+	}
+	if w.CompatibilityDate != "2026-05-01" {
+		t.Errorf("compat date: got %q", w.CompatibilityDate)
+	}
+
+	// Durable Objects
+	if len(w.DurableObjects) != 1 || w.DurableObjects[0].Name != "COURSE_AUTHORING" || w.DurableObjects[0].ClassName != "CourseAuthoringDO" {
+		t.Errorf("DurableObjects wrong: %+v", w.DurableObjects)
+	}
+
+	// Migrations
+	if len(w.Migrations) != 1 || len(w.Migrations[0].NewSQLiteClasses) != 1 || w.Migrations[0].NewSQLiteClasses[0] != "CourseAuthoringDO" {
+		t.Errorf("Migrations wrong: %+v", w.Migrations)
+	}
+
+	// Queue consumers with DLQ
+	if len(w.QueueConsumers) != 1 || w.QueueConsumers[0].DeadLetterQueue != "masomolab-processing-dev-dlq" {
+		t.Errorf("Queue consumers wrong: %+v", w.QueueConsumers)
+	}
+
+	// Merged from env.production: custom domain and crons
+	if len(w.CustomDomains) == 0 || w.CustomDomains[0] != "masomolab.com" {
+		t.Errorf("CustomDomains merged wrong: %+v", w.CustomDomains)
+	}
+	if len(w.Crons) != 1 || w.Crons[0] != "0 2 * * *" {
+		t.Errorf("Crons merged wrong: %+v", w.Crons)
+	}
+
+	// Test generated YAML output
+	y := res.RenderNextDeployYAML("masomolab-web")
+	assertValidNextDeployYAML(t, y)
+
+	for _, frag := range []string{
+		`domain: "masomolab.com"`,
+		`compatibility_date: "2026-05-01"`,
+		`compatibility_flags: [nodejs_compat]`,
+		`- { name: COURSE_AUTHORING, class_name: CourseAuthoringDO }`,
+		`- { name: INGEST_Q, queue: masomolab-processing-dev }`,
+		`queue: masomolab-processing-dev`,
+		`dead_letter_queue: masomolab-processing-dev-dlq`,
+		`tag: v1`,
+		`new_sqlite_classes: [CourseAuthoringDO]`,
+		`crons:`,
+		`- "0 2 * * *"`,
+	} {
+		if !strings.Contains(y, frag) {
+			t.Errorf("generated YAML missing %q\n%s", frag, y)
+		}
 	}
 }
 

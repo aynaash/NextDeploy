@@ -80,7 +80,7 @@ NextDeploy builds `.next/standalone`, syncs content-hashed assets to the cumulat
 
 ```bash
 nextdeploy status
-nextdeploy logs -f
+nextdeploy logs
 ```
 
 If anything looks wrong, revert in milliseconds without rebuilding:

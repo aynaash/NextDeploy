@@ -68,7 +68,7 @@ Next-generation edge compilation and resource orchestration for Cloudflare Worke
 - [ ] **Multi-Worker Micro-Routing**:
   - [ ] Option to split heavy background queues or isolated API routes into dedicated satellite workers.
 - [ ] **Automated Ephemeral PR Preview Teardown**:
-  - [ ] Add `nextdeploy cleanup --expired-previews` to purge old preview workers and orphaned R2 folders.
+  - [ ] Add preview cleanup command to purge old preview workers and orphaned R2 folders.
 
 ---
 
@@ -122,7 +122,7 @@ Enterprise-grade serverless autoscaling on AWS.
 - [x] **Authenticated Encryption (AEAD)**:
   - [x] ChaCha20-Poly1305 and AES-256-GCM authenticated encryption with Argon2id key derivation.
   - [x] Local encrypted binary vault format (`.secrets`).
-  - [x] Key rotation via `nextdeploy secrets rotate`.
+  - [ ] Key rotation (planned).
 - [x] **Cloud Provider Integrations**:
   - [x] Doppler dynamic secret synchronization.
   - [x] AWS Secrets Manager Lambda Extension in-memory caching.

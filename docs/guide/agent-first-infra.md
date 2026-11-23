@@ -335,4 +335,4 @@ Claude Code initializes with:
 | **NextDeploy** | `nextdeploy plan` | Validate configuration and build dry-run |
 | **NextDeploy** | `nextdeploy ship` | Build, bundle, deploy, and verify live endpoints |
 | **NextDeploy** | `nextdeploy rollback` | Atomic cutover back to previous active release |
-| **NextDeploy** | `nextdeploy logs -f` | Stream live server and SSR runtime logs |
+| **NextDeploy** | `nextdeploy logs` | Stream live server and SSR runtime logs |

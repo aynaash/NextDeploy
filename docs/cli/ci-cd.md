@@ -167,10 +167,10 @@ jobs:
               (curl -Ls --tlsv1.2 --proto "=https" --retry 3 https://cli.doppler.com/install.sh || wget -t 3 -qO- https://cli.doppler.com/install.sh) | sudo sh
             fi
             doppler run -- nextdeploy apply --yes
-            doppler run -- nextdeploy ship --no-provision --verify
+            doppler run -- nextdeploy ship --verify
           else
             nextdeploy apply --yes
-            nextdeploy ship --no-provision --verify
+            nextdeploy ship --verify
           fi
 
       - name: Deploy to VPS

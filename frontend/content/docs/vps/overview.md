@@ -80,7 +80,7 @@ nextdeploy ship
 nextdeploy status
 
 # 5. Tail live logs across application and reverse proxy
-nextdeploy logs -f
+nextdeploy logs
 
 # 6. Instant zero-downtime rollback to previous release (<10ms)
 nextdeploy rollback

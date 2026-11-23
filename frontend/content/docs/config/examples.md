@@ -77,20 +77,16 @@ app:
     isr_cache: true
     max_image_workers: 4
 
-deployment:
-  server:
-    host: 203.0.113.10
-    user: ubuntu
-    ssh_key: ~/.ssh/id_ed25519
-    use_sudo: true
-  healthcheck:
-    path: /api/health
-    interval: 30s
-    timeout: 5s
-    retries: 3
   resources:
     memory_max: 1024M
     cpu_quota: 150%
+
+servers:
+  - name: primary
+    host: 203.0.113.10
+    username: ubuntu
+    key_path: ~/.ssh/id_ed25519
+    port: 22
 ```
 
 ## 3. AWS Serverless (Lambda + S3 + CloudFront)
@@ -106,10 +102,11 @@ app:
 
 serverless:
   provider: aws
-  aws:
-    region: us-east-1
-    memory_size: 1024
-    timeout: 30
-    cloudfront:
-      price_class: PriceClass_100
+  region: us-east-1
+  memory_size: 1024
+  timeout: 30
+  cloudfront_id: ${CLOUDFRONT_DISTRIBUTION_ID}
+  isr_revalidation: true
+  image_optimization: true
+  warmer: true
 ```

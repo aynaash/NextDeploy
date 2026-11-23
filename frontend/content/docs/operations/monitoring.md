@@ -52,14 +52,14 @@ Historical Releases: 5 retained (Rollback target: 2026-11-23_10-15-00)
 ### Tail Live Logs (`nextdeploy logs`)
 
 ```bash
-# Follow logs in real-time
-nextdeploy logs -f
+# Stream live logs (follow mode is default)
+nextdeploy logs
 
-# Limit output to last 100 lines
-nextdeploy logs -n 100
+# Filter by route path
+nextdeploy logs --route /api/webhooks
 
-# Filter by error level
-nextdeploy logs --filter "level=error"
+# Stream daemon system logs
+nextdeploy logs --daemon
 ```
 
 - On **VPS**: Streams directly from `journalctl -u nextdeploy@<app> -f`.
