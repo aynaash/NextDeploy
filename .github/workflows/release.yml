@@ -77,4 +77,4 @@ jobs:
           ls -lh dist/*.tar.gz dist/*.zip 2>/dev/null || true
           echo ""
           echo "📋 Checksums:"
-          cat dist/*_checksums.txt 2>/dev/null || echo "No checksums found"
+          cat dist/checksums.txt 2>/dev/null || echo "No checksums found"
