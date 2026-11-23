@@ -106,7 +106,7 @@ func generateMetadata(skipBuild bool) (metadata NextCorePayload, err error) {
 	}
 	NextCoreLogger.Debug("Git commit hash: %s", gitCommit)
 
-	if err := copyStaticAssets(); err != nil {
+	if err = copyStaticAssets(); err != nil {
 		NextCoreLogger.Error("Failed to copy static assets: %v", err)
 		return NextCorePayload{}, fmt.Errorf("failed to copy static assets: %w", err)
 	}
@@ -119,7 +119,7 @@ func generateMetadata(skipBuild bool) (metadata NextCorePayload, err error) {
 
 	writeISRTagMap(cwd, metadata.RouteInfo.ISRDetail)
 
-	if err := createBuildLock(&metadata, ConfigFingerprint(cfg)); err != nil {
+	if err = createBuildLock(&metadata, ConfigFingerprint(cfg)); err != nil {
 		NextCoreLogger.Error("Failed to create build lock: %v", err)
 		return NextCorePayload{}, fmt.Errorf("failed to create build lock: %w", err)
 	}
@@ -226,7 +226,6 @@ func resolveBuildMetadata(cwd string, nextConfig *NextConfig, distDir, packageMa
 	return CollectBuildMetadata(buildCmd)
 }
 
-// LoadMetadata reads and unmarshals .nextdeploy/metadata.json from the current directory.
 // LoadMetadata reads and unmarshals the generated .nextdeploy/metadata.json file.
 func LoadMetadata() (NextCorePayload, error) {
 	data, err := os.ReadFile(MetadataFileName)
@@ -605,23 +604,29 @@ func scanRootAssets(projectDir string) ([]StaticAsset, error) {
 	return assets, nil
 }
 
-// ParseMiddleware parses Next.js middleware.{ts,js} configuration.
-// Falls back to proxy.{ts,js} only when no middleware file exists so callers
-// reading payload.Middleware directly remain backward compatible.
+// ParseMiddleware parses Next.js middleware.{ts,js} configuration (at root or src/).
+// Falls back to proxy.{ts,js} (at root or src/) only when no middleware file exists
+// so callers reading payload.Middleware directly remain backward compatible.
 func ParseMiddleware(projectDir string) (*MiddlewareConfig, error) {
 	return parseInterceptorFiles([]string{
 		filepath.Join(projectDir, "middleware.ts"),
 		filepath.Join(projectDir, "middleware.js"),
+		filepath.Join(projectDir, "src", "middleware.ts"),
+		filepath.Join(projectDir, "src", "middleware.js"),
 		filepath.Join(projectDir, "proxy.ts"),
 		filepath.Join(projectDir, "proxy.js"),
+		filepath.Join(projectDir, "src", "proxy.ts"),
+		filepath.Join(projectDir, "src", "proxy.js"),
 	})
 }
 
-// ParseProxy parses Next 15+ proxy.{ts,js} configuration independently.
+// ParseProxy parses Next 16+ proxy.{ts,js} configuration independently (at root or src/).
 func ParseProxy(projectDir string) (*MiddlewareConfig, error) {
 	return parseInterceptorFiles([]string{
 		filepath.Join(projectDir, "proxy.ts"),
 		filepath.Join(projectDir, "proxy.js"),
+		filepath.Join(projectDir, "src", "proxy.ts"),
+		filepath.Join(projectDir, "src", "proxy.js"),
 	})
 }
 

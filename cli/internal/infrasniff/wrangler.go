@@ -28,9 +28,10 @@ type WranglerConfig struct {
 // WranglerBinding is one declared binding. Fields are populated per kind; unused
 // ones stay empty (e.g. R2 has Resource=bucket_name, ID empty).
 type WranglerBinding struct {
-	Name     string // JS binding variable (e.g. "DB")
-	Resource string // database_name / bucket_name / index_name / queue
-	ID       string // database_id / namespace id / hyperdrive id
+	Name          string // JS binding variable (e.g. "DB")
+	Resource      string // database_name / bucket_name / index_name / queue
+	ID            string // database_id / namespace id / hyperdrive id
+	MigrationsDir string // D1 migrations_dir when declared in wrangler config
 }
 
 // wranglerFiles are checked in order; the first present wins. jsonc/json are the
@@ -38,13 +39,14 @@ type WranglerBinding struct {
 var wranglerFiles = []string{"wrangler.jsonc", "wrangler.json", "wrangler.toml"}
 
 type wBinding struct {
-	Binding      string `json:"binding" toml:"binding"`
-	DatabaseName string `json:"database_name" toml:"database_name"`
-	DatabaseID   string `json:"database_id" toml:"database_id"`
-	BucketName   string `json:"bucket_name" toml:"bucket_name"`
-	ID           string `json:"id" toml:"id"`
-	IndexName    string `json:"index_name" toml:"index_name"`
-	Queue        string `json:"queue" toml:"queue"`
+	Binding       string `json:"binding" toml:"binding"`
+	DatabaseName  string `json:"database_name" toml:"database_name"`
+	DatabaseID    string `json:"database_id" toml:"database_id"`
+	MigrationsDir string `json:"migrations_dir" toml:"migrations_dir"`
+	BucketName    string `json:"bucket_name" toml:"bucket_name"`
+	ID            string `json:"id" toml:"id"`
+	IndexName     string `json:"index_name" toml:"index_name"`
+	Queue         string `json:"queue" toml:"queue"`
 }
 
 type wranglerRaw struct {
@@ -103,7 +105,12 @@ func parseWranglerBytes(name string, data []byte) (*wranglerRaw, error) {
 func wranglerFromRaw(source string, raw *wranglerRaw) *WranglerConfig {
 	cfg := &WranglerConfig{Source: source, Name: raw.Name}
 	for _, d := range raw.D1Databases {
-		cfg.D1 = append(cfg.D1, WranglerBinding{Name: d.Binding, Resource: d.DatabaseName, ID: d.DatabaseID})
+		cfg.D1 = append(cfg.D1, WranglerBinding{
+			Name:          d.Binding,
+			Resource:      d.DatabaseName,
+			ID:            d.DatabaseID,
+			MigrationsDir: d.MigrationsDir,
+		})
 	}
 	for _, k := range raw.KVNamespaces {
 		cfg.KV = append(cfg.KV, WranglerBinding{Name: k.Binding, ID: k.ID})

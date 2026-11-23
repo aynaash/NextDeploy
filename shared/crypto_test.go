@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"testing"
@@ -47,5 +48,39 @@ func TestSharedAESRoundTrip(t *testing.T) {
 
 	if string(plaintext) != string(data) {
 		t.Fatalf("roundtrip mismatch: got %q, want %q", plaintext, data)
+	}
+}
+
+func TestECDHKeyExchange(t *testing.T) {
+	kpA, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair A failed: %v", err)
+	}
+	kpB, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair B failed: %v", err)
+	}
+
+	sharedA, err := DeriveSharedKey(kpA.ECDHPrivate, kpB.ECDHPublic)
+	if err != nil {
+		t.Fatalf("DeriveSharedKey A->B failed: %v", err)
+	}
+	sharedB, err := DeriveSharedKey(kpB.ECDHPrivate, kpA.ECDHPublic)
+	if err != nil {
+		t.Fatalf("DeriveSharedKey B->A failed: %v", err)
+	}
+	if len(sharedA) != SharedKeySize || !bytes.Equal(sharedA, sharedB) {
+		t.Fatalf("shared keys do not match or invalid length: len=%d", len(sharedA))
+	}
+
+	if _, err := DeriveSharedKey(nil, kpB.ECDHPublic); err == nil {
+		t.Fatal("expected error for nil private key")
+	}
+	if _, err := DeriveSharedKey(kpA.ECDHPrivate, nil); err == nil {
+		t.Fatal("expected error for nil public key")
+	}
+
+	if err := RunCryptoHealthChecks(); err != nil {
+		t.Fatalf("RunCryptoHealthChecks failed: %v", err)
 	}
 }

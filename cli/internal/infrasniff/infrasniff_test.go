@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -222,6 +223,34 @@ func TestSniff_MissingDirIsNotFatal(t *testing.T) {
 	}
 	if len(res.Resources()) != 0 {
 		t.Errorf("expected empty result, got %v", res.Resources())
+	}
+}
+
+func TestSniff_WranglerParseErrorAndVarsExcluded(t *testing.T) {
+	// Malformed wrangler.jsonc surfaces as a warning instead of being silently dropped.
+	badDir := t.TempDir()
+	write(t, badDir, "wrangler.jsonc", `{ "name": broken`)
+	resBad, err := Sniff(badDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resBad.Warnings) == 0 || !strings.Contains(resBad.Summary(), "Warning:") {
+		t.Errorf("expected wrangler parse warning, warnings=%v summary=%q", resBad.Warnings, resBad.Summary())
+	}
+
+	// Plain-text wrangler vars must not be suggested as secrets.
+	varsDir := t.TempDir()
+	write(t, varsDir, "wrangler.jsonc", `{ "vars": { "PUBLIC_STAGE": "prod" } }`)
+	write(t, varsDir, "app/page.tsx", `const a = env.PUBLIC_STAGE; const b = process.env.REAL_SECRET;`)
+	resVars, err := Sniff(varsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(resVars.Secrets, "PUBLIC_STAGE") {
+		t.Errorf("wrangler plain-text var should not be listed as secret: %v", resVars.Secrets)
+	}
+	if !contains(resVars.Secrets, "REAL_SECRET") {
+		t.Errorf("expected REAL_SECRET in secrets: %v", resVars.Secrets)
 	}
 }
 

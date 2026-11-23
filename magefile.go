@@ -123,36 +123,44 @@ func testPkgs() ([]string, error) {
 	return pkgs, nil
 }
 
+func goBinDir() string {
+	binDir, err := sh.Output("go", "env", "GOBIN")
+	if err == nil && strings.TrimSpace(binDir) == "" {
+		binDir, err = sh.Output("go", "env", "GOPATH")
+		if err == nil && strings.TrimSpace(binDir) != "" {
+			binDir = filepath.Join(strings.TrimSpace(binDir), "bin")
+		}
+	}
+	if err != nil || strings.TrimSpace(binDir) == "" {
+		binDir = filepath.Join(home(), "go", "bin")
+	}
+	return strings.TrimSpace(binDir)
+}
+
+func prependToPath(dir string) {
+	if dir == "" {
+		return
+	}
+	pathSep := string(os.PathListSeparator)
+	currentPath := os.Getenv("PATH")
+	if !strings.Contains(pathSep+currentPath+pathSep, pathSep+dir+pathSep) {
+		_ = os.Setenv("PATH", dir+pathSep+currentPath)
+	}
+}
+
 func ensureTool(name, installSpec string) error {
+	// Ensure $GOBIN (or $GOPATH/bin) is on PATH before checking LookPath so
+	// tools already installed by `go install` are found even when the user's
+	// shell profile hasn't added ~/go/bin to PATH.
+	binDir := goBinDir()
+	prependToPath(binDir)
+
 	if _, err := exec.LookPath(name); err == nil {
 		return nil
 	}
 	fmt.Printf("Installing %s...\n", name)
 	if err := sh.Run("go", "install", installSpec); err != nil {
 		return err
-	}
-	// After `go install`, the binary lives in $GOPATH/bin (or
-	// $GOBIN if set). If that directory isn't already on PATH,
-	// prepend it for this process so subsequent sh.Run calls
-	// resolve the tool by bare name. Without this, a fresh user
-	// who never added ~/go/bin to PATH gets a confusing
-	// "executable file not found in $PATH" right after we tell
-	// them we just installed it.
-	binDir, err := sh.Output("go", "env", "GOBIN")
-	if err == nil && strings.TrimSpace(binDir) == "" {
-		binDir, err = sh.Output("go", "env", "GOPATH")
-		if err == nil {
-			binDir = filepath.Join(strings.TrimSpace(binDir), "bin")
-		}
-	}
-	if err != nil || binDir == "" {
-		binDir = filepath.Join(home(), "go", "bin")
-	}
-	binDir = strings.TrimSpace(binDir)
-	pathSep := string(os.PathListSeparator)
-	currentPath := os.Getenv("PATH")
-	if !strings.Contains(pathSep+currentPath+pathSep, pathSep+binDir+pathSep) {
-		_ = os.Setenv("PATH", binDir+pathSep+currentPath)
 	}
 	if _, lookErr := exec.LookPath(name); lookErr != nil {
 		return fmt.Errorf("%s installed to %s but still not resolvable: %w", name, binDir, lookErr)
@@ -165,12 +173,12 @@ func ensureTool(name, installSpec string) error {
 func ensureDevBinOnPath() {
 	rcNames := []string{".bashrc"}
 	if shell := os.Getenv("SHELL"); strings.Contains(shell, "zsh") {
-		rcNames = []string{".zshrc", ".bashrc"}
+		rcNames = []string{".zshrc"}
 	}
 	for _, rcName := range rcNames {
 		rcFile := filepath.Join(home(), rcName)
 		data, err := os.ReadFile(rcFile)
-		if err == nil && strings.Contains(string(data), devBinDir()) {
+		if err == nil && (strings.Contains(string(data), ".nextdeploy/bin") || strings.Contains(string(data), devBinDir())) {
 			continue
 		}
 		f, err := os.OpenFile(rcFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
@@ -185,11 +193,12 @@ func ensureDevBinOnPath() {
 
 // ── build targets ────────────────────────────────────────────────────────────
 
-// Clean removes local build artifacts (bin/, dist/, coverage files).
+// Clean removes local build artifacts (bin/, dist/, tmp/, coverage files).
 func Clean() error {
 	fmt.Println("Cleaning build artifacts...")
 	_ = sh.Rm(binDir)
 	_ = sh.Rm(distDir)
+	_ = sh.Rm("tmp")
 	_ = os.Remove("coverage.out")
 	_ = os.Remove("coverage.html")
 	return nil
@@ -376,7 +385,7 @@ func Lint() error {
 	if err := ensureTool("golangci-lint", "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"); err != nil {
 		return err
 	}
-	return sh.Run("golangci-lint", "run", "--timeout=5m")
+	return sh.RunV("golangci-lint", "run", "--timeout=5m")
 }
 
 // SecurityScan runs gosec and govulncheck.
@@ -384,13 +393,13 @@ func SecurityScan() error {
 	if err := ensureTool("gosec", "github.com/securego/gosec/v2/cmd/gosec@latest"); err != nil {
 		return err
 	}
-	if err := sh.Run("gosec", "./..."); err != nil {
+	if err := sh.RunV("gosec", "./..."); err != nil {
 		return err
 	}
 	if err := ensureTool("govulncheck", "golang.org/x/vuln/cmd/govulncheck@latest"); err != nil {
 		return err
 	}
-	return sh.Run("govulncheck", "./...")
+	return sh.RunV("govulncheck", "./...")
 }
 
 // ── tests ────────────────────────────────────────────────────────────────────
@@ -611,7 +620,7 @@ func DevCLI() error {
 		return err
 	}
 	ensureDevBinOnPath()
-	fmt.Println("Watching cli/ and shared/ — rebuilds ~/.nextdeploy/bin/nextdeploy on change.")
+	fmt.Println("Watching cli/, shared/, internal/, and assets/ — rebuilds ~/.nextdeploy/bin/nextdeploy on change.")
 	return sh.RunV("air", "-c", ".air.cli.toml")
 }
 

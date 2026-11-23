@@ -44,7 +44,8 @@ Exit codes:
 		// Provision into a named environment so preview/staging stacks get
 		// their own resources instead of sharing (or colliding with) the
 		// configured environment's.
-		if err := applyEnvironmentOverride(cfg, applyEnvironment); err != nil {
+		err = applyEnvironmentOverride(cfg, applyEnvironment)
+		if err != nil {
 			log.Error("%v", err)
 			os.Exit(1)
 		}

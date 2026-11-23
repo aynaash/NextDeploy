@@ -95,7 +95,7 @@ func (p *CloudflareProvider) ProvisionResources(ctx context.Context, cfg *config
 	}
 
 	for _, h := range res.Hyperdrive {
-		id, err := p.ensureHyperdrive(ctx, h)
+		id, err := p.ensureHyperdrive(ctx, cfg, h)
 		if err != nil {
 			return fmt.Errorf("hyperdrive %q: %w", h.Name, err)
 		}

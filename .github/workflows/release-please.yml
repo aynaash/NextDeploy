@@ -1,10 +1,12 @@
 name: Release Please
 
-# Primary, automated release path. On every push to main, release-please reads
-# the Conventional Commits since the last release and maintains a single
-# "release PR" that previews the next semantic version and the CHANGELOG.
-# Merging that PR creates the git tag + GitHub Release, and the gated `release`
-# job below then builds and attaches the binaries with GoReleaser.
+# Primary, controlled release path. Normal pushes to main do not trigger
+# release-please. Run this workflow manually (workflow_dispatch) whenever you're
+# ready to release: release-please reads the Conventional Commits since the last
+# release and opens/updates a single "release PR" that previews the next semantic
+# version, CHANGELOG, and CLIVersion pin. Merging that PR (`chore(main): release`)
+# triggers this workflow on push to create the git tag + GitHub Release, and the
+# gated `release` job below then builds and attaches the binaries with GoReleaser.
 #
 # Why versions stop being chaotic: the bump level is derived from commit types
 # (feat -> minor, fix -> patch, feat!/BREAKING CHANGE -> minor while 0.x), so no
@@ -26,6 +28,7 @@ permissions:
 jobs:
   release-please:
     name: Compute version & changelog
+    if: "github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'chore(main): release')"
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.rp.outputs.release_created }}
@@ -74,8 +77,8 @@ jobs:
 
       - name: Verify release assets
         run: |
-          echo "🔍 Release assets:"
+          echo "Release assets:"
           ls -lh dist/*.tar.gz dist/*.zip 2>/dev/null || true
           echo ""
-          echo "📋 Checksums:"
+          echo "Checksums:"
           cat dist/*_checksums.txt 2>/dev/null || echo "No checksums found"

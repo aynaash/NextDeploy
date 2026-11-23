@@ -29,7 +29,7 @@ func TestScaffold_WritesDeploymentInfra(t *testing.T) {
 
 	// Deployment infra files (not app business logic).
 	for _, rel := range []string{
-		"nextdeploy.yml", "proxy.ts", "lib/env.ts",
+		"nextdeploy.yml", "middleware.ts", "lib/env.ts",
 		".github/workflows/nextdeploy.yml", "package.json", "README.md",
 		"next.config.mjs", "tsconfig.json",
 		"migrations/0001_example.sql",
@@ -104,6 +104,27 @@ func TestScaffold_BYOVariant_ConfiguresHyperdrive(t *testing.T) {
 	}
 }
 
+func TestScaffold_NoneVariant_OmitsDatabase(t *testing.T) {
+	dir := t.TempDir()
+	if _, _, err := Scaffold(Options{AppName: "marketing", DBVariant: DBNone, Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	y := read(t, filepath.Join(dir, "nextdeploy.yml"))
+	for _, forbidden := range []string{"d1:", "hyperdrive:", "migrations_dir:"} {
+		if strings.Contains(y, forbidden) {
+			t.Errorf("none variant should not include %q:\n%s", forbidden, y)
+		}
+	}
+	for _, want := range []string{"provider: cloudflare", `domain: ""`, "r2:", "kv:", "protection:"} {
+		if !strings.Contains(y, want) {
+			t.Errorf("none variant missing %q:\n%s", want, y)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "migrations")); err == nil {
+		t.Error("none variant should not create migrations/ directory")
+	}
+}
+
 func TestScaffold_DefaultsToD1(t *testing.T) {
 	dir := t.TempDir()
 	if _, _, err := Scaffold(Options{AppName: "a", Dir: dir}); err != nil {
@@ -170,13 +191,13 @@ func TestScaffold_Validation(t *testing.T) {
 	}
 }
 
-func TestTemplateFiles_BothVariants(t *testing.T) {
-	for _, v := range []DBVariant{DBD1, DBBYO} {
+func TestTemplateFiles_AllVariants(t *testing.T) {
+	for _, v := range []DBVariant{DBD1, DBBYO, DBNone} {
 		files, err := TemplateFiles(v)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !containsPath(files, "package.json") || !containsPath(files, "nextdeploy.yml") || !containsPath(files, "proxy.ts") {
+		if !containsPath(files, "package.json") || !containsPath(files, "nextdeploy.yml") || !containsPath(files, "middleware.ts") {
 			t.Errorf("variant %s missing core infra files: %v", v, files)
 		}
 	}
@@ -212,8 +233,10 @@ func TestScaffold_VPSPlatform(t *testing.T) {
 	}
 
 	// Should NOT include Cloudflare-specific files.
-	if _, err := os.Stat(filepath.Join(dir, "proxy.ts")); err == nil {
-		t.Error("VPS scaffold should not include proxy.ts")
+	for _, rel := range []string{"middleware.ts", "proxy.ts"} {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err == nil {
+			t.Errorf("VPS scaffold should not include %s", rel)
+		}
 	}
 
 	// Check nextdeploy.yml content
@@ -260,5 +283,98 @@ func TestScaffold_AWSPlatform(t *testing.T) {
 	}
 	if len(written) < 6 {
 		t.Errorf("expected several files written, got %d", len(written))
+	}
+}
+
+func TestScaffold_CloudflareInfraOnlySkipsStarterAppPages(t *testing.T) {
+	dir := t.TempDir()
+	written, _, err := Scaffold(Options{
+		AppName:   "existing-app",
+		Platform:  PlatformCloudflare,
+		DBVariant: DBD1,
+		Dir:       dir,
+		InfraOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("Scaffold InfraOnly: %v", err)
+	}
+	for _, want := range []string{
+		"nextdeploy.yml", "middleware.ts", "lib/env.ts",
+		"migrations/0001_example.sql", ".github/workflows/nextdeploy.yml",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, want)); err != nil {
+			t.Errorf("expected infra file %s: %v", want, err)
+		}
+	}
+	for _, forbidden := range []string{
+		"package.json", "tsconfig.json", "next.config.mjs", "README.md",
+		"app/page.tsx", "app/layout.tsx", "app/app/page.tsx", "app/login/page.tsx",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, forbidden)); err == nil {
+			t.Errorf("InfraOnly must not create %s", forbidden)
+		}
+	}
+	yml := read(t, filepath.Join(dir, "nextdeploy.yml"))
+	if !strings.Contains(yml, `domain: ""`) {
+		t.Errorf("scaffolded Cloudflare nextdeploy.yml missing app.domain field:\n%s", yml)
+	}
+	if len(written) != 5 {
+		t.Errorf("expected 5 infra files written, got %d: %v", len(written), written)
+	}
+}
+
+func TestScaffold_CloudflareNext16UsesProxyAndSrcLayout(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src", "app"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Scaffold(Options{
+		AppName:     "next16-app",
+		Platform:    PlatformCloudflare,
+		DBVariant:   DBNone,
+		Dir:         dir,
+		InfraOnly:   true,
+		NextVersion: "^16.0.0",
+	}); err != nil {
+		t.Fatalf("Scaffold Next 16: %v", err)
+	}
+	proxyPath := filepath.Join(dir, "src", "proxy.ts")
+	body := read(t, proxyPath)
+	if !strings.Contains(body, "export default function proxy(") {
+		t.Errorf("expected Next 16 proxy export in src/proxy.ts:\n%s", body)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "middleware.ts")); err == nil {
+		t.Error("Next 16 src/app project should not create root middleware.ts")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "proxy.ts")); err == nil {
+		t.Error("src/app project should place proxy.ts inside src/, not root")
+	}
+}
+
+func TestScaffold_CloudflareSkipsWhenInterceptorAlreadyExists(t *testing.T) {
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "src", "middleware.ts")
+	if err := os.MkdirAll(filepath.Dir(existing), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(existing, []byte("export function middleware() {}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, skipped, err := Scaffold(Options{
+		AppName:     "has-mw",
+		Platform:    PlatformCloudflare,
+		DBVariant:   DBNone,
+		Dir:         dir,
+		InfraOnly:   true,
+		NextVersion: "^16.0.0",
+	})
+	if err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+	if !containsPath(skipped, existing) {
+		t.Errorf("expected existing %s to be skipped, got %v", existing, skipped)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "proxy.ts")); err == nil {
+		t.Error("must not create conflicting proxy.ts when src/middleware.ts already exists")
 	}
 }

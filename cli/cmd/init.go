@@ -5,6 +5,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// PackageManager  manage type can be either bun pnpm npm or yarn.
 type PackageManager string
 
 func (pm PackageManager) String() string {
@@ -26,6 +27,6 @@ func init() {
 	initCmd.Flags().String("target", "", "Deploy target: vps | aws | cloudflare (skip the interactive prompt)")
 	initCmd.Flags().String("platform", "", "Alias for --target")
 	initCmd.Flags().String("mode", "", "Cloudflare only: scaffold | sniff (skip the interactive prompt)")
-	initCmd.Flags().String("db", "", "Cloudflare scaffold only: d1 | byo (skip the interactive prompt)")
+	initCmd.Flags().String("db", "", "Cloudflare scaffold only: d1 | byo | none (skip the interactive prompt)")
 	rootCmd.AddCommand(initCmd)
 }

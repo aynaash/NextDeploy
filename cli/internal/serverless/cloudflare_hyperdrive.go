@@ -28,8 +28,8 @@ import (
 //     supports hot-swap on those fields. Pesastream §10's "delete+recreate"
 //     concern referred to a now-fixed SDK gap; v6 has Edit/Update.
 //   - Caching/connection_limit drift is also Update-handled.
-func (p *CloudflareProvider) ensureHyperdrive(ctx context.Context, decl config.CFHyperdriveResource) (string, error) {
-	parsed, err := resolveHyperdriveOrigin(decl)
+func (p *CloudflareProvider) ensureHyperdrive(ctx context.Context, cfg *config.NextDeployConfig, decl config.CFHyperdriveResource) (string, error) {
+	parsed, err := resolveHyperdriveOriginWithConfig(decl, cfg)
 	if err != nil {
 		return "", err
 	}
@@ -116,11 +116,26 @@ type hyperdriveOrigin struct {
 // it. decl.Origin (literal) takes precedence over decl.OriginEnv (env var).
 // Errors are descriptive — connection-string mistakes are the #1 user pain.
 func resolveHyperdriveOrigin(decl config.CFHyperdriveResource) (hyperdriveOrigin, error) {
+	return resolveHyperdriveOriginWithConfig(decl, nil)
+}
+
+// resolveHyperdriveOriginWithConfig resolves decl.Origin or decl.OriginEnv,
+// checking os.Getenv first and falling back to NextDeploy's local/managed
+// secrets (.env, secrets.files, Doppler, .nextdeploy/.env) when unset.
+func resolveHyperdriveOriginWithConfig(decl config.CFHyperdriveResource, cfg *config.NextDeployConfig) (hyperdriveOrigin, error) {
 	raw := strings.TrimSpace(decl.Origin)
 	if raw == "" && decl.OriginEnv != "" {
 		raw = strings.TrimSpace(os.Getenv(decl.OriginEnv))
 		if raw == "" {
-			return hyperdriveOrigin{}, fmt.Errorf("hyperdrive %q: env var %s is empty", decl.Name, decl.OriginEnv)
+			if cfg == nil {
+				cfg = &config.NextDeployConfig{}
+			}
+			if localSecrets, err := loadLocalSecrets(cfg); err == nil {
+				raw = strings.TrimSpace(localSecrets[decl.OriginEnv])
+			}
+		}
+		if raw == "" {
+			return hyperdriveOrigin{}, fmt.Errorf("hyperdrive %q: env var %s is empty (export %s or run `nextdeploy secrets set %s <url>`)", decl.Name, decl.OriginEnv, decl.OriginEnv, decl.OriginEnv)
 		}
 	}
 	if raw == "" {

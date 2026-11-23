@@ -19,4 +19,6 @@ var (
 	ErrInvalidProvider       = errors.New("invalid secret provider")
 	ErrProviderNotConfigured = errors.New("provider not configured")
 	ErrConfigNotFound        = errors.New("configuration not found")
+	ErrInvalidSecretName     = errors.New("invalid secret name")
+	ErrReservedSecretName    = errors.New("reserved or system secret name")
 )

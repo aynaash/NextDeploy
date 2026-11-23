@@ -1,3 +1,4 @@
+// Package config manages the deployment config for nextjs web apps
 package config
 
 import (

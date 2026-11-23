@@ -80,7 +80,7 @@ When you open a file to fix bug X:
 
 - [ ] No new file >300 LOC
 - [ ] No new function >40 LOC
-- [ ] No new SDK clients constructed inside business logic
+- [ ] No new SDK clients constructed inside infra logic
 - [ ] No new `strings.Contains(err.Error(), ...)`
 - [ ] No new silent `_ =` on errors
 - [ ] All exported symbols documented

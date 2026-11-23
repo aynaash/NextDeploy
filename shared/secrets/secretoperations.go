@@ -2,17 +2,82 @@ package secrets
 
 import (
 	"crypto/subtle"
-	"encoding/base64"
 	"encoding/json"
-	"maps"
-
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"strings"
 	"time"
 )
 
+const maxSecretNameLen = 256
+
+var reservedSecretNames = map[string]bool{
+	"PATH":                  true,
+	"HOME":                  true,
+	"USER":                  true,
+	"LOGNAME":               true,
+	"SHELL":                 true,
+	"PWD":                   true,
+	"OLDPWD":                true,
+	"TERM":                  true,
+	"HOSTNAME":              true,
+	"HOST":                  true,
+	"PORT":                  true,
+	"IFS":                   true,
+	"LD_PRELOAD":            true,
+	"LD_LIBRARY_PATH":       true,
+	"LD_AUDIT":              true,
+	"DYLD_INSERT_LIBRARIES": true,
+	"DYLD_LIBRARY_PATH":     true,
+	"DYLD_FRAMEWORK_PATH":   true,
+	"NODE_OPTIONS":          true,
+}
+
+var reservedSecretPrefixes = []string{"ND_", "NEXTDEPLOY_", "DOPPLER_"}
+
+// ValidateSecretName enforces POSIX environment identifier rules and blocks
+// reserved system, runtime, and internal NextDeploy secret keys.
+func ValidateSecretName(name string) error {
+	if name == "" || len(name) > maxSecretNameLen {
+		return fmt.Errorf("%w: name length must be between 1 and %d", ErrInvalidSecretName, maxSecretNameLen)
+	}
+	if !isValidSecretIdentifier(name) {
+		return fmt.Errorf("%w: %q must match [A-Za-z_][A-Za-z0-9_]*", ErrInvalidSecretName, name)
+	}
+	upper := strings.ToUpper(name)
+	if reservedSecretNames[upper] {
+		return fmt.Errorf("%w: %q", ErrReservedSecretName, name)
+	}
+	for _, prefix := range reservedSecretPrefixes {
+		if strings.HasPrefix(upper, prefix) {
+			return fmt.Errorf("%w: %q", ErrReservedSecretName, name)
+		}
+	}
+	return nil
+}
+
+func isValidSecretIdentifier(name string) bool {
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		isLetter := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_'
+		isDigit := c >= '0' && c <= '9'
+		if i == 0 && !isLetter {
+			return false
+		}
+		if !isLetter && !isDigit {
+			return false
+		}
+	}
+	return true
+}
+
+// ValidateSecret validates a secret's name and minimum value length.
 func (sm *SecretManager) ValidateSecret(name, value string) error {
+	if err := ValidateSecretName(name); err != nil {
+		return err
+	}
 	if len(value) < 12 {
 		return errors.New("secret must be at least 12 characters long")
 	}
@@ -44,26 +109,22 @@ func (sm *SecretManager) RotateSecrets() error {
 			continue
 		}
 
-		var cipherBytes []byte
-		if decoded, err := base64.StdEncoding.DecodeString(secret.Value); err == nil {
-			cipherBytes = decoded
-		} else {
-			cipherBytes = []byte(secret.Value)
-		}
-
-		decrypted, err := Decrypt(cipherBytes, []byte(oldKey))
+		decrypted, err := decryptSecretValue(secret, []byte(oldKey))
 		if err != nil {
 			SLogs.Warn("Failed to decrypt secret %s: %v", name, err)
 			continue
 		}
 
-		encrypted, err := Encrypt(decrypted, []byte(newKey))
+		encVal, alg, salt, iv, err := encryptSecretValue(decrypted, []byte(newKey))
 		if err != nil {
 			SLogs.Warn("Failed to re-encrypt secret %s: %v", name, err)
 			continue
 		}
 
-		secret.Value = string(encrypted)
+		secret.Value = encVal
+		secret.Alg = alg
+		secret.Salt = salt
+		secret.IV = iv
 		secret.Version++
 		secret.ModifiedAt = time.Now().Unix()
 		sm.keyCache[name] = []byte(newKey)
@@ -92,9 +153,12 @@ func (sm *SecretManager) PrepareSecretsContext() error {
 	return nil
 }
 
+// SetSecret validates the secret name and stores a new secret, optionally
+// encrypting it at rest with per-secret encryption metadata.
 func (sm *SecretManager) SetSecret(name, value string, encrypt bool) error {
-	// TODO: #60 ❗ Enforce naming rules, avoid reserved/system keys.
-	// TODO: #61 🔐 Store encryption metadata (alg version, salt, iv) with each secret.
+	if err := ValidateSecretName(name); err != nil {
+		return err
+	}
 
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -103,11 +167,12 @@ func (sm *SecretManager) SetSecret(name, value string, encrypt bool) error {
 		return ErrSecretAlreadyExists
 	}
 
+	now := time.Now().Unix()
 	secret := &Secret{
 		Value:       value,
 		Version:     1,
-		CreatedAt:   time.Now().Unix(),
-		ModifiedAt:  time.Now().Unix(),
+		CreatedAt:   now,
+		ModifiedAt:  now,
 		IsEncrypted: encrypt,
 	}
 
@@ -116,17 +181,21 @@ func (sm *SecretManager) SetSecret(name, value string, encrypt bool) error {
 		if err != nil {
 			return err
 		}
-		encrypted, err := Encrypt([]byte(value), []byte(key))
+		encVal, alg, salt, iv, err := encryptSecretValue([]byte(value), []byte(key))
 		if err != nil {
 			return err
 		}
-		secret.Value = string(encrypted)
+		secret.Value = encVal
+		secret.Alg = alg
+		secret.Salt = salt
+		secret.IV = iv
 	}
 
 	sm.secrets[name] = secret
 	return nil
 }
 
+// GetSecret retrieves and decrypts a secret by name.
 func (sm *SecretManager) GetSecret(name string) (string, error) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -152,14 +221,7 @@ func (sm *SecretManager) GetSecret(name string) (string, error) {
 		return "", err
 	}
 
-	var cipherBytes []byte
-	if decoded, err := base64.StdEncoding.DecodeString(secret.Value); err == nil {
-		cipherBytes = decoded
-	} else {
-		cipherBytes = []byte(secret.Value)
-	}
-
-	decrypted, err := Decrypt(cipherBytes, []byte(key))
+	decrypted, err := decryptSecretValue(secret, []byte(key))
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrDecryptionFailed, err)
 	}
@@ -222,14 +284,7 @@ func (sm *SecretManager) FlattenSecrets() map[string]string {
 			continue
 		}
 
-		var cipherBytes []byte
-		if decoded, err := base64.StdEncoding.DecodeString(secret.Value); err == nil {
-			cipherBytes = decoded
-		} else {
-			cipherBytes = []byte(secret.Value)
-		}
-
-		decrypted, err := Decrypt(cipherBytes, []byte(key))
+		decrypted, err := decryptSecretValue(secret, []byte(key))
 		if err != nil {
 			SLogs.Warn("Skipping secret %s — decryption failed: %v", name, err)
 			continue

@@ -85,6 +85,13 @@ func toCompilePayload(meta *nextcore.NextCorePayload, _ *config.NextDeployConfig
 			Matchers: convertMiddlewareMatchers(meta.Middleware.Matchers),
 		}
 	}
+	if meta.Proxy != nil {
+		p.Proxy = &nextcompile.MiddlewareConfig{
+			Path:     meta.Proxy.Path,
+			Runtime:  meta.Proxy.Runtime,
+			Matchers: convertMiddlewareMatchers(meta.Proxy.Matchers),
+		}
+	}
 
 	if meta.Proxy != nil {
 		p.Proxy = &nextcompile.MiddlewareConfig{

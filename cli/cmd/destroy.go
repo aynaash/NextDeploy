@@ -49,7 +49,8 @@ var destroyCmd = &cobra.Command{
 		// Env-scoped teardown. Because the environment is the namespace, a
 		// preview teardown can never reach production: a different environment
 		// means a different Worker script and a different R2 bucket entirely.
-		if err := applyEnvironmentOverride(cfg, destroyEnvironment); err != nil {
+		err = applyEnvironmentOverride(cfg, destroyEnvironment)
+		if err != nil {
 			log.Error("%v", err)
 			os.Exit(1)
 		}

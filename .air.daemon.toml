@@ -2,19 +2,19 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  cmd = "go build -o tmp/nextdeployd ./daemon/cmd/nextdeployd && mkdir -p $HOME/.nextdeploy/bin && cp tmp/nextdeployd $HOME/.nextdeploy/bin/nextdeployd"
-  bin = "tmp/nextdeployd"
-  full_bin = "tmp/nextdeployd --foreground=true"
-  include_ext = ["go", "toml", "yml"]
-  exclude_dir = ["assets", "tmp", "vendor", "cli", "docs"]
+  cmd = "mkdir -p \"$HOME/.nextdeploy/bin\" && go build -o tmp/nextdeployd ./daemon/cmd/nextdeployd && cp tmp/nextdeployd \"$HOME/.nextdeploy/bin/.nextdeployd.tmp\" && mv -f \"$HOME/.nextdeploy/bin/.nextdeployd.tmp\" \"$HOME/.nextdeploy/bin/nextdeployd\""
+  entrypoint = ["tmp/nextdeployd", "--foreground=true"]
+  include_ext = ["go", "toml", "yml", "yaml"]
+  exclude_dir = ["tmp", "bin", "dist", "vendor", "cli", "docs", "test-serverless-app", "node_modules"]
   include_dir = ["daemon", "shared"]
-  exclude_regex = ["_test.go"]
-  delay = 1000
+  exclude_regex = ["_test\\.go$"]
+  exclude_unchanged = true
+  delay = 300
   stop_on_error = true
   log = "air-daemon.log"
 
 [log]
-  time = false
+  time = true
 
 [color]
   main = "magenta"

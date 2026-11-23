@@ -121,3 +121,25 @@ func TestSmokeTargets_PrefersRootPlusFewStatics(t *testing.T) {
 		}
 	}
 }
+
+func TestSmokeVerify_ConsidersAuthGuarded401Healthy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(server.Close)
+
+	cfg := &config.NextDeployConfig{}
+	cfg.App.Domain = config.DomainConfig{Name: server.URL}
+
+	log := shared.PackageLogger("test", "")
+	res, err := SmokeVerify(context.Background(), log, cfg, nil, SmokeOpts{
+		MaxAttempts: 1, Timeout: 2 * time.Second, Delay: 10 * time.Millisecond,
+		FailOnError: true,
+	})
+	if err != nil {
+		t.Fatalf("expected 401 to pass smoke check, got err: %v", err)
+	}
+	if res.Passed != 1 || res.Failed != 0 {
+		t.Errorf("expected 401 to count as passed, got %+v", res.Probed)
+	}
+}

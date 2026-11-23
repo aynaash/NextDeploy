@@ -1,7 +1,9 @@
 # NextDeploy config for __APP_NAME__ — Cloudflare Workers + R2 + BYO Postgres
-# (reached through Hyperdrive). Set DATABASE_URL as a secret.
+# (reached through Hyperdrive). Set DATABASE_URL via `nextdeploy secrets set DATABASE_URL <url>`
+# or export DATABASE_URL in your shell before running `nextdeploy apply`.
 app:
   name: __APP_NAME__
+  domain: "" # optional custom domain, e.g. example.com — attached automatically on ship
 
 serverless:
   provider: cloudflare

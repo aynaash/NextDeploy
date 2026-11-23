@@ -3,9 +3,9 @@
 // embedded templates. It powers `nextdeploy init` when the user opts to scaffold
 // a new app rather than deploy their existing one.
 //
-// The DB layer is pluggable: "d1" (Cloudflare native SQLite) or "byo"
-// (bring-your-own Postgres via Hyperdrive). A db-<variant> overlay is written
-// on top of the shared base.
+// The DB layer is pluggable: "d1" (Cloudflare native SQLite), "byo"
+// (bring-your-own Postgres via Hyperdrive), or "none" (no database).
+// A db-<variant> overlay is written on top of the shared base.
 package scaffold
 
 import (
@@ -27,8 +27,9 @@ var tmplFS embed.FS
 type DBVariant string
 
 const (
-	DBD1  DBVariant = "d1"
-	DBBYO DBVariant = "byo" // bring-your-own Postgres via Hyperdrive
+	DBD1   DBVariant = "d1"
+	DBBYO  DBVariant = "byo"  // bring-your-own Postgres via Hyperdrive
+	DBNone DBVariant = "none" // no database
 )
 
 // Platform selects the deployment target platform.
@@ -47,6 +48,15 @@ type Options struct {
 	DBVariant       DBVariant
 	EnableGoSidecar bool
 	Dir             string // target directory (created if missing)
+	// InfraOnly skips starter app pages/package.json/tsconfig/README and writes
+	// only deployment infra (nextdeploy.yml, middleware.ts/proxy.ts, lib/env.ts,
+	// migrations, CI). Used when scaffolding Cloudflare infra into an existing
+	// Next.js app so root app/ pages never shadow an existing src/app/ directory.
+	InfraOnly bool
+	// NextVersion is the detected Next.js version in package.json (e.g. "^15.1.0",
+	// "^16.0.0"). Next 16+ uses proxy.ts; Next 15 and earlier (including the
+	// default starter) use middleware.ts.
+	NextVersion string
 }
 
 // placeholder tokens replaced in every template file.
@@ -88,16 +98,20 @@ func Scaffold(opts Options) (written, skipped []string, err error) {
 		if variant == "" {
 			variant = DBD1
 		}
-		if variant != DBD1 && variant != DBBYO {
-			return nil, nil, fmt.Errorf("unknown db variant %q (want d1 or byo)", variant)
+		if variant != DBD1 && variant != DBBYO && variant != DBNone {
+			return nil, nil, fmt.Errorf("unknown db variant %q (want d1, byo, or none)", variant)
 		}
-		roots = []string{"templates/base", "templates/platform-cloudflare", "templates/db-" + string(variant)}
+		if opts.InfraOnly {
+			roots = []string{"templates/platform-cloudflare", "templates/db-" + string(variant)}
+		} else {
+			roots = []string{"templates/base", "templates/platform-cloudflare", "templates/db-" + string(variant)}
+		}
 	default:
 		return nil, nil, fmt.Errorf("unknown platform %q (want cloudflare, vps, or aws)", platform)
 	}
 
 	for _, root := range roots {
-		w, s, err := copyTree(root, opts.Dir, opts.AppName, platformName, platformSlug)
+		w, s, err := copyTree(root, opts.Dir, opts.AppName, platformName, platformSlug, opts.InfraOnly, opts.NextVersion)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -133,7 +147,10 @@ func Scaffold(opts Options) (written, skipped []string, err error) {
 	return written, skipped, nil
 }
 
-func copyTree(root, destDir, appName, platformName, platformSlug string) (written, skipped []string, err error) {
+func copyTree(root, destDir, appName, platformName, platformSlug string, infraOnly bool, nextVersion string) (written, skipped []string, err error) {
+	useProxy := usesProxyConvention(nextVersion)
+	useSrcDir := infraOnly && hasSrcAppLayout(destDir)
+
 	walkErr := fs.WalkDir(tmplFS, root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -145,7 +162,32 @@ func copyTree(root, destDir, appName, platformName, platformSlug string) (writte
 		if err != nil {
 			return err
 		}
-		target := filepath.Join(destDir, rel)
+		slashRel := filepath.ToSlash(rel)
+		if infraOnly && (strings.HasPrefix(slashRel, "app/") || slashRel == "README.md") {
+			return nil
+		}
+
+		targetRel := rel
+		isInterceptor := slashRel == "middleware.ts"
+		if isInterceptor {
+			// If the project already has any Next.js middleware/proxy file, keep it
+			// rather than introducing a conflicting sibling.
+			if existing := findExistingInterceptor(destDir); existing != "" {
+				skipped = append(skipped, existing)
+				return nil
+			}
+			name := "middleware.ts"
+			if useProxy {
+				name = "proxy.ts"
+			}
+			if useSrcDir {
+				targetRel = filepath.Join("src", name)
+			} else {
+				targetRel = name
+			}
+		}
+
+		target := filepath.Join(destDir, targetRel)
 
 		if _, statErr := os.Stat(target); statErr == nil {
 			skipped = append(skipped, target)
@@ -159,6 +201,9 @@ func copyTree(root, destDir, appName, platformName, platformSlug string) (writte
 		out := strings.ReplaceAll(string(data), appNameToken, appName)
 		out = strings.ReplaceAll(out, "__PLATFORM_NAME__", platformName)
 		out = strings.ReplaceAll(out, "__PLATFORM_SLUG__", platformSlug)
+		if isInterceptor && useProxy {
+			out = renderAsProxyTS(out)
+		}
 
 		if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 			return err
@@ -170,6 +215,69 @@ func copyTree(root, destDir, appName, platformName, platformSlug string) (writte
 		return nil
 	})
 	return written, skipped, walkErr
+}
+
+// usesProxyConvention reports whether the target Next.js version uses proxy.ts
+// (Next.js 16+) instead of middleware.ts (Next.js 15 and earlier).
+func usesProxyConvention(nextVersion string) bool {
+	v := strings.TrimSpace(strings.ToLower(nextVersion))
+	if v == "" {
+		return false // default scaffold ships Next.js 15
+	}
+	if v == "latest" || v == "canary" || strings.HasPrefix(v, "canary") {
+		return true
+	}
+	// Extract the first integer major version from strings like "^16.0.0", ">=16", "v16.1.0".
+	major := 0
+	foundDigit := false
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		if c >= '0' && c <= '9' {
+			major = major*10 + int(c-'0')
+			foundDigit = true
+		} else if foundDigit {
+			break
+		}
+	}
+	return foundDigit && major >= 16
+}
+
+// hasSrcAppLayout reports whether dir uses a src/app or src/pages layout
+// without a root app/ or pages/ directory.
+func hasSrcAppLayout(dir string) bool {
+	for _, rootDir := range []string{"app", "pages"} {
+		if info, err := os.Stat(filepath.Join(dir, rootDir)); err == nil && info.IsDir() {
+			return false
+		}
+	}
+	for _, srcDir := range []string{filepath.Join("src", "app"), filepath.Join("src", "pages")} {
+		if info, err := os.Stat(filepath.Join(dir, srcDir)); err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+func findExistingInterceptor(dir string) string {
+	candidates := []string{
+		"middleware.ts", "middleware.js",
+		filepath.Join("src", "middleware.ts"), filepath.Join("src", "middleware.js"),
+		"proxy.ts", "proxy.js",
+		filepath.Join("src", "proxy.ts"), filepath.Join("src", "proxy.js"),
+	}
+	for _, rel := range candidates {
+		p := filepath.Join(dir, rel)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+func renderAsProxyTS(middlewareSrc string) string {
+	out := strings.Replace(middlewareSrc, "// middleware.ts — Next.js middleware", "// proxy.ts — Next.js 16+ proxy", 1)
+	out = strings.Replace(out, "export function middleware(", "export default function proxy(", 1)
+	return out
 }
 
 // TemplateFiles returns the relative paths shipped for a given variant (base +

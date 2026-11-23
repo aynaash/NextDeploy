@@ -1,3 +1,4 @@
+// Package logs aggregates and formats log streams from multiple sources.
 package logs
 
 import (
@@ -8,8 +9,10 @@ import (
 	"time"
 )
 
+// LogSource identifies the origin of a log entry.
 type LogSource string
 
+// Supported log sources.
 const (
 	SourceApp    LogSource = "APP"
 	SourceAudit  LogSource = "AUDIT"
@@ -17,19 +20,28 @@ const (
 	SourceDaemon LogSource = "DAEMON"
 )
 
-var sourceColors = map[LogSource]string{
-	SourceApp:    "\033[38;5;12m", // Blue
-	SourceAudit:  "\033[38;5;13m", // Magenta
-	SourceWAF:    "\033[38;5;9m",  // Red
-	SourceDaemon: "\033[38;5;14m", // Cyan
-}
+var (
+	sourceColors = map[LogSource]string{
+		SourceApp:    "\033[38;5;12m", // Blue
+		SourceAudit:  "\033[38;5;13m", // Magenta
+		SourceWAF:    "\033[38;5;9m",  // Red
+		SourceDaemon: "\033[38;5;14m", // Cyan
+	}
 
+	// Matches "Mar 05 19:39:47 hostname process[pid]: ".
+	journalMetadataRe  = regexp.MustCompile(`^[A-Z][a-z]{2}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\S+\s+[^\s\[]+(?:\[\d+\])?: `)
+	urlRe              = regexp.MustCompile(`https?://\S+`)
+	auditCommandTypeRe = regexp.MustCompile(`"CommandType":"([^"]+)"`)
+)
+
+// LogAggregator formats and writes log lines from multiple sources.
 type LogAggregator struct {
 	Out           io.Writer
 	AppName       string
 	ShowTimestamp bool
 }
 
+// NewAggregator returns a LogAggregator that writes formatted logs to out.
 func NewAggregator(out io.Writer, appName string) *LogAggregator {
 	return &LogAggregator{
 		Out:           out,
@@ -38,18 +50,21 @@ func NewAggregator(out io.Writer, appName string) *LogAggregator {
 	}
 }
 
+// WriteSource formats and writes each non-empty line in p tagged with source.
 func (a *LogAggregator) WriteSource(source LogSource, p []byte) (n int, err error) {
 	lines := strings.SplitSeq(string(p), "\n")
 	for line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		a.printLine(source, line)
+		if err := a.printLine(source, line); err != nil {
+			return 0, err
+		}
 	}
 	return len(p), nil
 }
 
-func (a *LogAggregator) printLine(source LogSource, content string) {
+func (a *LogAggregator) printLine(source LogSource, content string) error {
 	timestamp := ""
 	if a.ShowTimestamp {
 		timestamp = fmt.Sprintf("\033[90m%s\033[0m ", time.Now().Format("15:04:05"))
@@ -70,13 +85,12 @@ func (a *LogAggregator) printLine(source LogSource, content string) {
 		content = formatAuditJSON(content)
 	}
 
-	fmt.Fprintf(a.Out, "%s%s %s\n", timestamp, sourceLabel, content)
+	_, err := fmt.Fprintf(a.Out, "%s%s %s\n", timestamp, sourceLabel, content)
+	return err
 }
 
 func stripJournalMetadata(line string) string {
-	// Matches "Mar 05 19:39:47 hostname process[pid]: "
-	re := regexp.MustCompile(`^[A-Z][a-z]{2}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+[^\s]+\s+[^\s\[]+(?:\[\d+\])?: `)
-	return re.ReplaceAllString(line, "")
+	return journalMetadataRe.ReplaceAllString(line, "")
 }
 
 func colorizeNextJS(line string) string {
@@ -89,7 +103,6 @@ func colorizeNextJS(line string) string {
 	line = strings.ReplaceAll(line, "- Network:", "\033[90m- Network:\033[0m")
 
 	// URLs
-	urlRe := regexp.MustCompile(`https?://[^\s]+`)
 	line = urlRe.ReplaceAllStringFunc(line, func(match string) string {
 		return fmt.Sprintf("\033[4;34m%s\033[0m", match)
 	})
@@ -100,15 +113,12 @@ func colorizeNextJS(line string) string {
 func formatAuditJSON(line string) string {
 	// Minimal JSON extract for audit logs
 	if strings.Contains(line, `"CommandType"`) {
-		re := regexp.MustCompile(`"CommandType":"([^"]+)"`)
-		match := re.FindStringSubmatch(line)
+		match := auditCommandTypeRe.FindStringSubmatch(line)
 		if len(match) > 1 {
 			cmdType := match[1]
-			res := "SUCCESS"
+			res := "\033[32mSUCCESS\033[0m"
 			if strings.Contains(line, `"Result":"false"`) {
 				res = "\033[31mFAILED\033[0m"
-			} else {
-				res = "\033[32mSUCCESS\033[0m"
 			}
 			return fmt.Sprintf("Command: \033[1m%s\033[0m -> %s", cmdType, res)
 		}
@@ -122,6 +132,7 @@ type SourceWriter struct {
 	source LogSource
 }
 
+// GetWriter returns an io.Writer that tags all writes with source.
 func (a *LogAggregator) GetWriter(source LogSource) io.Writer {
 	return &SourceWriter{agg: a, source: source}
 }

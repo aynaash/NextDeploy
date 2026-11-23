@@ -1,6 +1,7 @@
 # NextDeploy config for __APP_NAME__ — Cloudflare Workers + R2 + D1.
 app:
   name: __APP_NAME__
+  domain: "" # optional custom domain, e.g. example.com — attached automatically on ship
 
 serverless:
   provider: cloudflare

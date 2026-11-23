@@ -191,24 +191,15 @@ app:
   #     provider: namecheap   # namecheap | cloudflare | other
   #     dns: manual           # auto (provider API) | manual (print records)
   #     zone: example.com
-  domain: app.example.com # Public domain for your app
+  domain: "" # optional custom domain, e.g. example.com — attached automatically on ship
   port: 3000 # [REQUIRED] Internal port your app listens on (used locally; Workers ignore this)
 
 # -----
-# CLOUD PROVIDER — CLOUDFLARE
-# Credentials are read from env vars (recommended) or the credstore.
-# Required env vars:
-#   CLOUDFLARE_API_TOKEN  — management plane (Workers, DNS, R2 bucket lifecycle)
-#   CLOUDFLARE_ACCOUNT_ID — can also be set via account_id below
-#   R2_ACCESS_KEY_ID      — R2 object uploads (S3-compatible)
-#   R2_SECRET_ACCESS_KEY  — R2 object uploads (S3-compatible)
-# -----
-CloudProvider:
-  name: cloudflare
-  account_id: "YOUR_CLOUDFLARE_ACCOUNT_ID" # Fallback if CLOUDFLARE_ACCOUNT_ID env var is unset
-
-# -----
 # SERVERLESS CONFIGURATION (Cloudflare Workers)
+# Credentials are read from env vars (recommended) or ~/.nextdeploy/credstore
+# (` + "`nextdeploy creds set --provider cloudflare`" + `):
+#   CLOUDFLARE_API_TOKEN  — required (account ID auto-discovers when unset)
+#   CLOUDFLARE_ACCOUNT_ID — optional
 # -----
 serverless:
   provider: cloudflare
@@ -224,8 +215,8 @@ serverless:
     # bindings:
     #   r2:
     #     - name: ASSETS
-    # Full schema: bindings (r2, kv, hyperdrive, queues, vectorize, ai, durable_objects),
-    # migrations, and resources (hyperdrive, queues, vectorize, ai_gateway, dns, zone_settings).
+    # Full schema: bindings (r2, d1, kv, hyperdrive, queues, vectorize, ai, durable_objects, secrets_store),
+    # migrations, protection, and resources (d1, kv, hyperdrive, queues, vectorize, ai_gateway, dns, zone_settings).
 `
 
 func GetSampleConfigTemplate(targetType string) string {

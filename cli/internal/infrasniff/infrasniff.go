@@ -49,6 +49,12 @@ type Result struct {
 	// bindings are authoritative (real names + IDs) and should be preferred
 	// over heuristic signals when prefilling nextdeploy.yml.
 	Wrangler *WranglerConfig
+	// MigrationsDir is an existing SQL migrations directory found on disk
+	// (e.g. "migrations" or "drizzle"). Empty when none exists so render
+	// doesn't emit a non-existent migrations_dir that breaks `plan`/`apply`.
+	MigrationsDir string
+	// Warnings collects non-fatal diagnostics (e.g. malformed wrangler config).
+	Warnings []string
 }
 
 // Resources returns the unique detected resources, sorted.
@@ -184,7 +190,11 @@ func Sniff(projectDir string) (*Result, error) {
 	}
 
 	// 2. wrangler config — authoritative declared bindings.
-	if w, err := readWrangler(projectDir); err == nil && w != nil {
+	wranglerVars := map[string]bool{}
+	w, wErr := readWrangler(projectDir)
+	if wErr != nil {
+		res.Warnings = append(res.Warnings, "failed to parse wrangler config: "+wErr.Error())
+	} else if w != nil {
 		res.Wrangler = w
 		for _, b := range w.D1 {
 			addSignal(ResD1, "wrangler d1_databases["+b.Name+"]")
@@ -206,6 +216,18 @@ func Sniff(projectDir string) (*Result, error) {
 		}
 		if w.AI != "" {
 			addSignal(ResAI, "wrangler ai["+w.AI+"]")
+		}
+		for _, v := range w.Vars {
+			wranglerVars[v] = true
+		}
+	}
+
+	// Detect an existing local migrations directory so D1 resource rendering
+	// only emits migrations_dir when the directory actually exists on disk.
+	for _, candidate := range []string{"migrations", "drizzle"} {
+		if info, err := os.Stat(filepath.Join(projectDir, candidate)); err == nil && info.IsDir() {
+			res.MigrationsDir = candidate
+			break
 		}
 	}
 
@@ -243,7 +265,7 @@ func Sniff(projectDir string) (*Result, error) {
 		}
 		for _, m := range envRef.FindAllStringSubmatch(src, -1) {
 			name := m[1]
-			if strings.HasPrefix(name, "NEXT_PUBLIC_") || bindingNames[name] || isInfraEnvVar(name) {
+			if strings.HasPrefix(name, "NEXT_PUBLIC_") || bindingNames[name] || isInfraEnvVar(name) || wranglerVars[name] {
 				continue
 			}
 			secretSet[name] = true

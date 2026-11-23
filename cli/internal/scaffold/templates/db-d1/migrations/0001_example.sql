@@ -1,6 +1,11 @@
--- Your D1 schema goes here. `nextdeploy ship` applies each *.sql in this dir
--- once, in filename order (tracked in _nextdeploy_migrations). Bring whatever
--- tooling you like (drizzle-kit, raw SQL, etc.) — NextDeploy just applies it.
+-- Your D1 schema goes here. `nextdeploy ship` / `nextdeploy apply` runs each
+-- *.sql in this dir once, in filename order (tracked in _nextdeploy_migrations).
+-- Bring whatever tooling you like (drizzle-kit, raw SQL, etc.).
+--
+-- IMPORTANT: On your first `nextdeploy apply`, this file is recorded as applied
+-- in `_nextdeploy_migrations`. Either edit/replace this file BEFORE your first
+-- `apply`, or add new numbered files (e.g. `0002_init.sql`) afterward — edits to
+-- an already-recorded migration file will not be re-run.
 --
 -- Example:
 -- CREATE TABLE IF NOT EXISTS items (

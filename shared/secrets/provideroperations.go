@@ -1,10 +1,10 @@
 package secrets
 
 import (
-	"encoding/base64"
 	"fmt"
 )
 
+// MigrateToProvider exports all secrets into the named SecretProvider.
 func (sm *SecretManager) MigrateToProvider(providerName string) error {
 	if sm.manager == nil {
 		return ErrProviderNotConfigured
@@ -23,13 +23,7 @@ func (sm *SecretManager) MigrateToProvider(providerName string) error {
 				SLogs.Warn("Failed to get key for %s during migration: %v", name, err)
 				continue
 			}
-			var cipherBytes []byte
-			if decoded, err := base64.StdEncoding.DecodeString(value); err == nil {
-				cipherBytes = decoded
-			} else {
-				cipherBytes = []byte(value)
-			}
-			decrypted, err := Decrypt(cipherBytes, []byte(key))
+			decrypted, err := decryptSecretValue(secret, []byte(key))
 			if err != nil {
 				SLogs.Warn("Failed to decrypt %s during migration: %v", name, err)
 				continue

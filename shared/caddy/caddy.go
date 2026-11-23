@@ -1,8 +1,8 @@
+// Package caddy is the web server and reverse proxy configuration tool
 package caddy
 
 import (
 	"context"
-
 	"encoding/json"
 	"fmt"
 	"io"
@@ -321,7 +321,7 @@ func (cm *CaddyManager) LoadConfig(filePath string) (*Config, error) {
 
 func (cm *CaddyManager) SaveConfig(config *Config, filePath string) error {
 	tmp := filePath + ".tmp"
-	if err := os.WriteFile(tmp, []byte(config.Content), 0600); err != nil {
+	if err := os.WriteFile(tmp, []byte(config.Content), 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, filePath)

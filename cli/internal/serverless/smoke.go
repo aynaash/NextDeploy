@@ -82,7 +82,7 @@ func SmokeVerify(
 	for _, u := range urls {
 		outcome := probeOnce(ctx, client, u, opts)
 		result.Probed = append(result.Probed, outcome)
-		if outcome.StatusCode >= 200 && outcome.StatusCode < 400 {
+		if isHealthyStatus(outcome.StatusCode) {
 			result.Passed++
 			log.Info("  ✓ %s → %d (%s, %d attempt(s))", u, outcome.StatusCode, outcome.Duration.Round(time.Millisecond), outcome.Attempts)
 			continue
@@ -97,9 +97,16 @@ func SmokeVerify(
 
 	log.Info("Smoke verify: %d passed, %d failed", result.Passed, result.Failed)
 	if opts.FailOnError && result.Failed > 0 {
-		return result, fmt.Errorf("smoke verify failed: %d of %d probes did not return 2xx/3xx", result.Failed, len(urls))
+		return result, fmt.Errorf("smoke verify failed: %d of %d probes did not return healthy status", result.Failed, len(urls))
 	}
 	return result, nil
+}
+
+// isHealthyStatus defines status codes indicating the application is live.
+// 2xx and 3xx are healthy. 401 (Unauthorized) and 403 (Forbidden) also confirm
+// that the Worker and edge auth middleware are active and protecting routes.
+func isHealthyStatus(code int) bool {
+	return (code >= 200 && code < 400) || code == http.StatusUnauthorized || code == http.StatusForbidden
 }
 
 // smokeTargets builds the probe list. Prefers cfg.App.Domain.Name (root)
@@ -181,7 +188,7 @@ func probeOnce(ctx context.Context, client *http.Client, url string, opts SmokeO
 		_ = resp.Body.Close()
 		out.StatusCode = resp.StatusCode
 		out.Err = ""
-		if resp.StatusCode < 400 {
+		if isHealthyStatus(resp.StatusCode) {
 			break
 		}
 		if attempt < opts.MaxAttempts {

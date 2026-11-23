@@ -1,6 +1,8 @@
 package serverless
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -69,6 +71,25 @@ func TestResolveHyperdriveOrigin_OriginEnvFallback(t *testing.T) {
 	}
 	if got.host != "h" || got.password != "p" {
 		t.Errorf("env fallback failed: got %+v", got)
+	}
+}
+
+func TestResolveHyperdriveOrigin_DotenvFallbackWhenShellEnvEmpty(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("HYPERDRIVE_DOTENV_URL", "")
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("HYPERDRIVE_DOTENV_URL=postgres://u:p@dotenv.host:5432/mydb\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveHyperdriveOrigin(config.CFHyperdriveResource{
+		Name:      "primary",
+		OriginEnv: "HYPERDRIVE_DOTENV_URL",
+	})
+	if err != nil {
+		t.Fatalf("expected dotenv fallback to resolve origin: %v", err)
+	}
+	if got.host != "dotenv.host" || got.database != "mydb" {
+		t.Errorf("unexpected parsed origin: %+v", got)
 	}
 }
 

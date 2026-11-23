@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
@@ -128,8 +129,55 @@ func GenerateKeyPair() (*KeyPair, error) {
 	}, nil
 }
 
+// RunCryptoHealthChecks verifies ECDH key exchange, AES-GCM round-trip, and
+// Ed25519 signing/verification using ephemeral keys.
 func RunCryptoHealthChecks() error {
-	// TODO:Test #62 ECDH key exchange
+	kpA, err := GenerateKeyPair()
+	if err != nil {
+		return fmt.Errorf("crypto health check key pair A: %w", err)
+	}
+	kpB, err := GenerateKeyPair()
+	if err != nil {
+		return fmt.Errorf("crypto health check key pair B: %w", err)
+	}
+	sharedA, err := DeriveSharedKey(kpA.ECDHPrivate, kpB.ECDHPublic)
+	if err != nil {
+		return fmt.Errorf("crypto health check derive A->B: %w", err)
+	}
+	sharedB, err := DeriveSharedKey(kpB.ECDHPrivate, kpA.ECDHPublic)
+	if err != nil {
+		return fmt.Errorf("crypto health check derive B->A: %w", err)
+	}
+	if len(sharedA) != SharedKeySize || !bytes.Equal(sharedA, sharedB) {
+		return errors.New("crypto health check failed: ECDH shared keys do not match")
+	}
+	return verifyCryptoProbe(kpA, sharedA, sharedB)
+}
+
+func verifyCryptoProbe(kp *KeyPair, encKey, decKey []byte) error {
+	probe := []byte("nextdeploy-ecdh-healthcheck")
+	ct, nonce, err := Encrypt(probe, encKey)
+	if err != nil {
+		return fmt.Errorf("crypto health check encrypt: %w", err)
+	}
+	pt, err := Decrypt(ct, decKey, nonce)
+	if err != nil {
+		return fmt.Errorf("crypto health check decrypt: %w", err)
+	}
+	if !bytes.Equal(pt, probe) {
+		return errors.New("crypto health check failed: decrypted payload mismatch")
+	}
+	sig, err := Sign(probe, kp.SignPrivate)
+	if err != nil {
+		return fmt.Errorf("crypto health check sign: %w", err)
+	}
+	ok, err := Verify(probe, sig, kp.SignPublic)
+	if err != nil {
+		return fmt.Errorf("crypto health check verify: %w", err)
+	}
+	if !ok {
+		return errors.New("crypto health check failed: signature verification returned false")
+	}
 	return nil
 }
 
