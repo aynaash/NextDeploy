@@ -16,7 +16,14 @@ related:
 
 ## 1. Export Cloudflare Credentials
 
-Create a Cloudflare API token with **Workers Scripts (Edit)**, **R2 Storage (Edit)**, **Account Settings (Read)**, **Zone DNS (Edit)**, and optionally **Zone Cache Purge (Purge)**, then export:
+Create a Cloudflare **User API Token** with:
+- **Account → Workers Scripts (Edit)**
+- **Account → Workers R2 Storage (Edit)**
+- **Account → Account Settings (Read)**
+- **Zone → DNS (Edit)** & **Zone → Zone (Read)**
+- **Zone → Cache Purge (Purge)** *(required for automatic edge cache invalidation)*
+
+For the complete guide and troubleshooting, see [Cloudflare API Token Permissions](/docs/cloudflare/tokens).
 
 ```bash
 export CLOUDFLARE_ACCOUNT_ID="your-account-id"

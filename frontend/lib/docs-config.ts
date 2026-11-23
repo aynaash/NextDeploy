@@ -56,6 +56,7 @@ export const docCategories: DocCategory[] = [
         items: [
             { title: 'Overview', href: '/docs/cloudflare/overview' },
             { title: 'Quickstart', href: '/docs/cloudflare/quickstart' },
+            { title: 'API Token Permissions', href: '/docs/cloudflare/tokens' },
             { title: 'Workers Runtime', href: '/docs/cloudflare/workers' },
             { title: 'Bindings', href: '/docs/cloudflare/bindings' },
             { title: 'R2', href: '/docs/cloudflare/r2' },

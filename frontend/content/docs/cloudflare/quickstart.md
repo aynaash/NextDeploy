@@ -17,12 +17,15 @@ related:
 ## Prerequisites
 
 1. A Next.js app with `output: 'standalone'` in `next.config.mjs`.
-2. A Cloudflare account ID and an API token with:
+2. A Cloudflare account ID and an API token (see the full [Cloudflare API Token Permissions](/docs/cloudflare/tokens) guide):
    - **Account → Workers Scripts: Edit**
    - **Account → Workers R2 Storage: Edit**
    - **Account → Workers KV Storage / D1 / Queues / Hyperdrive: Edit** *(for any bindings you declare)*
    - **Zone → DNS: Edit** & **Zone → Zone: Read** *(for custom domains)*
-   - **Zone → Cache Purge: Purge** *(optional, for automatic edge cache purge)*
+   - **Zone → Cache Purge: Purge** *(required for automatic edge cache purge)*
+
+> [!TIP]
+> Ensure you create a **User API Token** (`My Profile → API Tokens`) rather than an Account API Token to avoid `401 Unauthorized` errors during cache purge. See [API Token Permissions](/docs/cloudflare/tokens) for step-by-step setup.
 
 ## 1. Export Credentials
 
