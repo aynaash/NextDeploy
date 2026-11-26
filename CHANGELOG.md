@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/aynaash/NextDeploy/compare/v1.2.0...v1.2.1) (2026-11-26)
+
+### Bug Fixes
+
+* **cloudflare:** resolve `workerd` `node:*` built-ins and VFS `fs`/`fs/promises` shims in Turbopack `Context.externalRequire` (`__ndDynRequire` / `builtin_registry.mjs`)
+* **cloudflare:** package Next.js 16 prerendered `.segments/**/*.segment.rsc` files to R2, load `.meta` `segmentPaths` in `CloudflareCacheHandler`, round-trip `segmentData` `Map` + `rscData` `Buffer` across R2 JSON cache, and guard stale legacy `{}` entries
+
 ## [1.2.0](https://github.com/aynaash/NextDeploy/compare/v1.1.1...v1.2.0) (2026-11-26)
 
 ### Features
