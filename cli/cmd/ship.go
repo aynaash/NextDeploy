@@ -64,6 +64,12 @@ var shipCmd = &cobra.Command{
 		if shipEnvironment != "" {
 			log.Info("Deploying to environment: %s", cfg.App.Environment)
 		}
+		if strings.EqualFold(cfg.ResolveTargetType(""), "vps") {
+			if err := config.ValidateServers(cfg.Servers); err != nil {
+				log.Error("%v", err)
+				os.Exit(1)
+			}
+		}
 
 		if git.IsDirty() {
 			log.Warn(" Git directory is dirty (uncommitted changes).")

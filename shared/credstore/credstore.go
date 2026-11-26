@@ -27,7 +27,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strings"
 
 	"github.com/zalando/go-keyring"
 
@@ -40,6 +42,8 @@ const (
 	dirName        = "credstore"
 	masterFileName = "master.key"
 )
+
+var validProviderName = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
 // ErrNotFound signals that no entry exists for the requested provider.
 var ErrNotFound = errors.New("credstore: entry not found")
@@ -156,6 +160,9 @@ func credstoreDir() (string, error) {
 func entryPath(provider string) (string, error) {
 	if provider == "" {
 		return "", errors.New("provider is required")
+	}
+	if !validProviderName.MatchString(provider) || strings.Contains(provider, "..") || provider == "." {
+		return "", fmt.Errorf("invalid provider name %q: must match ^[a-zA-Z0-9._-]+$ without path traversal", provider)
 	}
 	dir, err := credstoreDir()
 	if err != nil {

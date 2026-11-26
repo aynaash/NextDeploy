@@ -24,6 +24,8 @@ func LoadConfig() (*NextDeployConfig, error) {
 		return nil, err
 	}
 
+	resolveServers(&cfg)
+
 	fmt.Printf("%s Configuration loaded successfully\n", EmojiSuccess)
 	return &cfg, nil
 }

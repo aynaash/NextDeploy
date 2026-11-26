@@ -19,6 +19,7 @@ const (
 
 	CaddyLogDir      = "/var/log/caddy"
 	CaddyFragmentDir = "/etc/caddy/nextdeploy.d"
+	DaemonLogDir     = "/var/log/nextdeployd"
 
 	// BinDir is where systemd ExecStart lines look for runtimes. Units do not
 	// inherit a login PATH, so resolveBinary hard-codes this prefix — every
@@ -330,6 +331,13 @@ func hardeningSteps(pm PackageManager) []Step {
 			Done: func(h Host) bool { return h.Exists("/etc/logrotate.d/caddy") },
 			Apply: func(h Host) error {
 				return h.WriteFile("/etc/logrotate.d/caddy", []byte(logrotateCaddy), 0o644)
+			},
+		},
+		{
+			Name: "Install logrotate policy for " + DaemonLogDir,
+			Done: func(h Host) bool { return h.Exists("/etc/logrotate.d/nextdeployd") },
+			Apply: func(h Host) error {
+				return h.WriteFile("/etc/logrotate.d/nextdeployd", []byte(logrotateNextdeployd), 0o644)
 			},
 		},
 		{

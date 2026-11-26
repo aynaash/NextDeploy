@@ -24,6 +24,25 @@ const logrotateCaddy = `/var/log/caddy/*.log {
 }
 `
 
+// logrotateNextdeployd rotates /var/log/nextdeployd/*.log (audit.log and
+// nextdeployd.log).
+//
+// copytruncate because nextdeployd holds nextdeployd.log open for its lifetime
+// (O_APPEND) and does not reopen log files on SIGHUP: renaming the inode
+// without copytruncate would leave the daemon writing to an unlinked file until
+// restart, while restarting during rotation could interrupt an active deploy.
+const logrotateNextdeployd = `/var/log/nextdeployd/*.log {
+  daily
+  rotate 14
+  compress
+  delaycompress
+  missingok
+  notifempty
+  copytruncate
+  su root nextdeploy
+}
+`
+
 // filterCaddyAuth bans on repeated 401/403 in Caddy's JSON access log.
 //
 // The lookaheads require both fields on the line without assuming remote_ip

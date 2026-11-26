@@ -302,21 +302,29 @@ func resolveTargetServers() ([]config.ServerConfig, error) {
 		return nil, fmt.Errorf("cannot combine --all with --server; choose one target or all targets")
 	}
 
-	if prepareAllServers {
-		return cfg.Servers, nil
-	}
-
-	if prepareServerName != "" {
+	var selected []config.ServerConfig
+	switch {
+	case prepareAllServers:
+		selected = cfg.Servers
+	case prepareServerName != "":
 		for _, serverCfg := range cfg.Servers {
 			if strings.EqualFold(strings.TrimSpace(serverCfg.Name), strings.TrimSpace(prepareServerName)) ||
 				strings.EqualFold(strings.TrimSpace(serverCfg.Host), strings.TrimSpace(prepareServerName)) {
-				return []config.ServerConfig{serverCfg}, nil
+				selected = []config.ServerConfig{serverCfg}
+				break
 			}
 		}
-		return nil, fmt.Errorf("server %q not found in nextdeploy.yml", prepareServerName)
+		if len(selected) == 0 {
+			return nil, fmt.Errorf("server %q not found in nextdeploy.yml", prepareServerName)
+		}
+	default:
+		selected = []config.ServerConfig{cfg.Servers[0]}
 	}
 
-	return []config.ServerConfig{cfg.Servers[0]}, nil
+	if err := config.ValidateServers(selected); err != nil {
+		return nil, err
+	}
+	return selected, nil
 }
 
 func writeInventory(tmpDir, serverName string, cfg config.ServerConfig) (string, error) {

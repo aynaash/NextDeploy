@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/config"
 	"github.com/aynaash/nextdeploy/shared/credstore"
 )
 
@@ -27,6 +28,12 @@ var providerSchemas = map[string][]credField{
 		{Key: "secret_access_key", Label: "AWS secret access key", Required: true, Hidden: true},
 		{Key: "session_token", Label: "AWS session token (optional)", Required: false, Hidden: true},
 	},
+	"vps": {
+		{Key: "host", Label: "VPS host / IP address", Required: true, Hidden: false},
+		{Key: "username", Label: "SSH username (optional)", Required: false, Hidden: false},
+		{Key: "key_path", Label: "SSH private key path (optional, e.g. ~/.ssh/id_ed25519)", Required: false, Hidden: false},
+		{Key: "key_passphrase", Label: "SSH key passphrase (optional)", Required: false, Hidden: true},
+	},
 }
 
 type credField struct {
@@ -38,33 +45,70 @@ type credField struct {
 
 var credsCmd = &cobra.Command{
 	Use:   "creds",
-	Short: "Manage cloud-provider credentials in the encrypted credstore",
-	Long: `Stores cloud-provider credentials in an AES-GCM encrypted file under
+	Short: "Manage cloud-provider and VPS credentials in the encrypted credstore",
+	Long: `Stores cloud-provider and VPS server credentials in an AES-GCM encrypted file under
 ~/.nextdeploy/credstore/. Per-machine, mode 0600. Use this instead of
-committing keys to nextdeploy.yml or relying on shell-exported env vars.
+committing keys or VPS IPs to nextdeploy.yml or relying on shell-exported env vars.
 
-Resolution order at runtime: env vars → credstore → nextdeploy.yml (legacy, warns).`,
+Resolution order at runtime: env vars → credstore → nextdeploy.yml.`,
 }
 
-var credsProviderFlag string
+var (
+	credsProviderFlag string
+	credsServerFlag   string
+)
+
+func resolveCredsTarget(providerFlag, serverFlag string, args []string) (provider, storeKey string, err error) {
+	flagVal := strings.ToLower(strings.TrimSpace(providerFlag))
+	var argVal string
+	if len(args) > 0 {
+		argVal = strings.ToLower(strings.TrimSpace(args[0]))
+	}
+	if flagVal != "" && argVal != "" && flagVal != argVal {
+		return "", "", fmt.Errorf("conflicting provider argument %q and --provider %q", argVal, flagVal)
+	}
+	provider = flagVal
+	if provider == "" {
+		provider = argVal
+	}
+	if provider == "" {
+		return "", "", fmt.Errorf("provider is required (cloudflare, aws, vps); e.g. 'nextdeploy creds set vps'")
+	}
+	if _, ok := providerSchemas[provider]; !ok {
+		return "", "", fmt.Errorf("unknown provider %q (supported: cloudflare, aws, vps)", provider)
+	}
+
+	storeKey = provider
+	if srv := strings.TrimSpace(serverFlag); srv != "" {
+		if provider != "vps" {
+			return "", "", fmt.Errorf("--server is only supported with provider \"vps\"")
+		}
+		if strings.Contains(srv, "/") || strings.Contains(srv, `\`) || strings.Contains(srv, "..") {
+			return "", "", fmt.Errorf("invalid server name %q", srv)
+		}
+		key := config.ServerCredstoreKey(srv)
+		if key == "" {
+			return "", "", fmt.Errorf("invalid server name %q", srv)
+		}
+		storeKey = key
+	}
+	return provider, storeKey, nil
+}
 
 var credsSetCmd = &cobra.Command{
-	Use:   "set",
-	Short: "Store credentials for a provider (interactive)",
+	Use:   "set [provider]",
+	Short: "Store credentials for a provider or VPS server (interactive)",
+	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		log := shared.PackageLogger("creds", "🔒 CREDS")
-		provider := strings.ToLower(strings.TrimSpace(credsProviderFlag))
-		if provider == "" {
-			log.Error("--provider is required (cloudflare, aws)")
+		provider, storeKey, err := resolveCredsTarget(credsProviderFlag, credsServerFlag, args)
+		if err != nil {
+			log.Error("%v", err)
 			os.Exit(2)
 		}
-		schema, ok := providerSchemas[provider]
-		if !ok {
-			log.Error("unknown provider %q (supported: cloudflare, aws)", provider)
-			os.Exit(2)
-		}
+		schema := providerSchemas[provider]
 
-		existing, _ := credstore.Load(provider)
+		existing, _ := credstore.Load(storeKey)
 		fields := map[string]string{}
 		maps.Copy(fields, existing)
 
@@ -86,29 +130,30 @@ var credsSetCmd = &cobra.Command{
 			}
 		}
 
-		if err := credstore.Save(provider, fields); err != nil {
+		if err := credstore.Save(storeKey, fields); err != nil {
 			log.Error("save failed: %v", err)
 			os.Exit(1)
 		}
-		log.Success("Stored %d field(s) for provider %q", len(fields), provider)
+		log.Success("Stored %d field(s) for %q", len(fields), storeKey)
 	},
 }
 
 var credsClearCmd = &cobra.Command{
-	Use:   "clear",
-	Short: "Remove stored credentials for a provider",
+	Use:   "clear [provider]",
+	Short: "Remove stored credentials for a provider or VPS server",
+	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		log := shared.PackageLogger("creds", "🔒 CREDS")
-		provider := strings.ToLower(strings.TrimSpace(credsProviderFlag))
-		if provider == "" {
-			log.Error("--provider is required")
+		_, storeKey, err := resolveCredsTarget(credsProviderFlag, credsServerFlag, args)
+		if err != nil {
+			log.Error("%v", err)
 			os.Exit(2)
 		}
-		if err := credstore.Delete(provider); err != nil {
+		if err := credstore.Delete(storeKey); err != nil {
 			log.Error("delete failed: %v", err)
 			os.Exit(1)
 		}
-		log.Success("Cleared credentials for provider %q", provider)
+		log.Success("Cleared credentials for %q", storeKey)
 	},
 }
 
@@ -166,8 +211,10 @@ func promptCredential(f credField, hasExisting bool) (string, error) {
 }
 
 func init() {
-	credsSetCmd.Flags().StringVar(&credsProviderFlag, "provider", "", "provider name (cloudflare, aws)")
-	credsClearCmd.Flags().StringVar(&credsProviderFlag, "provider", "", "provider name (cloudflare, aws)")
+	credsSetCmd.Flags().StringVar(&credsProviderFlag, "provider", "", "provider name (cloudflare, aws, vps)")
+	credsSetCmd.Flags().StringVar(&credsServerFlag, "server", "", "VPS server name from nextdeploy.yml (for multi-server vps entries)")
+	credsClearCmd.Flags().StringVar(&credsProviderFlag, "provider", "", "provider name (cloudflare, aws, vps)")
+	credsClearCmd.Flags().StringVar(&credsServerFlag, "server", "", "VPS server name from nextdeploy.yml (for multi-server vps entries)")
 
 	credsCmd.AddCommand(credsSetCmd)
 	credsCmd.AddCommand(credsClearCmd)

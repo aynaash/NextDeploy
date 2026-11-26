@@ -1,14 +1,22 @@
 package daemon
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/aynaash/nextdeploy/daemon/internal/types"
 )
 
 func TestReleasesToPrune(t *testing.T) {
@@ -181,5 +189,165 @@ func TestProcessAlive(t *testing.T) {
 				t.Errorf("processAlive(%q) = %v, want %v", tt.pidStr, got, tt.want)
 			}
 		})
+	}
+}
+
+func signTestCommand(t *testing.T, secret, cmdType string, args map[string]interface{}, nonce string) types.Command {
+	t.Helper()
+	cmd := types.Command{
+		Type:      cmdType,
+		Args:      args,
+		Timestamp: time.Now().Unix(),
+		Nonce:     nonce,
+	}
+	payload, err := json.Marshal(map[string]interface{}{
+		"type":      cmd.Type,
+		"args":      cmd.Args,
+		"timestamp": cmd.Timestamp,
+		"nonce":     cmd.Nonce,
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	h := hmac.New(sha256.New, []byte(secret))
+	h.Write(payload)
+	cmd.Signature = hex.EncodeToString(h.Sum(nil))
+	return cmd
+}
+
+func readAuditEntries(t *testing.T, path string) ([]byte, []AuditEntry) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read audit log %s: %v", path, err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	entries := make([]AuditEntry, 0, len(lines))
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		var entry AuditEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("unmarshal audit entry %q: %v", line, err)
+		}
+		entries = append(entries, entry)
+	}
+	return data, entries
+}
+
+func TestSanitizeAuditArgs(t *testing.T) {
+	in := map[string]interface{}{
+		"action":       "set",
+		"appName":      "myapp",
+		"key":          "DATABASE_URL",
+		"tarball":      "/opt/nextdeploy/uploads/app.tar.gz",
+		"value":        "postgres://secret",
+		"dopplerToken": "dp.st.secret",
+	}
+
+	got := sanitizeAuditArgs(in)
+	want := map[string]interface{}{
+		"action":  "set",
+		"appName": "myapp",
+		"key":     "DATABASE_URL",
+		"tarball": "/opt/nextdeploy/uploads/app.tar.gz",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("sanitizeAuditArgs() = %#v, want %#v", got, want)
+	}
+	if in["value"] != "postgres://secret" || in["dopplerToken"] != "dp.st.secret" {
+		t.Errorf("sanitizeAuditArgs mutated input map in place: %#v", in)
+	}
+	if sanitizeAuditArgs(nil) != nil {
+		t.Error("sanitizeAuditArgs(nil) should return nil")
+	}
+}
+
+func TestHandleCommandAuditRedactsSecrets(t *testing.T) {
+	withTempSecretsDir(t)
+	ch := newTestHandler(t, nil)
+
+	const secretVal = "postgres://user:super-secret-value@host/db"
+
+	// 1. secrets set: raw value must not be logged in args or message.
+	setCmd := signTestCommand(t, "test-secret", "secrets", map[string]interface{}{
+		"action":  "set",
+		"appName": "audit-test-app",
+		"key":     "DATABASE_URL",
+		"value":   secretVal,
+	}, "nonce-set")
+	setResp := ch.HandleCommand(setCmd, localSocketIdentity, true)
+	if !setResp.Success {
+		t.Fatalf("secrets set failed: %+v", setResp)
+	}
+
+	raw, entries := readAuditEntries(t, ch.auditLogger.path)
+	if strings.Contains(string(raw), secretVal) {
+		t.Fatalf("audit log leaked secret value on secrets set: %s", string(raw))
+	}
+	last := entries[len(entries)-1]
+	argsMap, ok := last.Args.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected Args map in audit entry, got %T", last.Args)
+	}
+	if argsMap["key"] != "DATABASE_URL" || argsMap["action"] != "set" {
+		t.Errorf("unexpected audit Args: %#v", argsMap)
+	}
+	if _, hasValue := argsMap["value"]; hasValue {
+		t.Errorf("audit Args still contained 'value': %#v", argsMap)
+	}
+
+	// 2. secrets get: CLI response must return the secret, audit log must redact it.
+	getCmd := signTestCommand(t, "test-secret", "secrets", map[string]interface{}{
+		"action":  "get",
+		"appName": "audit-test-app",
+		"key":     "DATABASE_URL",
+	}, "nonce-get")
+	getResp := ch.HandleCommand(getCmd, localSocketIdentity, true)
+	if !getResp.Success || getResp.Message != secretVal {
+		t.Fatalf("secrets get = %+v, want success with secret value", getResp)
+	}
+
+	raw, entries = readAuditEntries(t, ch.auditLogger.path)
+	if strings.Contains(string(raw), secretVal) {
+		t.Fatalf("audit log leaked secret value on secrets get: %s", string(raw))
+	}
+	last = entries[len(entries)-1]
+	if last.ErrorDetails != "secret value retrieved" {
+		t.Errorf("secrets get ErrorDetails = %q, want %q", last.ErrorDetails, "secret value retrieved")
+	}
+
+	// 3. secrets list: CLI gets key list, audit log gets fixed summary.
+	listCmd := signTestCommand(t, "test-secret", "secrets", map[string]interface{}{
+		"action":  "list",
+		"appName": "audit-test-app",
+	}, "nonce-list")
+	listResp := ch.HandleCommand(listCmd, localSocketIdentity, true)
+	if !listResp.Success || listResp.Message != "DATABASE_URL" {
+		t.Fatalf("secrets list = %+v, want success with DATABASE_URL", listResp)
+	}
+
+	_, entries = readAuditEntries(t, ch.auditLogger.path)
+	last = entries[len(entries)-1]
+	if last.ErrorDetails != "secret keys listed" {
+		t.Errorf("secrets list ErrorDetails = %q, want %q", last.ErrorDetails, "secret keys listed")
+	}
+
+	// 4. secrets get for missing key: failure details are preserved.
+	missingCmd := signTestCommand(t, "test-secret", "secrets", map[string]interface{}{
+		"action":  "get",
+		"appName": "audit-test-app",
+		"key":     "DOES_NOT_EXIST",
+	}, "nonce-missing")
+	missingResp := ch.HandleCommand(missingCmd, localSocketIdentity, true)
+	if missingResp.Success {
+		t.Fatalf("expected missing secret lookup to fail, got %+v", missingResp)
+	}
+
+	_, entries = readAuditEntries(t, ch.auditLogger.path)
+	last = entries[len(entries)-1]
+	if last.Result != "false" || !strings.Contains(last.ErrorDetails, "not found") {
+		t.Errorf("missing secret audit entry = %+v, want Result=false and ErrorDetails containing 'not found'", last)
 	}
 }

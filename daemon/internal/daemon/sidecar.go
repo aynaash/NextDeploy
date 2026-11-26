@@ -116,7 +116,7 @@ func NewSidecarHandler(releaseDir, sharedStatic, imageCacheDir string, nodePort 
 		}
 		legacyDist := filepath.Join(releaseDir, ".next")
 		if _, legacyErr := os.Stat(legacyDist); legacyErr != nil {
-			return nil, fmt.Errorf("Next.js dist directory %s is unavailable: %w", resolvedDist, err)
+			return nil, fmt.Errorf("next.js dist directory %s is unavailable: %w", resolvedDist, err)
 		}
 		resolvedDist = legacyDist
 	}
@@ -397,9 +397,10 @@ func (s *SidecarHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if cleanRoute != "/" {
 			cleanRoute = strings.TrimSuffix(cleanRoute, "/")
 		}
-		isRSC := r.Header.Get("RSC") == "1" || strings.HasSuffix(cleanRoute, ".rsc")
-		if strings.HasSuffix(cleanRoute, ".rsc") {
-			cleanRoute = strings.TrimSuffix(cleanRoute, ".rsc")
+		routeWithoutRSC, isRSCSuffix := strings.CutSuffix(cleanRoute, ".rsc")
+		isRSC := r.Header.Get("RSC") == "1" || isRSCSuffix
+		if isRSCSuffix {
+			cleanRoute = routeWithoutRSC
 			if cleanRoute == "" {
 				cleanRoute = "/"
 			}

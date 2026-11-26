@@ -45,6 +45,7 @@ func TestRenderGitLabCIWorkflow_HardeningAndDopplerFirst(t *testing.T) {
 		"DOPPLER_TOKEN",
 		"cli.doppler.com/install.sh",
 		"doppler run --",
+		"doppler secrets get VPS_HOST --plain",
 		"SSH_PRIVATE_KEY",
 		"SSH_KNOWN_HOSTS",
 		"chmod 700 ~/.ssh",

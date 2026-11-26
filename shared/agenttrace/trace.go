@@ -1,3 +1,4 @@
+// Package agenttrace manages AI coding agent trace checkpoints, events, and developer takeover briefs.
 package agenttrace
 
 import (
@@ -136,7 +137,7 @@ func RecordEvent(projectDir string, event HandoffEvent) error {
 	eventsPath := filepath.Join(dir, EventsFile)
 	var events []HandoffEvent
 
-	if data, err := os.ReadFile(eventsPath); err == nil && len(data) > 0 {
+	if data, readErr := os.ReadFile(eventsPath); readErr == nil && len(data) > 0 {
 		_ = json.Unmarshal(data, &events)
 	}
 
@@ -168,11 +169,11 @@ func UpdateTakeoverBrief(projectDir string, target, environment, status, liveURL
 
 	sb.WriteString("## Active AI Coding Agent\n")
 	if cp != nil {
-		sb.WriteString(fmt.Sprintf("- **Agent & Model**: %s (%s)\n", cp.Agent, cp.Model))
-		sb.WriteString(fmt.Sprintf("- **Session ID**: `%s`\n", cp.SessionID))
-		sb.WriteString(fmt.Sprintf("- **Objective**: %s\n", cp.Objective))
+		fmt.Fprintf(&sb, "- **Agent & Model**: %s (%s)\n", cp.Agent, cp.Model)
+		fmt.Fprintf(&sb, "- **Session ID**: `%s`\n", cp.SessionID)
+		fmt.Fprintf(&sb, "- **Objective**: %s\n", cp.Objective)
 		if cp.UnfinishedWork != "" {
-			sb.WriteString(fmt.Sprintf("- **Unfinished Work**: %s\n", cp.UnfinishedWork))
+			fmt.Fprintf(&sb, "- **Unfinished Work**: %s\n", cp.UnfinishedWork)
 		}
 	} else {
 		sb.WriteString("- **Status**: Interactive session in progress\n")
@@ -180,20 +181,20 @@ func UpdateTakeoverBrief(projectDir string, target, environment, status, liveURL
 
 	if target != "" || status != "" {
 		sb.WriteString("\n## NextDeploy Infrastructure Status\n")
-		sb.WriteString(fmt.Sprintf("- **Target**: `%s` (environment: `%s`)\n", target, environment))
-		sb.WriteString(fmt.Sprintf("- **Status**: `%s` (at %s)\n", status, time.Now().UTC().Format(time.RFC3339)))
+		fmt.Fprintf(&sb, "- **Target**: `%s` (environment: `%s`)\n", target, environment)
+		fmt.Fprintf(&sb, "- **Status**: `%s` (at %s)\n", status, time.Now().UTC().Format(time.RFC3339))
 		if liveURL != "" {
-			sb.WriteString(fmt.Sprintf("- **Deployment URL**: %s\n", liveURL))
+			fmt.Fprintf(&sb, "- **Deployment URL**: %s\n", liveURL)
 		}
 		if deployErr != nil {
-			sb.WriteString(fmt.Sprintf("- **Failure**: `%v`\n", deployErr))
+			fmt.Fprintf(&sb, "- **Failure**: `%v`\n", deployErr)
 		}
 	}
 
 	sb.WriteString("\n## Modified Files & Git State\n")
 	if len(modFiles) > 0 {
 		for _, f := range modFiles {
-			sb.WriteString(fmt.Sprintf("- `%s`\n", f))
+			fmt.Fprintf(&sb, "- `%s`\n", f)
 		}
 	} else {
 		sb.WriteString("- Clean working directory (no uncommitted diffs)\n")

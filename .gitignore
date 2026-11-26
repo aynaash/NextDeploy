@@ -21,6 +21,7 @@ assets/lambda/*/bootstrap
 .keys
 .nextdeploy/.env
 .nextdeploy/secrets/
+.nextdeploy/trace/
 *.pem
 *.key
 !**/testdata/**/*.pem
@@ -61,7 +62,7 @@ test_src_dir/
 
 # ── Documentation ────────────────────────────────────────────────
 # Track only the docs we curate. Anything else is scratch/draft.
-*.md
+/*.md
 !README.md
 !TECH_DOCS.md
 !CODE_QUALITY.md
@@ -96,7 +97,7 @@ shared/nextcompile/runtime_src/vendor/*
 
 # ── Dev-local ────────────────────────────────────────────────────
 tmp/
-NextDeploy/
+/NextDeploy/
 graphify-out/
 
 # ── Personal flow notes (do NOT commit) ──────────────────────────

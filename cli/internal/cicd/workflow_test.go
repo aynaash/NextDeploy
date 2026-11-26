@@ -215,6 +215,8 @@ func TestRenderDeployWorkflow_VPSSSHHardening(t *testing.T) {
 		"chmod 600 ~/.ssh/id_ed25519",
 		"cp ~/.ssh/id_ed25519 ~/.ssh/id_rsa",
 		"chmod 600 ~/.ssh/id_rsa",
+		"VPS_HOST: ${{ secrets.VPS_HOST }}",
+		"doppler secrets get VPS_HOST --plain",
 		"SSH_KNOWN_HOSTS",
 		"chmod 600 ~/.ssh/known_hosts",
 		"SSH_KEY_PASSPHRASE",

@@ -106,7 +106,7 @@ app:
 # -----
 servers:
   - name: "production-01" # [REQUIRED] Friendly name for the server
-    host: 203.0.113.10 # [REQUIRED] IP or hostname of the server
+    host: 203.0.113.10 # [REQUIRED] IP/hostname, or ${VPS_HOST} (or omit & run 'nextdeploy creds set vps')
     username: ubuntu # [REQUIRED] SSH user (e.g., ubuntu, debian, root)
     key_path: ~/.ssh/id_rsa  # [REQUIRED] Path to your private SSH key
     # password: "" # Optional: SSH password (key_path takes precedence)

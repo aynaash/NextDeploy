@@ -28,7 +28,7 @@ func StartTraceUI(projectDir string, port int) error {
 		modFiles, _ := GetGitModifiedFiles(projectDir)
 		branch, _ := GetGitBranch(projectDir)
 
-		payload := map[string]interface{}{
+		payload := map[string]any{
 			"checkpoint":     cp,
 			"events":         events,
 			"modified_files": modFiles,

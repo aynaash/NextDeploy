@@ -46,6 +46,10 @@ func runUpgradeDaemon(cmd *cobra.Command, args []string) {
 		log.Error("No servers configured in nextdeploy.yml")
 		os.Exit(1)
 	}
+	if err := config.ValidateServers(cfg.Servers); err != nil {
+		log.Error("%v", err)
+		os.Exit(1)
+	}
 
 	fmt.Println("\n🔍 Checking for latest daemon release...")
 	latest, err := updater.LatestRelease()

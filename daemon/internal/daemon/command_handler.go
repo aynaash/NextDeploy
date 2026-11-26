@@ -290,11 +290,46 @@ func (ch *CommandHandler) HandleCommand(cmd types.Command, clientIdentity string
 		CommandType:    cmd.Type,
 		ClientIdentity: clientIdentity,
 		Result:         fmt.Sprintf("%v", resp.Success),
-		ErrorDetails:   resp.Message,
-		Args:           cmd.Args,
+		ErrorDetails:   auditResponseDetails(cmd, resp),
+		Args:           sanitizeAuditArgs(cmd.Args),
 	})
 
 	return resp
+}
+
+var redactedAuditArgKeys = map[string]struct{}{
+	"value":        {},
+	"dopplertoken": {},
+	"token":        {},
+	"secret":       {},
+	"password":     {},
+}
+
+func auditResponseDetails(cmd types.Command, resp types.Response) string {
+	if cmd.Type == "secrets" && resp.Success {
+		action, _ := StringArg(cmd.Args, "action")
+		switch action {
+		case "get":
+			return "secret value retrieved"
+		case "list":
+			return "secret keys listed"
+		}
+	}
+	return resp.Message
+}
+
+func sanitizeAuditArgs(args map[string]interface{}) map[string]interface{} {
+	if len(args) == 0 {
+		return nil
+	}
+	sanitized := make(map[string]interface{}, len(args))
+	for k, v := range args {
+		if _, redact := redactedAuditArgKeys[strings.ToLower(k)]; redact {
+			continue
+		}
+		sanitized[k] = v
+	}
+	return sanitized
 }
 
 func (ch *CommandHandler) stopDaemon(args map[string]interface{}) types.Response {

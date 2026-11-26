@@ -69,4 +69,43 @@ func TestServerHost(t *testing.T) {
 			t.Fatal("ServerHost on a config-less ServerStruct succeeded; want an error")
 		}
 	})
+
+	t.Run("errors when host contains unresolved placeholder", func(t *testing.T) {
+		unresolved := &ServerStruct{
+			config: &config.NextDeployConfig{
+				Servers: []config.ServerConfig{
+					{Name: "production", Host: "${VPS_HOST}"},
+				},
+			},
+		}
+		_, err := unresolved.ServerHost("production")
+		if err == nil {
+			t.Fatal("ServerHost succeeded on unresolved ${VPS_HOST}; want error")
+		}
+		for _, want := range []string{"VPS_HOST", "nextdeploy creds set vps"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q missing %q", err.Error(), want)
+			}
+		}
+	})
+}
+
+func TestWithSSH_FailsEarlyOnUnresolvedHost(t *testing.T) {
+	s := &ServerStruct{
+		config: &config.NextDeployConfig{
+			Servers: []config.ServerConfig{
+				{Name: "production", Host: "${VPS_HOST}", Username: "ubuntu", KeyPath: "/nonexistent/key"},
+			},
+		},
+		sshClients: make(map[string]*SSHClient),
+	}
+	err := WithSSH()(s)
+	if err == nil {
+		t.Fatal("WithSSH succeeded on unresolved ${VPS_HOST}; want error")
+	}
+	for _, want := range []string{"VPS_HOST", "nextdeploy creds set vps"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("WithSSH error %q missing %q", err.Error(), want)
+		}
+	}
 }

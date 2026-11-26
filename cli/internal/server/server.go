@@ -1,3 +1,4 @@
+// Package server handles vps deployemtn and connections
 package server
 
 import (
@@ -23,9 +24,7 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
-var (
-	serverlogger = shared.PackageLogger("Server", "🅱)SERVERLOGGER")
-)
+var serverlogger = shared.PackageLogger("Server", "🅱)SERVERLOGGER")
 
 type ServerStruct struct {
 	config     *config.NextDeployConfig
@@ -68,6 +67,7 @@ func WithConfig() ServerOption {
 		return nil
 	}
 }
+
 func WithDaemon() ServerOption {
 	return func(s *ServerStruct) error {
 		serverlogger.Debug("Writing NextDeploy Agent connection here")
@@ -79,6 +79,9 @@ func WithSSH() ServerOption {
 	return func(s *ServerStruct) error {
 		if s.config == nil || len(s.config.Servers) == 0 {
 			return fmt.Errorf("the server configuration is not loaded or no servers configured")
+		}
+		if err := config.ValidateServers(s.config.Servers); err != nil {
+			return err
 		}
 
 		s.mu.Lock()
@@ -124,6 +127,9 @@ func (s *ServerStruct) GetDeploymentServer() (string, error) {
 	}
 
 	first := s.config.Servers[0]
+	if err := config.ValidateServerConfig(first); err != nil {
+		return "", err
+	}
 	_, err := connectSSH(first)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to deployment server %s (%s): %w",
@@ -148,8 +154,8 @@ func (s *ServerStruct) ServerHost(name string) (string, error) {
 		if srv.Name != name {
 			continue
 		}
-		if srv.Host == "" {
-			return "", fmt.Errorf("server %q has no host configured in nextdeploy.yml", name)
+		if err := config.ValidateServerConfig(srv); err != nil {
+			return "", err
 		}
 		return srv.Host, nil
 	}
@@ -171,7 +177,7 @@ func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 
 	sshDir := filepath.Dir(knownHostsPath)
 	if _, err := os.Stat(sshDir); os.IsNotExist(err) {
-		if err := os.Mkdir(sshDir, 0700); err != nil {
+		if err := os.Mkdir(sshDir, 0o700); err != nil {
 			return fmt.Errorf("failed to create .ssh directory: %w", err)
 		}
 	}
@@ -191,7 +197,7 @@ func AddHostToKnownHosts(ip string, knownHostsPath string) error {
 	}
 
 	// #nosec G304
-	f, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	f, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open known_hosts file: %w", err)
 	}
@@ -217,6 +223,9 @@ func isValidHostname(hostname string) bool {
 }
 
 func connectSSH(cfg config.ServerConfig) (*SSHClient, error) {
+	if err := config.ValidateServerConfig(cfg); err != nil {
+		return nil, err
+	}
 	if cfg.Port == 0 {
 		cfg.Port = 22
 	}
@@ -335,11 +344,11 @@ func getHostKeyCallback() (ssh.HostKeyCallback, error) {
 
 	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
 
-	if err := os.MkdirAll(filepath.Dir(knownHostsPath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(knownHostsPath), 0o700); err != nil {
 		return nil, err
 	}
 	// #nosec G304
-	f, err := os.OpenFile(knownHostsPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	f, err := os.OpenFile(knownHostsPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -373,7 +382,7 @@ func getHostKeyCallback() (ssh.HostKeyCallback, error) {
 				// of time (or set NEXTDEPLOY_STRICT_HOST_KEY) to close the window.
 				serverlogger.Warn("Trusting host %s on first use (%s) — this first connection is NOT protected against MITM. Set NEXTDEPLOY_STRICT_HOST_KEY=1 to fail closed instead.", hostname, fingerprint)
 				// #nosec G304
-				f, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_WRONLY, 0600)
+				f, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_WRONLY, 0o600)
 				if err != nil {
 					return err
 				}
@@ -751,6 +760,7 @@ func (s *ServerStruct) getSSHClient(serverName string) (*SSHClient, error) {
 	}
 	return client, nil
 }
+
 func (s *ServerStruct) Reconnect(serverName string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

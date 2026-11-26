@@ -239,6 +239,13 @@ func TestPrepareWritesHardeningConfigs(t *testing.T) {
 	if _, ok := h.files["/etc/logrotate.d/caddy"]; !ok {
 		t.Error("no logrotate policy — Caddy/Coraza logs would grow unbounded")
 	}
+	nextdeploydLR, ok := h.files["/etc/logrotate.d/nextdeployd"]
+	if !ok {
+		t.Fatal("no logrotate policy — nextdeployd logs would grow unbounded")
+	}
+	if !strings.Contains(string(nextdeploydLR), "/var/log/nextdeployd/*.log") || !strings.Contains(string(nextdeploydLR), "copytruncate") {
+		t.Errorf("unexpected nextdeployd logrotate policy:\n%s", nextdeploydLR)
+	}
 	// The WAF jail is the one that closes the detect→ban gap: Coraza writes to
 	// audit.log, which the access-log jail never reads.
 	waf, ok := h.files["/etc/fail2ban/jail.d/caddy-waf.conf"]
@@ -309,6 +316,9 @@ func TestPrepareSkipOptions(t *testing.T) {
 		Run(h, Options{SkipHardening: true}, io.Discard)
 		if _, ok := h.files["/etc/logrotate.d/caddy"]; ok {
 			t.Error("SkipHardening still wrote the logrotate policy")
+		}
+		if _, ok := h.files["/etc/logrotate.d/nextdeployd"]; ok {
+			t.Error("SkipHardening still wrote the nextdeployd logrotate policy")
 		}
 		if len(h.commandsMatching("nodesource")) == 0 {
 			t.Error("SkipHardening should not skip runtimes")

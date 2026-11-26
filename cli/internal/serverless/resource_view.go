@@ -7,33 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/aynaash/nextdeploy/cli/internal/dns"
 	"github.com/aynaash/nextdeploy/shared"
 	"github.com/aynaash/nextdeploy/shared/config"
 )
-
-// ServerlessResourceMap holds the metadata for the visual report.
-type ServerlessResourceMap struct {
-	AppName           string
-	Environment       string
-	Region            string
-	WorkerName        string
-	ActiveVersion     string
-	Status            string // "Online", "Deploying", "Not Deployed", etc.
-	LambdaARN         string
-	FunctionURL       string
-	S3BucketName      string
-	CloudFrontID      string
-	CloudFrontDomain  string
-	CustomDomain      string
-	CertificateARN    string
-	CertificateStatus string // "PENDING_VALIDATION", "ISSUED", "FAILED"
-	ValidationRecords []dns.ValidationRecord
-	DeploymentTime    time.Time
-	DNSProvider       string // "namecheap", "cloudflare", "godaddy", "route53", "other"
-}
 
 // ProviderRules holds DNS provider-specific display instructions.
 type ProviderRules struct {

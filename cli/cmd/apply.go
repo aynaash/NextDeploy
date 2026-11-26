@@ -54,13 +54,13 @@ Exit codes:
 		}
 
 		if cfg.Serverless == nil || cfg.Serverless.Cloudflare == nil {
-			log.Error("apply only supports Cloudflare deployments — no serverless.cloudflare block found")
+			log.Error("apply only supports Cloudflare deployments : no serverless.cloudflare block found")
 			os.Exit(1)
 		}
 
 		ctx := context.Background()
 		provider := serverless.NewCloudflareProvider()
-		if err := provider.Initialize(ctx, cfg); err != nil {
+		if er := provider.Initialize(ctx, cfg); er != nil {
 			log.Error("Cloudflare initialize failed: %v", err)
 			os.Exit(1)
 		}
@@ -92,7 +92,7 @@ Exit codes:
 			os.Exit(1)
 		}
 		fmt.Println()
-		fmt.Println(success("✓ Reconcile complete — declared resources are in place."))
+		fmt.Println(success("Reconcile complete — declared resources are in place."))
 	},
 }
 

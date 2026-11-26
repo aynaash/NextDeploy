@@ -1,0 +1,404 @@
+package cloudflare
+
+import (
+	"fmt"
+
+	"github.com/aynaash/nextdeploy/shared/config"
+
+	"github.com/cloudflare/cloudflare-go/v6"
+	"github.com/cloudflare/cloudflare-go/v6/workers"
+)
+
+// Defaults applied when CloudflareConfig fields are unset.
+const (
+	defaultCFCompatibilityDate = "2025-04-01"
+	defaultR2AssetsBindingName = "ASSETS"
+)
+
+var defaultCFCompatibilityFlags = []string{"nodejs_compat_v2"}
+
+// refResolver returns a CF resource UUID for a (kind, name) pair previously
+// stashed by ProvisionResources. Returns ("", false) if unknown.
+type refResolver func(kind, name string) (string, bool)
+
+// noResolver is used by callers that don't have a provisioned-ID map.
+// Bindings with `ref:` will then fail with a clear error.
+func noResolver(string, string) (string, bool) { return "", false }
+
+// buildScriptMetadata translates the user's CloudflareConfig + auto-derived
+// per-app R2 bucket into a workers.ScriptUpdateParamsMetadata ready to upload.
+//
+// `defaultBucket` is the auto-derived R2 asset bucket name. If the user did
+// not declare an ASSETS R2 binding in YAML, we auto-inject an ASSETS binding
+// pointing at defaultBucket so compiled Next.js assets and SSG/ISR pages can
+// be served. If they declared an explicit ASSETS binding, we trust their custom bucket.
+//
+// `resolveRef` resolves `ref:` shortcuts on bindings (e.g. hyperdrive.ref) to
+// the CF UUID stashed by ProvisionResources. Pass noResolver if no IaC layer
+// has run yet — bindings using `ref:` will then error.
+//
+// `secrets` is the set of secret_text bindings to attach. Pass nil to leave
+// secrets untouched — but note: CF's binding metadata is replace-not-merge
+// at upload time, so omitting secrets on a re-deploy WILL strip every
+// previously-attached secret from the script. Callers that don't want that
+// must pass the full secret map (which is what the deploy orchestration
+// does — secrets are loaded pre-compute and threaded through here).
+func buildScriptMetadata(cf *config.CloudflareConfig, defaultBucket, entryName string, resolveRef refResolver, secrets map[string]string) (workers.ScriptUpdateParamsMetadata, error) {
+	compatDate := defaultCFCompatibilityDate
+	flags := defaultCFCompatibilityFlags
+	if cf != nil {
+		if cf.CompatibilityDate != "" {
+			compatDate = cf.CompatibilityDate
+		}
+		if len(cf.CompatibilityFlags) > 0 {
+			flags = cf.CompatibilityFlags
+		}
+	}
+
+	bindings, err := buildBindings(cf, defaultBucket, resolveRef)
+	if err != nil {
+		return workers.ScriptUpdateParamsMetadata{}, err
+	}
+
+	for _, name := range sortedKeys(secrets) {
+		bindings = append(bindings, workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindSecretText{
+			Name: cloudflare.F(name),
+			Text: cloudflare.F(secrets[name]),
+			Type: cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindSecretTextTypeSecretText),
+		})
+	}
+
+	// Detect duplicate binding names before the (multi-MB) upload — a collision
+	// otherwise surfaces only as an opaque CF API error post-upload. Common
+	// cause: an .env key (folded in as secret_text) shadowing a declared binding
+	// or the auto-injected ASSETS bucket.
+	seen := make(map[string]struct{}, len(bindings))
+	for _, b := range bindings {
+		name := bindingName(b)
+		if name == "" {
+			continue
+		}
+		if _, dup := seen[name]; dup {
+			return workers.ScriptUpdateParamsMetadata{}, fmt.Errorf(
+				"duplicate Worker binding name %q — rename one, or remove the .env key "+
+					"that collides with a declared binding or the ASSETS bucket", name)
+		}
+		seen[name] = struct{}{}
+	}
+
+	meta := workers.ScriptUpdateParamsMetadata{
+		MainModule:         cloudflare.F(entryName),
+		CompatibilityDate:  cloudflare.F(compatDate),
+		CompatibilityFlags: cloudflare.F(flags),
+		Bindings:           cloudflare.F(bindings),
+		Observability:      cloudflare.F(buildObservability(cf)),
+	}
+
+	if cf != nil && len(cf.Migrations) > 0 {
+		meta.Migrations = cloudflare.F[workers.ScriptUpdateParamsMetadataMigrationsUnion](
+			buildMigrations(cf.Migrations),
+		)
+	}
+	return meta, nil
+}
+
+// buildObservability sets up Workers Logs for the script. Logs are ON by
+// default (NextDeploy provisions log infra out of the box) — the user must
+// explicitly set observability.enabled:false to opt out. head_sampling_rate
+// defaults to 1 (100%) and is clamped to [0,1].
+func buildObservability(cf *config.CloudflareConfig) workers.ScriptUpdateParamsMetadataObservability {
+	enabled := true
+	rate := 1.0
+	if cf != nil && cf.Observability != nil {
+		if cf.Observability.Enabled != nil {
+			enabled = *cf.Observability.Enabled
+		}
+		if cf.Observability.HeadSamplingRate > 0 {
+			rate = cf.Observability.HeadSamplingRate
+		}
+	}
+	if rate < 0 {
+		rate = 0
+	}
+	if rate > 1 {
+		rate = 1
+	}
+	return workers.ScriptUpdateParamsMetadataObservability{
+		Enabled:          cloudflare.F(enabled),
+		HeadSamplingRate: cloudflare.F(rate),
+		Logs: cloudflare.F(workers.ScriptUpdateParamsMetadataObservabilityLogs{
+			Enabled:        cloudflare.F(enabled),
+			InvocationLogs: cloudflare.F(enabled),
+		}),
+	}
+}
+
+// sortedKeys returns m's keys in ascending order. Used so binding emission
+// (and resulting upload payloads) is deterministic — same secrets set
+// produces byte-identical metadata, which keeps content hashes stable.
+func sortedKeys(m map[string]string) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	for i := 1; i < len(keys); i++ {
+		for j := i; j > 0 && keys[j-1] > keys[j]; j-- {
+			keys[j-1], keys[j] = keys[j], keys[j-1]
+		}
+	}
+	return keys
+}
+
+// bindingName extracts a binding's Name from the request-param union. There's no
+// shared accessor on the union, but every kind embeds Name param.Field[string]
+// whose Value field is exported. Returns "" for an unrecognized kind (never
+// expected — all kinds buildBindings emits are covered).
+func bindingName(u workers.ScriptUpdateParamsMetadataBindingUnion) string {
+	switch b := u.(type) {
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindR2Bucket:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindD1:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindHyperdrive:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindQueue:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindVectorize:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindAI:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindDurableObjectNamespace:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindKVNamespace:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindPlainText:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindSecretsStoreSecret:
+		return b.Name.Value
+	case workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindSecretText:
+		return b.Name.Value
+	default:
+		return ""
+	}
+}
+
+func buildBindings(cf *config.CloudflareConfig, defaultBucket string, resolveRef refResolver) ([]workers.ScriptUpdateParamsMetadataBindingUnion, error) {
+	if resolveRef == nil {
+		resolveRef = noResolver
+	}
+	var out []workers.ScriptUpdateParamsMetadataBindingUnion
+
+	hasNamedAssets := false
+	if cf != nil && cf.Bindings != nil {
+		for _, r := range cf.Bindings.R2 {
+			if r.Name == defaultR2AssetsBindingName {
+				hasNamedAssets = true
+				break
+			}
+		}
+	}
+	if !hasNamedAssets && defaultBucket != "" {
+		out = append(out, workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindR2Bucket{
+			Name:       cloudflare.F(defaultR2AssetsBindingName),
+			BucketName: cloudflare.F(defaultBucket),
+			Type:       cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindR2BucketTypeR2Bucket),
+		})
+	}
+	if cf == nil || cf.Bindings == nil {
+		return out, nil
+	}
+
+	b := cf.Bindings
+
+	for _, r2 := range b.R2 {
+		bucket := r2.Bucket
+		if bucket == "" {
+			bucket = defaultBucket
+		}
+		if bucket == "" {
+			return nil, fmt.Errorf("r2 binding %q: bucket name required (no default)", r2.Name)
+		}
+		out = append(out, workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindR2Bucket{
+			Name:       cloudflare.F(r2.Name),
+			BucketName: cloudflare.F(bucket),
+			Type:       cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindR2BucketTypeR2Bucket),
+		})
+	}
+
+	for _, d := range b.D1 {
+		id := d.ID
+		if id == "" && d.Ref != "" {
+			resolved, ok := resolveRef("d1", d.Ref)
+			if !ok {
+				return nil, fmt.Errorf("d1 binding %q: ref %q not found in provisioned resources (run ProvisionResources first, or set id: explicitly)", d.Name, d.Ref)
+			}
+			id = resolved
+		}
+		if id == "" {
+			return nil, fmt.Errorf("d1 binding %q: id or ref required", d.Name)
+		}
+		out = append(out, workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindD1{
+			Name: cloudflare.F(d.Name),
+			ID:   cloudflare.F(id),
+			Type: cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindD1TypeD1),
+		})
+	}
+
+	for _, h := range b.Hyperdrive {
+		id := h.ID
+		if id == "" && h.Ref != "" {
+			resolved, ok := resolveRef("hyperdrive", h.Ref)
+			if !ok {
+				return nil, fmt.Errorf("hyperdrive binding %q: ref %q not found in provisioned resources (run ProvisionResources first, or set id: explicitly)", h.Name, h.Ref)
+			}
+			id = resolved
+		}
+		if id == "" {
+			return nil, fmt.Errorf("hyperdrive binding %q: id or ref required", h.Name)
+		}
+		out = append(out, workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindHyperdrive{
+			Name: cloudflare.F(h.Name),
+			ID:   cloudflare.F(id),
+			Type: cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindHyperdriveTypeHyperdrive),
+		})
+	}
+
+	if b.Queues != nil {
+		for _, p := range b.Queues.Producers {
+			out = append(out, workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindQueue{
+				Name:      cloudflare.F(p.Name),
+				QueueName: cloudflare.F(p.Queue),
+				Type:      cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindQueueTypeQueue),
+			})
+		}
+		// Queue consumers are NOT bindings — they are Worker-level consumer
+		// configuration on a separate API surface, so they are deliberately
+		// absent from this metadata. They ARE registered: wireQueueConsumers
+		// → ensureQueueConsumer runs after the script upload (the consumer
+		// references the script by name, so the script must exist first).
+	}
+
+	for _, v := range b.Vectorize {
+		out = append(out, workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindVectorize{
+			Name:      cloudflare.F(v.Name),
+			IndexName: cloudflare.F(v.Index),
+			Type:      cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindVectorizeTypeVectorize),
+		})
+	}
+
+	for _, ai := range b.AI {
+		// AI binding takes only Name + Type. AI Gateway routing is a runtime
+		// option (env.AI.run(..., { gateway: { id } })), not metadata. We
+		// keep the YAML field for documentation but don't translate it.
+		out = append(out, workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindAI{
+			Name: cloudflare.F(ai.Name),
+			Type: cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindAITypeAI),
+		})
+	}
+
+	for _, do := range b.DurableObjects {
+		binding := workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindDurableObjectNamespace{
+			Name:      cloudflare.F(do.Name),
+			ClassName: cloudflare.F(do.ClassName),
+			Type:      cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindDurableObjectNamespaceTypeDurableObjectNamespace),
+		}
+		if do.Script != "" {
+			binding.ScriptName = cloudflare.F(do.Script)
+		}
+		out = append(out, binding)
+	}
+
+	for _, kv := range b.KV {
+		id := kv.NamespaceID
+		if id == "" && kv.Ref != "" {
+			resolved, ok := resolveRef("kv", kv.Ref)
+			if !ok {
+				return nil, fmt.Errorf("kv binding %q: ref %q not found in provisioned resources (run ProvisionResources first, or set namespace_id: explicitly)", kv.Name, kv.Ref)
+			}
+			id = resolved
+		}
+		if id == "" {
+			return nil, fmt.Errorf("kv binding %q: namespace_id or ref required", kv.Name)
+		}
+		out = append(out, workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindKVNamespace{
+			Name:        cloudflare.F(kv.Name),
+			NamespaceID: cloudflare.F(id),
+			Type:        cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindKVNamespaceTypeKVNamespace),
+		})
+	}
+
+	for _, pt := range b.PlainText {
+		out = append(out, workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindPlainText{
+			Name: cloudflare.F(pt.Name),
+			Text: cloudflare.F(pt.Value),
+			Type: cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindPlainTextTypePlainText),
+		})
+	}
+
+	for _, ss := range b.SecretsStore {
+		if ss.StoreID == "" || ss.SecretName == "" {
+			return nil, fmt.Errorf("secrets_store binding %q: store_id and secret_name are required", ss.Name)
+		}
+		out = append(out, workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindSecretsStoreSecret{
+			Name:       cloudflare.F(ss.Name),
+			StoreID:    cloudflare.F(ss.StoreID),
+			SecretName: cloudflare.F(ss.SecretName),
+			Type:       cloudflare.F(workers.ScriptUpdateParamsMetadataBindingsWorkersBindingKindSecretsStoreSecretTypeSecretsStoreSecret),
+		})
+	}
+
+	return out, nil
+}
+
+// buildMigrations converts the YAML migration list to the SDK multi-step form.
+// The last entry's tag becomes new_tag (the latest applied migration). We do
+// not set old_tag — the upload then becomes idempotent (CF will skip already-
+// applied tags rather than reject the upload). Tag mismatches that the user
+// wants enforced are a follow-up.
+func buildMigrations(ms []config.CFMigration) workers.ScriptUpdateParamsMetadataMigrationsWorkersMultipleStepMigrations {
+	steps := make([]workers.MigrationStepParam, 0, len(ms))
+	for _, m := range ms {
+		step := workers.MigrationStepParam{}
+		if len(m.NewSQLiteClasses) > 0 {
+			step.NewSqliteClasses = cloudflare.F(m.NewSQLiteClasses)
+		}
+		if len(m.NewClasses) > 0 {
+			step.NewClasses = cloudflare.F(m.NewClasses)
+		}
+		if len(m.DeletedClasses) > 0 {
+			step.DeletedClasses = cloudflare.F(m.DeletedClasses)
+		}
+		if len(m.RenamedClasses) > 0 {
+			rs := make([]workers.MigrationStepRenamedClassParam, len(m.RenamedClasses))
+			for i, r := range m.RenamedClasses {
+				rs[i] = workers.MigrationStepRenamedClassParam{
+					From: cloudflare.F(r.From),
+					To:   cloudflare.F(r.To),
+				}
+			}
+			step.RenamedClasses = cloudflare.F(rs)
+		}
+		if len(m.TransferredClasses) > 0 {
+			ts := make([]workers.MigrationStepTransferredClassParam, len(m.TransferredClasses))
+			for i, t := range m.TransferredClasses {
+				ts[i] = workers.MigrationStepTransferredClassParam{
+					From:       cloudflare.F(t.From),
+					FromScript: cloudflare.F(t.FromScript),
+					To:         cloudflare.F(t.To),
+				}
+			}
+			step.TransferredClasses = cloudflare.F(ts)
+		}
+		steps = append(steps, step)
+	}
+	out := workers.ScriptUpdateParamsMetadataMigrationsWorkersMultipleStepMigrations{
+		Steps: cloudflare.F(steps),
+	}
+	if len(ms) > 0 {
+		out.NewTag = cloudflare.F(ms[len(ms)-1].Tag)
+	}
+	return out
+}

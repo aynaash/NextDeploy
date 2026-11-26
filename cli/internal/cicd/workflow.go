@@ -158,6 +158,7 @@ jobs:
         if: steps.detect.outputs.type == 'vps'
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
           SSH_KEY_PASSPHRASE: ${{ secrets.SSH_KEY_PASSPHRASE }}
@@ -171,6 +172,8 @@ jobs:
               (curl -Ls --tlsv1.2 --proto "=https" --retry 3 https://cli.doppler.com/install.sh || wget -t 3 -qO- https://cli.doppler.com/install.sh) | sudo sh
             fi
             RUN_PREFIX="doppler run --"
+            VPS_HOST=$(doppler secrets get VPS_HOST --plain 2>/dev/null || echo "$VPS_HOST")
+            export VPS_HOST
             KEY=$(doppler secrets get SSH_PRIVATE_KEY --plain 2>/dev/null || echo "$SSH_PRIVATE_KEY")
             HOSTS=$(doppler secrets get SSH_KNOWN_HOSTS --plain 2>/dev/null || echo "$SSH_KNOWN_HOSTS")
             SSH_KEY_PASSPHRASE=$(doppler secrets get SSH_KEY_PASSPHRASE --plain 2>/dev/null || echo "$SSH_KEY_PASSPHRASE")

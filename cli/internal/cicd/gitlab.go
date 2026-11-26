@@ -135,6 +135,8 @@ deploy:
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           if [ -n "${DOPPLER_TOKEN:-}" ]; then
+            VPS_HOST=$(doppler secrets get VPS_HOST --plain 2>/dev/null || echo "${VPS_HOST:-}")
+            export VPS_HOST
             KEY=$(doppler secrets get SSH_PRIVATE_KEY --plain 2>/dev/null || echo "${SSH_PRIVATE_KEY:-}")
             HOSTS=$(doppler secrets get SSH_KNOWN_HOSTS --plain 2>/dev/null || echo "${SSH_KNOWN_HOSTS:-}")
             SSH_KEY_PASSPHRASE=$(doppler secrets get SSH_KEY_PASSPHRASE --plain 2>/dev/null || echo "${SSH_KEY_PASSPHRASE:-}")

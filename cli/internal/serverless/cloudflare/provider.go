@@ -1,0 +1,1793 @@
+// Package cloudflare implements the Cloudflare Workers and R2 serverless provider.
+package cloudflare
+
+import (
+	"context"
+	"crypto/md5" // #nosec G501 — R2 ETag is content MD5; not used for security
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"maps"
+	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/aynaash/nextdeploy/cli/internal/serverless/cloudflare/adapter"
+	"github.com/aynaash/nextdeploy/cli/internal/serverless/core"
+	"github.com/aynaash/nextdeploy/internal/packaging"
+	"github.com/aynaash/nextdeploy/shared"
+	"github.com/aynaash/nextdeploy/shared/config"
+	"github.com/aynaash/nextdeploy/shared/credstore"
+	"github.com/aynaash/nextdeploy/shared/nextcore"
+	"github.com/aynaash/nextdeploy/shared/sensitive"
+	"golang.org/x/net/publicsuffix"
+
+	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+
+	"github.com/cloudflare/cloudflare-go/v6"
+	"github.com/cloudflare/cloudflare-go/v6/cache"
+	"github.com/cloudflare/cloudflare-go/v6/option"
+	"github.com/cloudflare/cloudflare-go/v6/r2"
+	"github.com/cloudflare/cloudflare-go/v6/workers"
+	"github.com/cloudflare/cloudflare-go/v6/zones"
+)
+
+// CloudflareProvider implements Provider for Cloudflare Workers + R2.
+//
+// IMPORTANT — Next.js compatibility status:
+//
+// Cloudflare Workers do not run vanilla Node.js, so a Next.js standalone
+// build cannot be uploaded as-is. Production deployments require the
+// build to be adapted into a Worker-compatible bundle (see the cloudflare
+// adapter step in the packager). Until that lands, DeployCompute will log
+// a loud warning when given a non-static-export build.
+//
+// SDK usage:
+//   - Management plane (workers, secrets, routes, R2 buckets, zone, cache):
+//     github.com/cloudflare/cloudflare-go/v6
+//   - R2 object plane (PUT/GET/DELETE objects): the SDK does not cover this;
+//     we use the AWS S3 SDK pointed at R2's S3-compatible endpoint
+//     (https://<account>.r2.cloudflarestorage.com).
+//
+// Credentials (resolved in this order — first non-empty wins):
+//  1. Environment variables (CI-friendly, ephemeral)
+//  2. Encrypted credstore at ~/.nextdeploy/credstore (per-machine, mode 0600)
+//  3. Plaintext nextdeploy.yml (LEGACY — emits a loud WARN; prefer 1 or 2)
+//
+// Field map:
+//   - CF API token:    CLOUDFLARE_API_TOKEN     | credstore[cloudflare].api_token         | cloudprovider.access_key
+//   - CF account ID:   CLOUDFLARE_ACCOUNT_ID    | credstore[cloudflare].account_id        | cloudprovider.account_id
+//   - R2 access key:   R2_ACCESS_KEY_ID         | credstore[cloudflare].r2_access_key_id  | (no yaml fallback)
+//   - R2 secret key:   R2_SECRET_ACCESS_KEY     | credstore[cloudflare].r2_secret_key     | (no yaml fallback)
+//
+// Every resolved value is registered with the sensitive scrubber so it never
+// leaks into log lines or error messages.
+type CloudflareProvider struct {
+	log         *shared.Logger
+	cf          *cloudflare.Client
+	r2s3        *s3.Client // S3-compat client for R2 objects (lazy: built on first DeployStatic)
+	accountID   string
+	apiToken    string // raw token value, kept so we can derive R2 creds from it
+	apiTokenID  string // populated by verifyToken; the access-key-id half of derived R2 creds
+	r2AccessKey string
+	r2SecretKey string
+	// r2ParentKeyID, when set, lets DeployStatic mint short-lived temp R2
+	// credentials via /accounts/:id/r2/temp-access-credentials instead of
+	// using a long-lived R2_SECRET_ACCESS_KEY. The parent key authorizes
+	// the scope; the temp creds expire in ~1 hour.
+	r2ParentKeyID string
+	environment   string       // populated in Initialize
+	provisioned   *resourceMap // standalone resource name → CF UUID, populated by ProvisionResources
+
+	// pendingSecrets holds secrets staged via UpdateSecrets() that have not
+	// yet been folded into a Worker upload. DeployCompute reads them, emits
+	// them as secret_text bindings in the script metadata, and clears them
+	// on success. This avoids the per-secret PUT loop (which is rate-
+	// limited to ~13 req/s by CF, error code 10013) — instead the entire
+	// secret set lands atomically in one Workers.Scripts.Update call.
+	//
+	// Standalone rotation paths (SetSecret/UnsetSecret) still use the
+	// per-secret API and bypass this stash.
+	pendingSecrets map[string]string
+}
+
+// cloudflareCreds is the resolved bag returned by loadCloudflareCreds.
+type cloudflareCreds struct {
+	apiToken      string
+	accountID     string
+	r2AccessKey   string
+	r2SecretKey   string
+	r2ParentKeyID string // permanent R2 access key id used to mint short-lived temp creds
+}
+
+// loadCloudflareCreds resolves credentials in the documented precedence order
+// (env → credstore → yaml). Yaml usage emits a single WARN per call so leaks
+// via committed config get noticed.
+func loadCloudflareCreds(cfg *config.NextDeployConfig, log *shared.Logger) cloudflareCreds {
+	c := cloudflareCreds{
+		apiToken:      os.Getenv("CLOUDFLARE_API_TOKEN"),
+		accountID:     os.Getenv("CLOUDFLARE_ACCOUNT_ID"),
+		r2AccessKey:   os.Getenv("R2_ACCESS_KEY_ID"),
+		r2SecretKey:   os.Getenv("R2_SECRET_ACCESS_KEY"),
+		r2ParentKeyID: os.Getenv("R2_PARENT_ACCESS_KEY_ID"),
+	}
+
+	if c.apiToken == "" || c.accountID == "" || c.r2AccessKey == "" || c.r2SecretKey == "" || c.r2ParentKeyID == "" {
+		stored, err := credstore.Load("cloudflare")
+		if err == nil {
+			if c.apiToken == "" {
+				c.apiToken = stored["api_token"]
+			}
+			if c.accountID == "" {
+				c.accountID = stored["account_id"]
+			}
+			if c.r2AccessKey == "" {
+				c.r2AccessKey = stored["r2_access_key_id"]
+			}
+			if c.r2SecretKey == "" {
+				c.r2SecretKey = stored["r2_secret_key"]
+			}
+			if c.r2ParentKeyID == "" {
+				c.r2ParentKeyID = stored["r2_parent_access_key_id"]
+			}
+		}
+	}
+
+	if cfg.CloudProvider != nil {
+		usedYaml := false
+		if c.apiToken == "" && cfg.CloudProvider.AccessKey != "" {
+			c.apiToken = cfg.CloudProvider.AccessKey
+			usedYaml = true
+		}
+		if c.accountID == "" && cfg.CloudProvider.AccountID != "" {
+			c.accountID = cfg.CloudProvider.AccountID
+		}
+		if usedYaml {
+			log.Warn("⚠️  Cloudflare API token loaded from nextdeploy.yml — committing this file leaks creds.")
+			log.Warn("⚠️  Recommended: 'nextdeploy creds set --provider cloudflare' (encrypted, mode 0600).")
+		}
+	}
+	return c
+}
+
+func NewCloudflareProvider() *CloudflareProvider {
+	return &CloudflareProvider{
+		log: shared.PackageLogger("cloudflare", "☁️  CF::"),
+	}
+}
+
+// sanitizeCFName coerces s into a valid Cloudflare resource name (Worker script
+// or R2 bucket): lowercase, only [a-z0-9-], no leading/trailing or repeated
+// hyphens, capped at 63 chars. R2 rejects anything else with error 10005 ("The
+// specified bucket name is not valid"), and Worker script names share the same
+// constraint — so an app named e.g. "NextDeploy" must be folded to "nextdeploy".
+func sanitizeCFName(s string) string {
+	var b strings.Builder
+	lastHyphen := false
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+			lastHyphen = false
+		case b.Len() > 0 && !lastHyphen:
+			b.WriteByte('-')
+			lastHyphen = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if len(out) > 63 {
+		out = strings.Trim(out[:63], "-")
+	}
+	return out
+}
+
+// CloudflareWorkerName returns the Worker script name for an app+environment.
+// Exported so the CLI can print it (preview-URL composition) and tests can
+// assert it without constructing a provider.
+//
+// The environment IS the namespace: "" (→ production) yields <app>-production,
+// "pr-42" yields <app>-pr-42 — a completely separate Worker script. That's what
+// makes per-PR preview stacks, and their teardown, safe by construction.
+func CloudflareWorkerName(appName, environment string) string {
+	if environment == "" {
+		environment = "production"
+	}
+	return sanitizeCFName(fmt.Sprintf("%s-%s", appName, environment))
+}
+
+// CloudflareAssetBucketName is the env-scoped R2 asset bucket for an app.
+// Same namespacing rule as CloudflareWorkerName.
+func CloudflareAssetBucketName(appName, environment string) string {
+	if environment == "" {
+		environment = "production"
+	}
+	return sanitizeCFName(fmt.Sprintf("nextdeploy-%s-%s-assets", appName, environment))
+}
+
+func (p *CloudflareProvider) workerName(appName string) string {
+	return CloudflareWorkerName(appName, p.environment)
+}
+
+func (p *CloudflareProvider) bucketNameFromApp(appName string) string {
+	return CloudflareAssetBucketName(appName, p.environment)
+}
+
+// isProductionEnv returns true when the current environment is production (the
+// empty string or "production"). Non-production environments (e.g. "pr-42",
+// "staging") must never mutate production custom domains, routes, DNS records,
+// or purge the production zone cache — those mutations would hijack or delete
+// live production traffic.
+func (p *CloudflareProvider) isProductionEnv() bool {
+	return p.environment == "" || p.environment == "production"
+}
+
+// Initialize wires up the Cloudflare SDK client and verifies the API token.
+//
+// The deploy is designed around a single-token UX: the user sets
+// CLOUDFLARE_API_TOKEN and everything else (account ID, optionally R2
+// credentials) is derived. If they want explicit overrides, env or
+// credstore wins.
+func (p *CloudflareProvider) Initialize(ctx context.Context, cfg *config.NextDeployConfig) error {
+	p.log.Info("Initializing Cloudflare deployment session...")
+
+	p.environment = cfg.App.Environment
+
+	creds := loadCloudflareCreds(cfg, p.log)
+	if creds.apiToken == "" {
+		return fmt.Errorf("cloudflare API token not found (set CLOUDFLARE_API_TOKEN env, run 'nextdeploy creds set --provider cloudflare', or set cloudprovider.access_key in nextdeploy.yml)")
+	}
+
+	sensitive.Register(creds.apiToken, creds.r2AccessKey, creds.r2SecretKey, creds.r2ParentKeyID)
+	p.apiToken = creds.apiToken
+	p.r2AccessKey = creds.r2AccessKey
+	p.r2SecretKey = creds.r2SecretKey
+	p.r2ParentKeyID = creds.r2ParentKeyID
+
+	// 15-minute per-request timeout: Worker uploads can be multi-megabyte
+	// multipart bundles, and observed end-to-end latency on residential
+	// connections + CF API processing has hit 5+ minutes for ~3MB
+	// scripts. The SDK's WithRequestTimeout is per-retry, so the actual
+	// wall-clock budget for a failing upload is timeout × MaxRetries.
+	// Every other CF API call (zone list, DNS edit, secret list) returns
+	// in well under a second, so the longer ceiling doesn't slow happy
+	// paths. We also disable retries for the upload path because
+	// re-uploading a 3MB bundle on a transient 5xx adds latency without
+	// helping recover — the operator will rerun `nextdeploy ship`
+	// faster than the SDK's retry-with-backoff.
+	p.cf = cloudflare.NewClient(
+		option.WithAPIToken(creds.apiToken),
+		option.WithRequestTimeout(15*time.Minute),
+		option.WithMaxRetries(0),
+	)
+
+	if err := p.verifyToken(ctx); err != nil {
+		return err
+	}
+
+	if !looksLikeCloudflareAccountID(creds.accountID) {
+		if creds.accountID != "" {
+			p.log.Warn("Ignoring CLOUDFLARE_ACCOUNT_ID=%q — doesn't look like a real account id (expect 32 hex chars). Will try auto-discovery.", creds.accountID)
+		}
+		discovered, err := p.discoverAccountID(ctx)
+		if err != nil {
+			return fmt.Errorf("cloudflare account ID not provided and auto-discovery failed: %w (set CLOUDFLARE_ACCOUNT_ID env or cloudprovider.account_id in nextdeploy.yml)", err)
+		}
+		creds.accountID = discovered
+		p.log.Info("Auto-discovered account ID: %s", creds.accountID)
+	}
+	p.accountID = creds.accountID
+
+	// Long-lived R2 keys take precedence (preserves existing CI configs).
+	// Otherwise the s3 client is built lazily in DeployStatic, after we
+	// mint short-lived creds from the parent key.
+	if p.r2AccessKey != "" && p.r2SecretKey != "" {
+		p.r2s3 = newR2S3Client(p.accountID, p.r2AccessKey, p.r2SecretKey, "")
+	}
+
+	p.log.Info("Cloudflare session initialized (account: %s)", p.accountID)
+	return nil
+}
+
+// verifyToken hits /user/tokens/verify and returns a clear error if the token
+// is invalid or expired. The endpoint confirms the token is alive but does
+// not enumerate scopes — scope failures will surface as 403s on the first
+// API call that needs the missing permission. The error here lists the
+// scopes a typical end-to-end deploy needs so users can sanity-check
+// their token in the CF dashboard.
+//
+// The response also carries the token's `id`. Per Cloudflare's docs, that
+// id is also the R2 S3-compat access-key-id half when the token's secret
+// half is hashed via SHA-256. We stash the id on the provider so
+// DeployStatic can derive R2 credentials from the API token alone — no
+// separate R2 dashboard click required.
+func (p *CloudflareProvider) verifyToken(ctx context.Context) error {
+	var verify struct {
+		Success bool `json:"success"`
+		Result  struct {
+			ID        string `json:"id"`
+			Status    string `json:"status"`
+			ExpiresOn string `json:"expires_on"`
+		} `json:"result"`
+		Errors []struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := p.cf.Get(ctx, "/user/tokens/verify", nil, &verify); err != nil {
+		return fmt.Errorf("cloudflare token verification failed: %w\n\n%s", err, requiredScopesHint())
+	}
+	if !verify.Success {
+		msg := "cloudflare API token is invalid"
+		if len(verify.Errors) > 0 {
+			msg = fmt.Sprintf("%s: %s (code %d)", msg, verify.Errors[0].Message, verify.Errors[0].Code)
+		}
+		return fmt.Errorf("%s\n\n%s", msg, requiredScopesHint())
+	}
+	if verify.Result.Status != "" && verify.Result.Status != "active" {
+		return fmt.Errorf("cloudflare API token status is %q (need \"active\")", verify.Result.Status)
+	}
+	p.apiTokenID = verify.Result.ID
+	return nil
+}
+
+// looksLikeCloudflareAccountID accepts what Cloudflare actually issues
+// (32 lowercase hex characters) and rejects everything else, including
+// the obvious placeholder strings that get pasted from sample configs:
+// "YOUR_CLOUDFLARE_ACCOUNT_ID", "<account-id>", "REPLACE_ME", empty,
+// dashboard URLs the user accidentally pasted, etc.
+//
+// Treating those as "no account id" lets the auto-discovery path kick
+// in instead of letting them flow through to a 404 from /accounts/<bad>.
+func looksLikeCloudflareAccountID(s string) bool {
+	if len(s) != 32 {
+		return false
+	}
+	for _, r := range s {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// deriveR2CredsFromAPIToken returns the (accessKeyId, secretAccessKey)
+// pair that R2's S3 endpoint accepts for a given Cloudflare API token,
+// without any extra dashboard step or API call.
+//
+// Per Cloudflare's R2 docs:
+//
+//	The Access Key ID corresponds to the API token's `id`,
+//	and the Secret Access Key is the SHA-256 hash of the API token `value`.
+//
+// id is captured from /user/tokens/verify in verifyToken. value is the
+// raw bearer string the user already exported as CLOUDFLARE_API_TOKEN.
+//
+// This is the zero-config path: a token with the right scopes
+// (Workers R2 Storage: Edit) Just Works for both bucket management *and*
+// object PUT, the same way an AWS IAM key handles both planes.
+func deriveR2CredsFromAPIToken(tokenID, tokenValue string) (akid, secret string, ok bool) {
+	if tokenID == "" || tokenValue == "" {
+		return "", "", false
+	}
+	sum := sha256.Sum256([]byte(tokenValue))
+	return tokenID, hex.EncodeToString(sum[:]), true
+}
+
+// requiredScopesHint lists the token permissions a full nextdeploy CF deploy
+// uses. Surfaced in error messages so users know what to check when a deep
+// API call fails 403.
+func requiredScopesHint() string {
+	return "Required token scopes (Account):\n" +
+		"  • Workers Scripts: Edit\n" +
+		"  • Workers Routes: Edit\n" +
+		"  • Workers KV Storage: Edit (if using KV)\n" +
+		"  • Workers R2 Storage: Edit\n" +
+		"  • Workers Tail: Read\n" +
+		"  • Account Settings: Read\n" +
+		"  • D1: Edit (if using D1)\n" +
+		"  • Hyperdrive: Edit (if using Hyperdrive)\n" +
+		"  • Vectorize: Edit (if using Vectorize)\n" +
+		"  • AI Gateway: Edit (if using AI Gateway)\n" +
+		"Required token scopes (Zone, on each zone you deploy to):\n" +
+		"  • Zone: Read\n" +
+		"  • DNS: Edit\n" +
+		"  • Cache Purge: Purge"
+}
+
+// discoverAccountID lists the accounts the API token can see. Returns the
+// account ID if exactly one is visible. If multiple are visible, returns an
+// error listing them so the user can pick one explicitly.
+func (p *CloudflareProvider) discoverAccountID(ctx context.Context) (string, error) {
+	var resp struct {
+		Success bool `json:"success"`
+		Result  []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"result"`
+	}
+	if err := p.cf.Get(ctx, "/accounts", nil, &resp); err != nil {
+		return "", err
+	}
+	if !resp.Success || len(resp.Result) == 0 {
+		return "", fmt.Errorf("no accounts visible to this token")
+	}
+	if len(resp.Result) == 1 {
+		return resp.Result[0].ID, nil
+	}
+	names := make([]string, 0, len(resp.Result))
+	for _, a := range resp.Result {
+		names = append(names, fmt.Sprintf("  %s  (%s)", a.ID, a.Name))
+	}
+	return "", fmt.Errorf("token sees %d accounts, cannot pick one — set CLOUDFLARE_ACCOUNT_ID explicitly:\n%s",
+		len(resp.Result), strings.Join(names, "\n"))
+}
+
+// newR2S3Client builds an S3 client configured against the R2 S3-compatible
+// endpoint. Returns nil if R2 credentials are not present; callers must check
+// before issuing object PUTs.
+//
+// sessionToken is the third element of an STS-style triple, set when the
+// (akid, secret) pair was minted via /r2/temp-access-credentials. Pass ""
+// for permanent R2 access keys.
+//
+// UsePathStyle MUST be true for the default R2 endpoint. R2's TLS cert is
+// a wildcard *.r2.cloudflarestorage.com that only matches one subdomain
+// level, so virtual-hosted-style URLs (bucket.account.r2.cloudflarestorage.com)
+// fail TLS handshake. Path-style (account.r2.cloudflarestorage.com/bucket/key)
+// matches the cert and works. Custom-domain buckets can opt back into
+// virtual-hosted later, but that's out of scope here.
+func newR2S3Client(accountID, akid, secret, sessionToken string) *s3.Client {
+	if akid == "" || secret == "" {
+		return nil
+	}
+	endpoint := fmt.Sprintf("https://%s.r2.cloudflarestorage.com", accountID)
+	return s3.New(s3.Options{
+		Region:       "auto",
+		BaseEndpoint: awsv2.String(endpoint),
+		Credentials:  credentials.NewStaticCredentialsProvider(akid, secret, sessionToken),
+		UsePathStyle: true,
+	})
+}
+
+// r2TempCreds is the body returned by /accounts/:id/r2/temp-access-credentials.
+// CF wraps it in the standard {"success": bool, "result": {...}} envelope.
+type r2TempCreds struct {
+	AccessKeyID     string `json:"accessKeyId"`
+	SecretAccessKey string `json:"secretAccessKey"`
+	SessionToken    string `json:"sessionToken"`
+}
+
+// mintR2TempCreds asks Cloudflare for a short-lived R2 credential triple
+// scoped to a single bucket. The returned creds are good for ttl seconds
+// (clamped to [60, 36*3600] by the API; we ask for one hour).
+//
+// The endpoint is authenticated via the API token (Bearer) — the parent
+// access key id is the *authority* for the temp creds, but the call itself
+// rides the API token. So callers don't need the parent key's *secret*,
+// only the id.
+//
+// permission is one of:
+//
+//	"object-read-only", "object-read-write",
+//	"admin-read-only", "admin-read-write",
+//	"admin-object-only-read-only", "admin-object-only-read-write".
+//
+// We use "object-read-write" — uploads but no bucket-level admin.
+func (p *CloudflareProvider) mintR2TempCreds(ctx context.Context, bucket string) (r2TempCreds, error) {
+	if p.r2ParentKeyID == "" {
+		return r2TempCreds{}, fmt.Errorf("R2_PARENT_ACCESS_KEY_ID not set")
+	}
+	body := map[string]any{
+		"bucket":            bucket,
+		"parentAccessKeyId": p.r2ParentKeyID,
+		"permission":        "object-read-write",
+		"ttlSeconds":        3600,
+	}
+	var resp struct {
+		Success bool        `json:"success"`
+		Result  r2TempCreds `json:"result"`
+		Errors  []struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	path := fmt.Sprintf("/accounts/%s/r2/temp-access-credentials", p.accountID)
+	if err := p.cf.Post(ctx, path, body, &resp); err != nil {
+		return r2TempCreds{}, fmt.Errorf("mint r2 temp creds: %w", err)
+	}
+	if !resp.Success {
+		msg := "mint r2 temp creds: api returned success=false"
+		if len(resp.Errors) > 0 {
+			msg = fmt.Sprintf("%s (%s, code %d)", msg, resp.Errors[0].Message, resp.Errors[0].Code)
+		}
+		return r2TempCreds{}, fmt.Errorf("%s", msg)
+	}
+	if resp.Result.AccessKeyID == "" || resp.Result.SecretAccessKey == "" {
+		return r2TempCreds{}, fmt.Errorf("mint r2 temp creds: empty creds in response")
+	}
+	sensitive.Register(resp.Result.AccessKeyID, resp.Result.SecretAccessKey, resp.Result.SessionToken)
+	return resp.Result, nil
+}
+
+// DeployStatic uploads the package's static assets to an R2 bucket via the
+// S3-compatible endpoint. R2 management (bucket creation) goes through the
+// official SDK.
+//
+// R2 object PUTs use S3-protocol HMAC auth, not Bearer; cloudflare-go
+// doesn't expose object operations. Credential resolution order, designed
+// so the zero-config path is the default:
+//
+//  1. Explicit long-lived pair (R2_ACCESS_KEY_ID + R2_SECRET_ACCESS_KEY in
+//     env / credstore). Used as-is. Preserves existing CI configs.
+//  2. **Auto-derived from the CF API token.** Per CF's R2 docs, the access
+//     key id is the API token's `id` (captured in verifyToken via
+//     /user/tokens/verify) and the secret access key is SHA-256 of the
+//     token's `value`. No dashboard click, no extra scope beyond
+//     "Workers R2 Storage: Edit", no minting endpoint. This is the
+//     intended one-token-end-to-end path.
+//  3. Parent-key fallback (R2_PARENT_ACCESS_KEY_ID set): mint a 1-hour
+//     scoped child via /accounts/:id/r2/temp-access-credentials.
+//     Useful when the API token deliberately doesn't have R2 scope but a
+//     dedicated R2 parent key does.
+//  4. None of the above — fail with dashboard URL.
+func (p *CloudflareProvider) DeployStatic(ctx context.Context, pkg *packaging.PackageResult, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) error {
+	bucketName := p.getBucketName(cfg)
+
+	if err := p.ensureR2BucketExists(ctx, bucketName); err != nil {
+		return fmt.Errorf("failed to ensure R2 bucket: %w", err)
+	}
+
+	if err := p.ensureR2Client(ctx, bucketName); err != nil {
+		return err
+	}
+
+	p.log.Info("Uploading %d static assets to R2 bucket %s...", len(pkg.S3Assets), bucketName)
+
+	// Two-phase upload (D1): immutable content-hashed chunks first, so that by
+	// the time any mutable HTML referencing them becomes visible in R2, every
+	// chunk it points at already exists. uploadBatch wg.Wait()s internally, so
+	// its return is a hard barrier between the phases. A failure in the
+	// immutable phase aborts before any mutable key is touched.
+	immutable, mutable := partitionAssets(pkg.S3Assets)
+	if meta != nil && meta.OutputMode != nextcore.OutputModeExport {
+		if len(mutable) > 0 {
+			version, err := assetVersionForAssets(mutable)
+			if err != nil {
+				return fmt.Errorf("fingerprint mutable assets: %w", err)
+			}
+			meta.AssetVersion = version
+			mutable = versionMutableAssets(mutable, version)
+			p.log.Info("Versioning %d mutable R2 assets for build %s", len(mutable), version[:12])
+		}
+	}
+
+	upImm, skImm, err := p.uploadBatch(ctx, bucketName, immutable)
+	if err != nil {
+		return fmt.Errorf("upload immutable assets: %w", err)
+	}
+	upMut, skMut, err := p.uploadBatch(ctx, bucketName, mutable)
+	if err != nil {
+		return fmt.Errorf("upload mutable assets: %w", err)
+	}
+
+	uploaded, skipped := upImm+upMut, skImm+skMut
+	if skipped > 0 {
+		p.log.Info("R2 asset sync: %d uploaded, %d skipped (content unchanged)", uploaded, skipped)
+	} else {
+		p.log.Info("R2 asset sync: %d uploaded to %s", uploaded, bucketName)
+	}
+	return nil
+}
+
+const mutableAssetPrefix = "_nextdeploy/releases/"
+
+func versionMutableAssets(assets []packaging.S3Asset, version string) []packaging.S3Asset {
+	versioned := make([]packaging.S3Asset, len(assets))
+	for i, asset := range assets {
+		asset.S3Key = mutableAssetPrefix + version + "/" + strings.TrimLeft(asset.S3Key, "/")
+		versioned[i] = asset
+	}
+	return versioned
+}
+
+func assetVersionForAssets(assets []packaging.S3Asset) (string, error) {
+	ordered := append([]packaging.S3Asset(nil), assets...)
+	slices.SortFunc(ordered, func(a, b packaging.S3Asset) int {
+		return strings.Compare(a.S3Key, b.S3Key)
+	})
+
+	hash := sha256.New()
+	for _, asset := range ordered {
+		if _, err := fmt.Fprintf(hash, "%d:", len(asset.S3Key)); err != nil {
+			return "", err
+		}
+		if _, err := io.WriteString(hash, asset.S3Key); err != nil {
+			return "", err
+		}
+		file, err := os.Open(asset.LocalPath) // #nosec G304 — packager output path
+		if err != nil {
+			return "", fmt.Errorf("open %s: %w", asset.LocalPath, err)
+		}
+		contentHash := sha256.New()
+		_, copyErr := io.Copy(contentHash, file)
+		closeErr := file.Close()
+		if copyErr != nil {
+			return "", fmt.Errorf("hash %s: %w", asset.LocalPath, copyErr)
+		}
+		if closeErr != nil {
+			return "", fmt.Errorf("close %s: %w", asset.LocalPath, closeErr)
+		}
+		if _, err := hash.Write(contentHash.Sum(nil)); err != nil {
+			return "", err
+		}
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// immutableKeyPrefix marks content-hashed assets that are safe to upload before
+// any mutable HTML/RSC (see the two-phase upload in DeployStatic): new hashes
+// never collide with old ones and old ones are never deleted. The packager
+// emits these under _next/static/ with a "…, immutable" Cache-Control; the key
+// prefix is the authoritative signal — packaging.S3Asset has no Immutable field.
+const immutableKeyPrefix = "_next/static/"
+
+// partitionAssets splits the packaged asset set into immutable content-hashed
+// chunks (uploaded first) and mutable stable-key assets (prerendered HTML/RSC +
+// public/, uploaded second, after the chunks they reference exist in R2).
+func partitionAssets(assets []packaging.S3Asset) (immutable, mutable []packaging.S3Asset) {
+	for _, a := range assets {
+		if strings.HasPrefix(a.S3Key, immutableKeyPrefix) {
+			immutable = append(immutable, a)
+		} else {
+			mutable = append(mutable, a)
+		}
+	}
+	return immutable, mutable
+}
+
+// uploadBatch uploads assets to R2 with bounded concurrency, HEAD-skipping
+// objects whose content is unchanged. Returns per-batch counts so the two-phase
+// caller can log a combined summary. wg.Wait() makes the return a hard barrier.
+func (p *CloudflareProvider) uploadBatch(ctx context.Context, bucket string, assets []packaging.S3Asset) (uploaded, skipped int64, err error) {
+	const cfR2UploadConcurrency = 8
+	sem := make(chan struct{}, cfR2UploadConcurrency)
+	errs := make(chan error, len(assets))
+	var wg sync.WaitGroup
+
+	var up, sk atomic.Int64
+
+	for _, asset := range assets {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			didUpload, uploadErr := p.uploadToR2IfChanged(ctx, bucket, asset)
+			if uploadErr != nil {
+				errs <- fmt.Errorf("upload %s: %w", asset.S3Key, uploadErr)
+				return
+			}
+			if didUpload {
+				up.Add(1)
+			} else {
+				sk.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for e := range errs {
+		if e != nil {
+			return up.Load(), sk.Load(), e
+		}
+	}
+	return up.Load(), sk.Load(), nil
+}
+
+// ensureR2Client lazily initializes the S3-compatible R2 client (p.r2s3) used
+// for object uploads and teardown sweeps. Credential tiers: an explicit
+// parent-key opt-in (R2_PARENT_ACCESS_KEY_ID) mints short-lived creds, otherwise
+// creds are derived from the API token. No-op when already initialized.
+func (p *CloudflareProvider) ensureR2Client(ctx context.Context, bucketName string) error {
+	if p.r2s3 != nil {
+		return nil
+	}
+	switch {
+	case p.r2ParentKeyID != "":
+		// Explicit opt-in wins: the user set R2_PARENT_ACCESS_KEY_ID because
+		// their API token lacks R2 scope.
+		p.log.Info("Minting short-lived R2 creds for bucket %s (parent: %s…)", bucketName, p.r2ParentKeyID[:min(8, len(p.r2ParentKeyID))])
+		creds, err := p.mintR2TempCreds(ctx, bucketName)
+		if err != nil {
+			return fmt.Errorf("R2 temp credential minting failed: %w", err)
+		}
+		p.r2s3 = newR2S3Client(p.accountID, creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken)
+	default:
+		// Tier 2: derive R2 creds from the API token. Default zero-config path.
+		if akid, secret, ok := deriveR2CredsFromAPIToken(p.apiTokenID, p.apiToken); ok {
+			sensitive.Register(secret)
+			p.log.Info("Using R2 credentials derived from API token (zero-config path)")
+			p.r2s3 = newR2S3Client(p.accountID, akid, secret, "")
+		}
+	}
+	if p.r2s3 == nil {
+		return fmt.Errorf(
+			"R2 access needs credentials. The CLOUDFLARE_API_TOKEN you\n" +
+				"provided didn't expose a token id — that's unexpected. Check that\n" +
+				"the token has 'Workers R2 Storage: Edit' scope. As a fallback you\n" +
+				"can export an explicit pair (R2_ACCESS_KEY_ID + R2_SECRET_ACCESS_KEY)\n" +
+				"or just R2_PARENT_ACCESS_KEY_ID — see\n" +
+				"https://dash.cloudflare.com/?to=/:account/r2/api-tokens",
+		)
+	}
+	return nil
+}
+
+// uploadToR2IfChanged HEADs the object first and skips the PUT when the
+// remote ETag (R2 sets it to MD5 of the object body for non-multipart
+// uploads) matches the local file's MD5. Returns (didUpload, err) so the
+// caller can count uploaded vs. skipped.
+//
+// HeadObject costs one round trip but no body transfer; PUT pays the full
+// transfer cost. For large asset sets that change rarely (the common case
+// for /_next/static and /public), this turns N PUTs of N MB into N HEADs
+// of zero bytes — the dominant savings on a redeploy.
+func (p *CloudflareProvider) uploadToR2IfChanged(ctx context.Context, bucket string, asset packaging.S3Asset) (bool, error) {
+	localETag, err := md5OfFile(asset.LocalPath)
+	if err != nil {
+		return false, fmt.Errorf("hash %s: %w", asset.LocalPath, err)
+	}
+	if remoteETag, ok := p.headR2ETag(ctx, bucket, asset.S3Key); ok && remoteETag == localETag {
+		return false, nil
+	}
+	if err := p.putToR2(ctx, bucket, asset); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// headR2ETag returns the remote ETag (with the surrounding quotes that S3
+// returns trimmed off). Returns (_, false) on any error — including 404,
+// permission errors, network errors — so callers fall through to PUT.
+// Skipping a PUT we *should* have done just costs an extra round trip
+// next time; doing one we shouldn't have wastes bandwidth. We err toward
+// uploading.
+func (p *CloudflareProvider) headR2ETag(ctx context.Context, bucket, key string) (string, bool) {
+	out, err := p.r2s3.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: awsv2.String(bucket),
+		Key:    awsv2.String(key),
+	})
+	if err != nil || out.ETag == nil {
+		return "", false
+	}
+	return strings.Trim(*out.ETag, `"`), true
+}
+
+// md5OfFile streams a file through md5 and returns the lowercase hex
+// digest. Used to compare against R2 ETags. md5 is not used for any
+// security purpose here — R2's ETag scheme (S3-compatible) just happens
+// to be the content MD5 for single-part uploads, so we have to match it.
+func md5OfFile(path string) (string, error) {
+	f, err := os.Open(path) // #nosec G304 — caller-validated path
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := md5.New() // #nosec G401 — see comment on import
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// sha256OfFile streams a file through SHA-256 and returns the raw digest.
+// Used to fingerprint the Worker bundle for the deploy-hash skip check
+// without reading the (multi-MB) bundle into memory.
+func sha256OfFile(path string) ([32]byte, error) {
+	var sum [32]byte
+	f, err := os.Open(path) // #nosec G304 — caller-validated path (packager output)
+	if err != nil {
+		return sum, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return sum, err
+	}
+	copy(sum[:], h.Sum(nil))
+	return sum, nil
+}
+
+func (p *CloudflareProvider) putToR2(ctx context.Context, bucket string, asset packaging.S3Asset) error {
+	f, err := os.Open(asset.LocalPath) // #nosec G304
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	input := &s3.PutObjectInput{
+		Bucket:      awsv2.String(bucket),
+		Key:         awsv2.String(asset.S3Key),
+		Body:        f,
+		ContentType: awsv2.String(asset.ContentType),
+	}
+	if asset.CacheControl != "" {
+		input.CacheControl = awsv2.String(asset.CacheControl)
+	}
+	_, err = p.r2s3.PutObject(ctx, input)
+	return err
+}
+
+// deployHashTagPrefix marks Worker tags managed by nextdeploy. Anything
+// with this prefix is owned by us; anything without is left alone so user
+// tags set via dashboard / wrangler survive.
+const deployHashTagPrefix = "nextdeploy-deploy-hash:"
+
+// computeDeployHash returns a hex SHA-256 over everything that would
+// change the running Worker: the bundle digest (bundleSum, computed by the
+// caller — streamed from disk in prod so the worker.mjs is never buffered
+// whole into memory), the binding metadata, and the secret values. If any of
+// these change, the hash changes; if the hash matches the deployed one,
+// re-uploading is a no-op and we skip.
+//
+// The metadata hash uses the SDK's JSON marshalling — same bytes the SDK
+// would send to /scripts/{name}, modulo field ordering which Stainless
+// emits deterministically. Secrets are hashed separately so the secret
+// values don't end up in the metadata JSON before we hash it (they're
+// already in scriptMeta as secret_text bindings, but we double-hash them
+// to make the dependency explicit and keep tests deterministic).
+func computeDeployHash(bundleSum [32]byte, meta workers.ScriptUpdateParamsMetadata, secrets map[string]string) string {
+	h := sha256.New()
+	h.Write([]byte("nextdeploy-deploy-hash/v1\n"))
+
+	h.Write([]byte("bundle="))
+	h.Write([]byte(hex.EncodeToString(bundleSum[:])))
+	h.Write([]byte{'\n'})
+
+	if metaJSON, err := meta.MarshalJSON(); err == nil {
+		metaSum := sha256.Sum256(metaJSON)
+		h.Write([]byte("meta="))
+		h.Write([]byte(hex.EncodeToString(metaSum[:])))
+		h.Write([]byte{'\n'})
+	}
+
+	h.Write([]byte("secrets=\n"))
+	for _, k := range sortedKeys(secrets) {
+		h.Write([]byte(k))
+		h.Write([]byte{'='})
+		valSum := sha256.Sum256([]byte(secrets[k]))
+		h.Write([]byte(hex.EncodeToString(valSum[:])))
+		h.Write([]byte{'\n'})
+	}
+
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// workerAlreadyAtHash returns true when the named Worker's tags include
+// `nextdeploy-deploy-hash:<hash>`. Returns false on any read error
+// (script doesn't exist yet, permission issue, etc.) — safer to upload
+// when in doubt than to skip and serve stale code.
+func (p *CloudflareProvider) workerAlreadyAtHash(ctx context.Context, workerName, hash string) bool {
+	settings, err := p.cf.Workers.Scripts.Settings.Get(ctx, workerName, workers.ScriptSettingGetParams{
+		AccountID: cloudflare.F(p.accountID),
+	})
+	if err != nil || settings == nil {
+		return false
+	}
+	want := deployHashTagPrefix + hash
+	return slices.Contains(settings.Tags, want)
+}
+
+// tagWorkerDeployHash writes our deploy-hash tag onto the Worker,
+// preserving any user tags. Called after a successful upload so the next
+// deploy can skip when nothing relevant changed.
+//
+// We Get current tags first, drop any old `nextdeploy-deploy-hash:` entry,
+// append the fresh one, and PATCH back. This is safe even if the Worker
+// has no tags yet (the slice just starts empty).
+func (p *CloudflareProvider) tagWorkerDeployHash(ctx context.Context, workerName, hash string) error {
+	current, err := p.cf.Workers.Scripts.Settings.Get(ctx, workerName, workers.ScriptSettingGetParams{
+		AccountID: cloudflare.F(p.accountID),
+	})
+	if err != nil {
+		return fmt.Errorf("read script settings: %w", err)
+	}
+	tags := make([]string, 0, len(current.Tags)+1)
+	for _, t := range current.Tags {
+		if !strings.HasPrefix(t, deployHashTagPrefix) {
+			tags = append(tags, t)
+		}
+	}
+	tags = append(tags, deployHashTagPrefix+hash)
+
+	_, err = p.cf.Workers.Scripts.Settings.Edit(ctx, workerName, workers.ScriptSettingEditParams{
+		AccountID: cloudflare.F(p.accountID),
+		ScriptSetting: workers.ScriptSettingParam{
+			Tags: cloudflare.F(tags),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("write script settings: %w", err)
+	}
+	return nil
+}
+
+// resolveStandaloneDir returns a path the Cloudflare adapter can read the
+// raw Next.js standalone tree from, plus a cleanup closure.
+//
+// Preferred path: pkg.StandaloneTarPath is the target-agnostic artifact the
+// packager produces — extract it to a temp dir so we work from a pristine
+// copy and can't accidentally pollute the user's .next/standalone (the
+// adapter writes _nextdeploy_worker.mjs into it). Fallback: the live
+// standalone directory on disk, which is what older builds and non-Package
+// callers hand us.
+func resolveStandaloneDir(pkg *packaging.PackageResult, meta *nextcore.NextCorePayload, log *shared.Logger) (string, func(), error) {
+	noop := func() {}
+
+	if pkg != nil && pkg.StandaloneTarPath != "" {
+		tmp, err := os.MkdirTemp("", "nextdeploy-cf-standalone-*")
+		if err != nil {
+			return "", noop, fmt.Errorf("create temp dir for standalone extract: %w", err)
+		}
+		if err := shared.ExtractTarGz(pkg.StandaloneTarPath, tmp); err != nil {
+			_ = os.RemoveAll(tmp)
+			return "", noop, fmt.Errorf("extract %s: %w", pkg.StandaloneTarPath, err)
+		}
+		_ = filepath.WalkDir(tmp, func(path string, d os.DirEntry, err error) error {
+			if err == nil && !d.IsDir() && (strings.HasPrefix(d.Name(), "._") || d.Name() == ".DS_Store") {
+				_ = os.Remove(path)
+			}
+			return nil
+		})
+		log.Debug("Extracted standalone tarball to %s (%d bytes)", tmp, pkg.StandaloneTarSize)
+		return tmp, func() { _ = os.RemoveAll(tmp) }, nil
+	}
+
+	projectDir, err := os.Getwd()
+	if err != nil {
+		return "", noop, fmt.Errorf("get project dir: %w", err)
+	}
+	distDir := ".next"
+	if meta != nil && meta.DistDir != "" {
+		distDir = meta.DistDir
+	}
+	standaloneDir := filepath.Join(projectDir, distDir, "standalone")
+	log.Debug("Using live standalone dir: %s (no tarball in PackageResult)", standaloneDir)
+	return standaloneDir, noop, nil
+}
+
+// DeployCompute adapts the Next.js standalone build into a Worker bundle
+// (using esbuild + the embedded shim) and uploads it via the SDK.
+//
+// For static-export sites, no compute deploy is needed — DeployStatic + a
+// catch-all R2 worker is sufficient. We skip in that case.
+func (p *CloudflareProvider) DeployCompute(ctx context.Context, pkg *packaging.PackageResult, cfg *config.NextDeployConfig, meta *nextcore.NextCorePayload) error {
+	if meta != nil && meta.OutputMode == nextcore.OutputModeExport {
+		if len(p.pendingSecrets) > 0 {
+			p.log.Warn("Static-export build has no server runtime — %d staged secret(s) "+
+				"will NOT be deployed. Move runtime logic to SSR, or drop them from config.",
+				len(p.pendingSecrets))
+			p.pendingSecrets = nil
+		}
+		p.log.Info("Static-export build detected; skipping Worker deploy.")
+		return nil
+	}
+
+	p.log.Info("Adapting Next.js standalone build for Cloudflare Workers...")
+
+	standaloneDir, cleanup, err := resolveStandaloneDir(pkg, meta, p.log)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	bundlePath, err := adapter.BuildWorkerBundle(ctx, standaloneDir, meta, cfg, p.log)
+	if err != nil {
+		return fmt.Errorf("worker bundle build failed: %w", err)
+	}
+
+	// Fingerprint the bundle by streaming it through SHA-256 — never read the
+	// (multi-MB, esbuild-bundled) worker.mjs into memory. The upload below
+	// re-opens the file and streams it too, so the whole bundle is only ever
+	// in flight 32KB at a time.
+	bundleSum, err := sha256OfFile(bundlePath)
+	if err != nil {
+		return fmt.Errorf("failed to fingerprint worker bundle: %w", err)
+	}
+	bundleInfo, err := os.Stat(bundlePath)
+	if err != nil {
+		return fmt.Errorf("failed to stat worker bundle: %w", err)
+	}
+
+	workerName := p.getWorkerName(cfg)
+	bucketName := p.getBucketName(cfg)
+
+	const entryName = "worker.mjs"
+	var cfBlock *config.CloudflareConfig
+	if cfg.Serverless != nil {
+		cfBlock = cfg.Serverless.Cloudflare
+	}
+	// Resolve ref: bindings — try the in-memory provisioned map first, then
+	// fall back to the encrypted cf-state manifest. This lets `ship --no-provision`
+	// (the CI path: apply in one process, ship in another) resolve refs without
+	// re-running ProvisionResources.
+	resolve := p.refResolverWithFallback()
+
+	// Guard: a Worker upload is replace-not-merge. If the incoming set omits a
+	// secret currently live on the Worker, abort unless the operator opted into
+	// a wipe. GetSecrets lists live names (CF never returns values).
+	if cfBlock == nil || !cfBlock.AllowSecretWipe {
+		live, er := p.GetSecrets(ctx, cfg.App.Name)
+		if er != nil {
+			p.log.Warn("Could not list live Worker secrets to check for an accidental wipe (%v) — proceeding without the guard", err)
+		} else if err := refuseSecretWipe(p.pendingSecrets, live, false); err != nil {
+			return err
+		}
+	}
+
+	scriptMeta, err := buildScriptMetadata(cfBlock, bucketName, entryName, resolve, p.pendingSecrets)
+	if err != nil {
+		return fmt.Errorf("build script metadata: %w", err)
+	}
+	if len(p.pendingSecrets) > 0 {
+		p.log.Info("Folding %d secret_text bindings into Worker upload", len(p.pendingSecrets))
+	}
+
+	deployHash := computeDeployHash(bundleSum, scriptMeta, p.pendingSecrets)
+	if meta != nil && meta.GitCommit != "" {
+		scriptMeta.Annotations = cloudflare.F(workers.ScriptUpdateParamsMetadataAnnotations{
+			WorkersMessage: cloudflare.F("commit:" + meta.GitCommit),
+			WorkersTag:     cloudflare.F(meta.GitCommit),
+		})
+	}
+	if p.workerAlreadyAtHash(ctx, workerName, deployHash) {
+		p.log.Info("Worker bundle and bindings unchanged (hash %s) — skipping upload", deployHash[:12])
+		// Still drop the secret stash even on skip — the deployed worker
+		// already carries them, and keeping pendingSecrets around would
+		// fold them again on the next call.
+		p.pendingSecrets = nil
+	} else {
+		// Open the bundle for the upload stream. Wrap with a progress tracker
+		// so the operator sees live byte-counts during the multipart upload —
+		// without it the CLI looks hung, and we've watched 3MB Worker uploads
+		// run for several minutes on residential connections.
+		bundleFile, err := os.Open(bundlePath) // #nosec G304 — packager output path
+		if err != nil {
+			return fmt.Errorf("failed to open worker bundle: %w", err)
+		}
+		defer bundleFile.Close()
+		tracked := newProgressReader(bundleFile, bundleInfo.Size(), p.log, "worker upload")
+		scriptReader := newNamedFile(tracked, entryName, "application/javascript+module")
+
+		params := workers.ScriptUpdateParams{
+			AccountID: cloudflare.F(p.accountID),
+			Metadata:  cloudflare.F(scriptMeta),
+			Files:     cloudflare.F([]io.Reader{scriptReader}),
+		}
+		if _, err := p.cf.Workers.Scripts.Update(ctx, workerName, params); err != nil {
+			return fmt.Errorf("worker upload failed: %w", err)
+		}
+		p.log.Info("Worker deployed: %s", workerName)
+		// Stamp the deployed hash on the worker so the next deploy can
+		// compare without re-uploading.
+		if err := p.tagWorkerDeployHash(ctx, workerName, deployHash); err != nil {
+			// Non-fatal: failure here just means next deploy can't skip,
+			// it has to re-upload. The deploy itself succeeded.
+			p.log.Warn("Failed to stamp deploy-hash tag (non-fatal — next deploy won't be able to skip): %v", err)
+		}
+		p.pendingSecrets = nil
+	}
+
+	if err := p.applyWorkerTriggers(ctx, workerName, cfBlock); err != nil {
+		return err
+	}
+	if err := p.wireQueueConsumers(ctx, workerName, cfBlock); err != nil {
+		return err
+	}
+	p.attachEdgeRoutes(ctx, workerName, cfg, cfBlock)
+
+	return nil
+}
+
+// applyWorkerTriggers applies cron schedules declared under the cloudflare
+// block. Nil means "leave whatever's in the dashboard alone".
+func (p *CloudflareProvider) applyWorkerTriggers(ctx context.Context, workerName string, cfBlock *config.CloudflareConfig) error {
+	if cfBlock == nil || cfBlock.Triggers == nil {
+		return nil
+	}
+	if err := p.applyCronTriggers(ctx, workerName, cfBlock.Triggers.Crons); err != nil {
+		return fmt.Errorf("apply cron triggers: %w", err)
+	}
+	return nil
+}
+
+func findDeploymentByCommit(deployments []workers.Deployment, commitPrefix string) (*workers.Deployment, error) {
+	prefix := strings.ToLower(strings.TrimSpace(commitPrefix))
+	if prefix == "" {
+		return nil, errors.New("commit prefix is required")
+	}
+	for i := range deployments {
+		msg := strings.TrimSpace(deployments[i].Annotations.WorkersMessage)
+		sha := strings.TrimPrefix(strings.ToLower(msg), "commit:")
+		if sha != "" && strings.HasPrefix(sha, prefix) {
+			return &deployments[i], nil
+		}
+	}
+	return nil, fmt.Errorf("no Cloudflare Worker deployment found for commit %q", commitPrefix)
+}
+
+// wireQueueConsumers attaches each declared queue consumer to the worker.
+// Producer queues themselves are created by ProvisionResources; consumers
+// connect them to the script.
+func (p *CloudflareProvider) wireQueueConsumers(ctx context.Context, workerName string, cfBlock *config.CloudflareConfig) error {
+	if cfBlock == nil || cfBlock.Bindings == nil || cfBlock.Bindings.Queues == nil {
+		return nil
+	}
+	for _, c := range cfBlock.Bindings.Queues.Consumers {
+		if err := p.ensureQueueConsumer(ctx, workerName, c); err != nil {
+			return fmt.Errorf("wire queue consumer for %q: %w", c.Queue, err)
+		}
+	}
+	return nil
+}
+
+// attachEdgeRoutes wires custom domains + explicit routes. Each attempt is
+// independent and non-fatal so one bad hostname doesn't sink the deploy.
+//
+// When the user has not declared an explicit cloudflare.custom_domains or
+// cloudflare.routes block, we auto-promote cfg.App.Domain.Name to a Custom
+// Domain attachment (Workers.Domains.Update). Custom Domains provision
+// DNS + worker route + SSL atomically — the user does not need to create
+// any DNS records by hand. This replaces an older fallback that called
+// ensureWorkerRoute, which only set up the route pattern and left the
+// user wondering why their domain didn't resolve.
+//
+// Failure is logged but non-fatal: the Worker still serves on its
+// *.workers.dev URL, and the deployment report includes the manual DNS
+// instructions as a fallback for permission-denied or rate-limited
+// cases (commonly: API token missing Workers Routes:Edit / DNS:Edit).
+func (p *CloudflareProvider) attachEdgeRoutes(ctx context.Context, workerName string, cfg *config.NextDeployConfig, cfBlock *config.CloudflareConfig) {
+	// Non-production environments (pr-42, staging, …) must never touch
+	// production custom domains or routes. ensureCustomDomain re-points the
+	// hostname with override_existing_origin, and ensureWorkerRouteForZone
+	// binds the pattern to this worker — both would hijack the live domain
+	// and point it at a preview worker. The preview is still reachable on
+	// its *.workers.dev URL.
+	if !p.isProductionEnv() {
+		p.log.Info("Skipping edge routes/domains — non-production environment %q", p.environment)
+		return
+	}
+	if cfBlock != nil {
+		for _, cd := range cfBlock.CustomDomains {
+			if err := p.ensureCustomDomain(ctx, workerName, cd); err != nil {
+				p.log.Warn("Failed to attach custom domain %s (non-fatal): %v", cd.Hostname, err)
+			}
+		}
+		for _, rt := range cfBlock.Routes {
+			if err := p.ensureWorkerRouteForZone(ctx, workerName, rt.Pattern, rt.Zone); err != nil {
+				p.log.Warn("Failed to set worker route %s (non-fatal): %v", rt.Pattern, err)
+			}
+		}
+	}
+	// Auto-attach: when the user gave us cfg.App.Domain.Name but no explicit
+	// edge block, treat it as a Custom Domain. We attach the apex + the
+	// www subdomain so a typical "https://example.com" / "https://www.example.com"
+	// pair works out of the box. Each call is idempotent.
+	if cfg.App.Domain.Name != "" && hasNoExplicitEdge(cfBlock) {
+		hostnames := autoCustomDomainHostnames(cfg.App.Domain.Name)
+		for _, hostname := range hostnames {
+			if err := p.ensureCustomDomain(ctx, workerName, config.CFCustomDomain{Hostname: hostname}); err != nil {
+				p.log.Warn(
+					"Auto-attach custom domain %s failed (non-fatal): %v — "+
+						"check that the API token has Zone:DNS:Edit + Account:Workers Scripts:Edit, "+
+						"then re-run `nextdeploy ship`. The deployment report has manual DNS steps as a fallback.",
+					hostname, err,
+				)
+			}
+		}
+	}
+}
+
+// autoCustomDomainHostnames returns the set of hostnames to auto-attach
+// when only cfg.App.Domain.Name is set. For an apex (example.com) we attach
+// both apex and www. For a subdomain (app.example.com) we attach only
+// the subdomain — adding `www.app.example.com` is rarely what users
+// want.
+func autoCustomDomainHostnames(domain string) []string {
+	domain = strings.TrimSpace(strings.TrimSuffix(domain, "."))
+	if domain == "" {
+		return nil
+	}
+	apex := zoneNameFromHostname(domain)
+	if strings.EqualFold(domain, apex) {
+		return []string{domain, "www." + domain}
+	}
+
+	return []string{domain}
+}
+
+func hasNoExplicitEdge(cfBlock *config.CloudflareConfig) bool {
+	if cfBlock == nil {
+		return true
+	}
+	return len(cfBlock.CustomDomains) == 0 && len(cfBlock.Routes) == 0
+}
+
+// ensureCustomDomain attaches a hostname to the worker via Workers.Domains.Update.
+// The endpoint is upsert-style — calling repeatedly with the same hostname is
+// safe and idempotent. Zone is resolved from cd.ZoneID if set, else derived
+// from the hostname's apex.
+func (p *CloudflareProvider) ensureCustomDomain(ctx context.Context, workerName string, cd config.CFCustomDomain) error {
+	params := workers.DomainUpdateParams{
+		AccountID: cloudflare.F(p.accountID),
+		Hostname:  cloudflare.F(cd.Hostname),
+		Service:   cloudflare.F(workerName),
+	}
+	switch {
+	case cd.ZoneID != "":
+		params.ZoneID = cloudflare.F(cd.ZoneID)
+	default:
+		params.ZoneName = cloudflare.F(zoneNameFromHostname(cd.Hostname))
+	}
+	// Re-point the hostname to THIS worker even if it's already bound to another
+	// one (e.g. a prior deploy under a different worker name). Without these, the
+	// API returns 409 "already in use by other custom domain" and the domain
+	// keeps serving the stale worker — the "my domain won't update" trap. The
+	// SDK's typed params don't expose these yet, so set them on the request body.
+	overrides := []option.RequestOption{
+		option.WithJSONSet("override_existing_origin", true),
+		option.WithJSONSet("override_existing_dns_record", true),
+	}
+	if _, err := p.cf.Workers.Domains.Update(ctx, params, overrides...); err != nil {
+		return err
+	}
+	p.log.Info("Custom domain attached: %s → %s", cd.Hostname, workerName)
+	return nil
+}
+
+// zoneNameFromHostname returns the apex zone for a hostname. Naive heuristic:
+// last two DNS labels. Works for example.com, sub.example.com — does not
+// handle public suffix exceptions like .co.uk. Users with multi-label TLDs
+// should set zone_id explicitly.
+func zoneNameFromHostname(host string) string {
+	host = strings.TrimSpace(strings.TrimSuffix(host, "."))
+	if host == "" {
+		return ""
+	}
+	if ectld1, err := publicsuffix.EffectiveTLDPlusOne(host); err == nil {
+		return ectld1
+	}
+
+	parts := strings.Split(host, ".")
+	if len(parts) <= 2 {
+		return host
+	}
+	return strings.Join(parts[len(parts)-2:], ".")
+}
+
+// applyCronTriggers replaces the worker's full cron schedule with the given
+// list. The CF Schedules.Update endpoint is not additive — it overwrites.
+// An empty list intentionally clears all crons (this is opt-in: caller must
+// have already determined the user explicitly wants schedule management).
+func (p *CloudflareProvider) applyCronTriggers(ctx context.Context, workerName string, crons []string) error {
+	body := make([]workers.ScriptScheduleUpdateParamsBody, len(crons))
+	for i, c := range crons {
+		body[i] = workers.ScriptScheduleUpdateParamsBody{
+			Cron: cloudflare.F(c),
+		}
+	}
+	_, err := p.cf.Workers.Scripts.Schedules.Update(ctx, workerName, workers.ScriptScheduleUpdateParams{
+		AccountID: cloudflare.F(p.accountID),
+		Body:      body,
+	})
+	if err != nil {
+		return err
+	}
+	if len(crons) == 0 {
+		p.log.Info("Cleared cron triggers for worker %s", workerName)
+	} else {
+		p.log.Info("Applied %d cron trigger(s) to worker %s", len(crons), workerName)
+	}
+	return nil
+}
+
+// UpdateSecrets stashes a batch of secrets onto the provider so DeployCompute
+// can fold them into the next Workers.Scripts.Update call as secret_text
+// bindings. This bypasses CF's per-secret PUT endpoint (rate-limited at ~13
+// req/s, error 10013) and lands every secret atomically in a single upload.
+//
+// Trade-off: secret rotation requires a Worker re-upload. That re-upload is
+// cheap because the bundle is content-hashed and reused — only the metadata
+// changes — but it does mean `nextdeploy secrets set FOO=bar` outside of a
+// full deploy uses the per-secret path (SetSecret/UnsetSecret) instead of
+// going through here.
+//
+// Calling UpdateSecrets with an empty map clears the staged set.
+func (p *CloudflareProvider) UpdateSecrets(ctx context.Context, appName string, secrets map[string]string) error {
+	_ = ctx
+	_ = appName
+	if len(secrets) == 0 {
+		p.pendingSecrets = nil
+		return nil
+	}
+	staged := make(map[string]string, len(secrets))
+	maps.Copy(staged, secrets)
+	p.pendingSecrets = staged
+	p.log.Info("Staged %d secrets to fold into the next Worker upload", len(staged))
+	return nil
+}
+
+// refuseSecretWipe guards against a Worker upload that would strip live
+// secrets. CF uploads are replace-not-merge: uploading `pending` as the full
+// secret_text set removes any live secret whose name it omits. If pending drops
+// names the live Worker still has, this returns a fatal error naming the
+// at-risk secrets. No live secrets makes it a no-op. GetSecrets returns
+// map[name]"[secret]" — only the keys matter here.
+func refuseSecretWipe(pending, live map[string]string, allow bool) error {
+	if allow || len(live) == 0 {
+		return nil
+	}
+	dropped := map[string]string{}
+	for name := range live {
+		if _, keep := pending[name]; !keep {
+			dropped[name] = ""
+		}
+	}
+	if len(dropped) == 0 {
+		return nil
+	}
+	return fmt.Errorf("refusing to upload a Worker that would strip %d live secret(s) (%s): "+
+		"the incoming secret set omits them and CF uploads are replace-not-merge; "+
+		"set cloudflare.allow_secret_wipe: true to override",
+		len(dropped), strings.Join(sortedKeys(dropped), ", "))
+}
+
+// GetSecrets lists secret names. The CF API never returns secret values.
+func (p *CloudflareProvider) GetSecrets(ctx context.Context, appName string) (map[string]string, error) {
+	workerName := p.workerName(appName)
+	iter := p.cf.Workers.Scripts.Secrets.ListAutoPaging(ctx, workerName, workers.ScriptSecretListParams{
+		AccountID: cloudflare.F(p.accountID),
+	})
+
+	out := map[string]string{}
+	for iter.Next() {
+		out[iter.Current().Name] = "[secret]"
+	}
+	if err := iter.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (p *CloudflareProvider) SetSecret(ctx context.Context, appName, key, value string) error {
+	return p.putWorkerSecret(ctx, p.workerName(appName), key, value)
+}
+
+func (p *CloudflareProvider) UnsetSecret(ctx context.Context, appName, key string) error {
+	workerName := p.workerName(appName)
+	_, err := p.cf.Workers.Scripts.Secrets.Delete(ctx, workerName, key, workers.ScriptSecretDeleteParams{
+		AccountID: cloudflare.F(p.accountID),
+	})
+	return err
+}
+
+func (p *CloudflareProvider) putWorkerSecret(ctx context.Context, workerName, key, value string) error {
+	body := workers.ScriptSecretUpdateParamsBodyWorkersBindingKindSecretText{
+		Name: cloudflare.F(key),
+		Text: cloudflare.F(value),
+		Type: cloudflare.F(workers.ScriptSecretUpdateParamsBodyWorkersBindingKindSecretTextTypeSecretText),
+	}
+	_, err := p.cf.Workers.Scripts.Secrets.Update(ctx, workerName, workers.ScriptSecretUpdateParams{
+		AccountID: cloudflare.F(p.accountID),
+		Body:      body,
+	})
+	return err
+}
+
+// InvalidateCache purges the Cloudflare zone cache for the configured domain.
+func (p *CloudflareProvider) InvalidateCache(ctx context.Context, cfg *config.NextDeployConfig) error {
+	// A non-production deploy must never purge the production zone cache —
+	// that would nuke every cached asset for the live domain.
+	if !p.isProductionEnv() {
+		p.log.Info("Skipping cache purge — non-production environment %q", p.environment)
+		return nil
+	}
+	if cfg.App.Domain.Name == "" {
+		p.log.Info("No domain configured, skipping cache purge.")
+		return nil
+	}
+
+	zoneID, err := p.getZoneID(ctx, cfg.App.Domain.Name)
+	if err != nil {
+		return fmt.Errorf("failed to find zone for %s: %w", cfg.App.Domain.Name, err)
+	}
+
+	_, err = p.cf.Cache.Purge(ctx, cache.CachePurgeParams{
+		ZoneID: cloudflare.F(zoneID),
+		Body: cache.CachePurgeParamsBodyCachePurgeEverything{
+			PurgeEverything: cloudflare.F(true),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("cache purge failed: %w", err)
+	}
+
+	p.log.Info("Cloudflare cache purged for zone %s", zoneID)
+	return nil
+}
+
+// Rollback reverts the Worker to a previous deployment version, either by
+// git commit prefix (--to <commit>, matched against workers/message
+// annotations stamped during deploy) or by step count (--steps N).
+func (p *CloudflareProvider) Rollback(ctx context.Context, cfg *config.NextDeployConfig, opts core.RollbackOptions) error {
+	workerName := p.getWorkerName(cfg)
+	p.log.Info("Fetching deployment history for worker: %s...", workerName)
+
+	list, err := p.cf.Workers.Scripts.Deployments.List(ctx, workerName, workers.ScriptDeploymentListParams{
+		AccountID: cloudflare.F(p.accountID),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list deployments: %w", err)
+	}
+
+	deployments := list.Deployments
+	var target workers.Deployment
+	if opts.ToCommit != "" {
+		matched, err := findDeploymentByCommit(deployments, opts.ToCommit)
+		if err != nil {
+			return err
+		}
+		target = *matched
+	} else {
+		steps := opts.Steps
+		if steps <= 0 {
+			steps = 1
+		}
+		if len(deployments) < steps+1 {
+			return fmt.Errorf("not enough deployment history to rollback %d step(s) (found %d, need at least %d)",
+				steps, len(deployments), steps+1)
+		}
+		target = deployments[steps]
+	}
+	if len(target.Versions) == 0 {
+		return fmt.Errorf("rollback target deployment %s has no versions", target.ID)
+	}
+	previousVersionID := pickActiveVersion(target.Versions)
+	p.log.Info("Rolling back to version: %s", previousVersionID)
+
+	_, err = p.cf.Workers.Scripts.Deployments.New(ctx, workerName, workers.ScriptDeploymentNewParams{
+		AccountID: cloudflare.F(p.accountID),
+		Deployment: workers.DeploymentParam{
+			Strategy: cloudflare.F(workers.DeploymentStrategyPercentage),
+			Versions: cloudflare.F([]workers.DeploymentVersionParam{
+				{
+					VersionID:  cloudflare.F(previousVersionID),
+					Percentage: cloudflare.F(100.0),
+				},
+			}),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to activate previous deployment: %w", err)
+	}
+
+	// Purge the edge cache so the rolled-back version is served immediately
+	// (the Provider contract promises this). Non-fatal — the version swap
+	// already took effect.
+	if err := p.InvalidateCache(ctx, cfg); err != nil {
+		p.log.Warn("Rollback: cache invalidation failed (edge may serve stale HTML): %v", err)
+	}
+	p.log.Info("Rollback complete. Worker is now running version %s with its matching build assets", previousVersionID)
+	return nil
+}
+
+// pickActiveVersion returns the VersionID that was actually receiving traffic in
+// a deployment — the one with the highest rollout percentage. Falls back to the
+// first version. A single-version deployment (the common case) is unaffected;
+// this only matters for a gradual/percentage rollout where Versions[0] was
+// arbitrary.
+func pickActiveVersion(versions []workers.DeploymentVersion) string {
+	best := versions[0]
+	for _, v := range versions[1:] {
+		if v.Percentage > best.Percentage {
+			best = v
+		}
+	}
+	return best.VersionID
+}
+
+// Destroy tears down everything nextdeploy created for this app: the Worker
+// (its routes + secrets go with it), the R2 bucket (objects swept first, since
+// CF refuses to delete a non-empty bucket), every provisioned resource recorded
+// in the cfstate manifest (D1/KV/Hyperdrive/Queues/Vectorize/AI Gateway), and
+// the DNS records it added. Anything that can't be deleted is reported and makes
+// Destroy return an error, so the operator is never told "done" while resources
+// (and billing) survive. 404s are treated as already-gone.
+func (p *CloudflareProvider) Destroy(ctx context.Context, cfg *config.NextDeployConfig) error {
+	workerName := p.getWorkerName(cfg)
+	bucketName := p.getBucketName(cfg)
+
+	if err := p.SyncResourceState(ctx, cfg); err != nil {
+		return fmt.Errorf("synchronize resource state before destroy: %w", err)
+	}
+
+	var problems []string
+
+	// 1. Worker — its routes and secret_text bindings are removed with it.
+	p.log.Info("Deleting Worker: %s...", workerName)
+	if _, err := p.cf.Workers.Scripts.Delete(ctx, workerName, workers.ScriptDeleteParams{
+		AccountID: cloudflare.F(p.accountID),
+	}); err != nil && !isCFNotFound(err) {
+		p.log.Warn("Worker delete failed: %v", err)
+		problems = append(problems, "worker "+workerName)
+	}
+
+	// 2. Provisioned resources recorded in the state manifest (incl. orphans).
+	// Non-production environments skip this: shared stateful resources (D1, KV,
+	// Hyperdrive, Queues, Vectorize) are account-scoped, not env-scoped. A
+	// preview apply may have recorded a production resource's ID in the
+	// env-scoped manifest (because ensure* found it already existed and
+	// returned its ID), and deleting it would destroy production data.
+	if p.isProductionEnv() {
+		problems = append(problems, p.teardownProvisionedResources(ctx, cfg)...)
+	} else {
+		p.log.Info("Skipping provisioned resource teardown — non-production environment %q", p.environment)
+	}
+
+	// 4. DNS records nextdeploy added (matched by value; siblings untouched).
+	if p.isProductionEnv() {
+		problems = append(problems, p.teardownDeclaredDNS(ctx, cfg)...)
+	} else {
+		p.log.Info("Skipping DNS record teardown — non-production environment %q", p.environment)
+	}
+
+	// Delete the asset bucket last. If any earlier cleanup failed, keep it so
+	// the encrypted remote state remains available for a retry.
+	if len(problems) == 0 {
+		p.log.Info("Emptying + deleting R2 bucket: %s...", bucketName)
+		if err := p.sweepR2Bucket(ctx, bucketName); err != nil {
+			p.log.Warn("R2 sweep failed (bucket not deleted, still holds objects): %v", err)
+			problems = append(problems, "r2 bucket "+bucketName+" (objects remain)")
+		} else if _, err := p.cf.R2.Buckets.Delete(ctx, bucketName, r2.BucketDeleteParams{
+			AccountID: cloudflare.F(p.accountID),
+		}); err != nil && !isCFNotFound(err) {
+			p.log.Warn("R2 bucket delete failed: %v", err)
+			problems = append(problems, "r2 bucket "+bucketName)
+		}
+	} else {
+		p.log.Warn("Keeping R2 bucket %s so remote state is available for cleanup retry", bucketName)
+	}
+
+	if len(problems) > 0 {
+		return fmt.Errorf("destroy incomplete — these still exist and need manual cleanup "+
+			"(check the Cloudflare dashboard — they may still bill): %s", strings.Join(problems, ", "))
+	}
+
+	p.log.Info("Cloudflare resources destroyed.")
+	return nil
+}
+
+func (p *CloudflareProvider) GetResourceMap(ctx context.Context, cfg *config.NextDeployConfig) (core.ServerlessResourceMap, error) {
+	workerName := p.getWorkerName(cfg)
+	res := core.ServerlessResourceMap{
+		AppName:        cfg.App.Name,
+		Environment:    cfg.App.Environment,
+		Region:         "global",
+		WorkerName:     workerName,
+		S3BucketName:   p.getBucketName(cfg),
+		CustomDomain:   cfg.App.Domain.Name,
+		DeploymentTime: time.Now(),
+		Status:         "Unknown",
+	}
+
+	if cfg.Serverless != nil && cfg.Serverless.Cloudflare != nil && len(cfg.Serverless.Cloudflare.CustomDomains) > 0 && res.CustomDomain == "" {
+		res.CustomDomain = cfg.Serverless.Cloudflare.CustomDomains[0].Hostname
+	}
+
+	list, err := p.cf.Workers.Scripts.Deployments.List(ctx, workerName, workers.ScriptDeploymentListParams{
+		AccountID: cloudflare.F(p.accountID),
+	})
+	if err == nil && len(list.Deployments) > 0 {
+		latest := list.Deployments[0]
+		res.DeploymentTime = latest.CreatedOn
+		res.Status = "Online"
+		if len(latest.Versions) > 0 {
+			res.ActiveVersion = pickActiveVersion(latest.Versions)
+		}
+	} else if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "10007") || strings.Contains(strings.ToLower(errStr), "not found") {
+			res.Status = "Not Deployed"
+		}
+	}
+
+	return res, nil
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+func (p *CloudflareProvider) getWorkerName(cfg *config.NextDeployConfig) string {
+	return p.workerName(cfg.App.Name)
+}
+
+func (p *CloudflareProvider) getBucketName(cfg *config.NextDeployConfig) string {
+	return p.bucketNameFromApp(cfg.App.Name)
+}
+
+// ensureR2BucketExists checks for the bucket and creates it on 404.
+// Other API errors propagate, with one well-known case translated into
+// a friendlier message: code 10042 ("Please enable R2 through the
+// Cloudflare Dashboard") fires before R2 is opted in on the account
+// and there is nothing the API token can do about it — the user has
+// to click through the dashboard once to add a payment method and
+// accept R2's terms. Same shape as AWS's S3 ToS gate.
+func (p *CloudflareProvider) ensureR2BucketExists(ctx context.Context, name string) error {
+	_, err := p.cf.R2.Buckets.Get(ctx, name, r2.BucketGetParams{
+		AccountID: cloudflare.F(p.accountID),
+	})
+	if err == nil {
+		return nil
+	}
+	if isR2NotEnabled(err) {
+		return r2NotEnabledError(p.accountID)
+	}
+	var apiErr *cloudflare.Error
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
+		return fmt.Errorf("get bucket: %w", err)
+	}
+	_, err = p.cf.R2.Buckets.New(ctx, r2.BucketNewParams{
+		AccountID: cloudflare.F(p.accountID),
+		Name:      cloudflare.F(name),
+	})
+	if isR2NotEnabled(err) {
+		return r2NotEnabledError(p.accountID)
+	}
+	return err
+}
+
+// isR2NotEnabled returns true when an error is CF code 10042, which
+// means the account hasn't enabled R2 yet. The SDK doesn't expose error
+// codes as constants; we string-match on the well-known number.
+func isR2NotEnabled(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "10042")
+}
+
+// r2NotEnabledError returns a clear, actionable error for the one-time
+// R2 enablement gate. Includes the dashboard URL so the user goes
+// straight to the right page instead of digging through CF's nav.
+func r2NotEnabledError(accountID string) error {
+	return fmt.Errorf(
+		"R2 is not enabled on your Cloudflare account yet.\n\n"+
+			"This is a one-time per-account step (free tier exists, but a payment\n"+
+			"method must be on file). Open this URL, click 'Purchase R2 Plan',\n"+
+			"add payment, accept terms — then re-run nextdeploy ship:\n\n"+
+			"  https://dash.cloudflare.com/%s/r2/overview\n",
+		accountID,
+	)
+}
+
+// ensureWorkerRoute creates a route `<domain>/*` for the worker, deriving the
+// zone from the domain. Convenience wrapper around ensureWorkerRouteForZone.
+func (p *CloudflareProvider) ensureWorkerRoute(ctx context.Context, workerName, domain string) error {
+	return p.ensureWorkerRouteForZone(ctx, workerName, domain+"/*", domain)
+}
+
+// ensureWorkerRouteForZone creates the given route pattern for the worker in
+// the named zone. Skips creation if an identical route already exists.
+// Resolves zoneName via Zones.List; if zoneName is empty, derives it from the
+// pattern using zoneNameFromPattern.
+func (p *CloudflareProvider) ensureWorkerRouteForZone(ctx context.Context, workerName, pattern, zoneName string) error {
+	if zoneName == "" {
+		zoneName = zoneNameFromPattern(pattern)
+	}
+	zoneID, err := p.getZoneID(ctx, zoneName)
+	if err != nil {
+		return err
+	}
+	iter := p.cf.Workers.Routes.ListAutoPaging(ctx, workers.RouteListParams{
+		ZoneID: cloudflare.F(zoneID),
+	})
+	for iter.Next() {
+		r := iter.Current()
+		if r.Pattern == pattern && r.Script == workerName {
+			return nil
+		}
+	}
+	if err := iter.Err(); err != nil {
+		return fmt.Errorf("list routes: %w", err)
+	}
+
+	_, err = p.cf.Workers.Routes.New(ctx, workers.RouteNewParams{
+		ZoneID:  cloudflare.F(zoneID),
+		Pattern: cloudflare.F(pattern),
+		Script:  cloudflare.F(workerName),
+	})
+	if err == nil {
+		p.log.Info("Worker route attached: %s → %s", pattern, workerName)
+	}
+	return err
+}
+
+// zoneNameFromPattern strips the trailing /* and any wildcard subdomain to
+// extract the apex zone (e.g. "*.example.com/*" → "example.com"). Used as a
+// fallback when zone is not explicitly set on a route.
+func zoneNameFromPattern(pattern string) string {
+	host := pattern
+	if i := strings.Index(host, "/"); i >= 0 {
+		host = host[:i]
+	}
+	host = strings.TrimPrefix(host, "*.")
+	return zoneNameFromHostname(host)
+}
+
+func (p *CloudflareProvider) getZoneID(ctx context.Context, domain string) (string, error) {
+	page, err := p.cf.Zones.List(ctx, zones.ZoneListParams{
+		Name: cloudflare.F(domain),
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(page.Result) == 0 {
+		return "", fmt.Errorf("no Cloudflare zone found for domain: %s", domain)
+	}
+	return page.Result[0].ID, nil
+}
+
+// progressReader wraps an io.Reader and logs cumulative bytes-read at
+// regular intervals. Used to give the operator visibility into a
+// long-running multipart upload that would otherwise look indistinguishable
+// from a hung connection.
+//
+// Logging is throttled to one line per second + final summary, so a fast
+// upload doesn't spam the terminal and a slow one doesn't go silent.
+type progressReader struct {
+	r       io.Reader
+	total   int64
+	read    int64
+	lastLog time.Time
+	log     *shared.Logger
+	label   string
+}
+
+func newProgressReader(r io.Reader, total int64, log *shared.Logger, label string) *progressReader {
+	return &progressReader{r: r, total: total, log: log, label: label, lastLog: time.Now()}
+}
+
+func (pr *progressReader) Read(p []byte) (int, error) {
+	n, err := pr.r.Read(p)
+	pr.read += int64(n)
+	if err == io.EOF || time.Since(pr.lastLog) >= time.Second {
+		pct := 0
+		if pr.total > 0 {
+			pct = int(pr.read * 100 / pr.total)
+		}
+		pr.log.Info("  %s: %d/%d KB (%d%%)", pr.label, pr.read/1024, pr.total/1024, pct)
+		pr.lastLog = time.Now()
+	}
+	return n, err
+}
+
+// namedFile is an io.Reader that the CF SDK's multipart marshaller can name.
+// The SDK reflects on Filename() / ContentType() when assembling form parts.
+type namedFile struct {
+	io.Reader
+	filename    string
+	contentType string
+}
+
+func newNamedFile(r io.Reader, filename, contentType string) *namedFile {
+	return &namedFile{Reader: r, filename: filename, contentType: contentType}
+}
+
+func (f *namedFile) Filename() string    { return f.filename }
+func (f *namedFile) ContentType() string { return f.contentType }

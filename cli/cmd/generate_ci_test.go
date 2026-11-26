@@ -70,7 +70,7 @@ func TestSecretsForTarget(t *testing.T) {
 	t.Run("vps secrets include SSH key and hardening hints", func(t *testing.T) {
 		secrets := secretsForTarget("vps", "")
 		joined := strings.Join(secrets, " ")
-		for _, required := range []string{"SSH_PRIVATE_KEY", "SSH_KNOWN_HOSTS", "SSH_KEY_PASSPHRASE", "NEXTDEPLOY_STRICT_HOST_KEY"} {
+		for _, required := range []string{"VPS_HOST", "SSH_PRIVATE_KEY", "SSH_KNOWN_HOSTS", "SSH_KEY_PASSPHRASE", "NEXTDEPLOY_STRICT_HOST_KEY"} {
 			if !strings.Contains(joined, required) {
 				t.Errorf("VPS secrets missing %q: got %v", required, secrets)
 			}

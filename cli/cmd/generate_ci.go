@@ -216,6 +216,7 @@ func secretsForTarget(target, provider string) []string {
 		}
 	case "vps":
 		return []string{
+			"VPS_HOST              (optional — required when nextdeploy.yml uses host: ${VPS_HOST} or omits host)",
 			"SSH_PRIVATE_KEY       (required — private key configured in nextdeploy.yml)",
 			"SSH_KNOWN_HOSTS       (optional — pins server host key in CI to prevent MITM)",
 			"SSH_KEY_PASSPHRASE    (optional — if private key is encrypted with a passphrase)",

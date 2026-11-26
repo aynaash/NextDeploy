@@ -2,7 +2,7 @@
 // Uses Node's built-in test runner + Web Crypto (global in Node 18+), matching
 // the Workers runtime the guard actually runs in.
 
-import { test } from "node:test";
+import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
@@ -16,8 +16,13 @@ import {
   signSessionCookie,
   verifySessionCookie,
   checkRateLimit,
+  resetRateLimitState,
   runGuard,
 } from "./guard.mjs";
+
+beforeEach(() => {
+  resetRateLimitState();
+});
 
 // --- pathMatches -------------------------------------------------------------
 
@@ -226,6 +231,86 @@ test("checkRateLimit isolates by IP and window", async () => {
   // same IP, next window — fresh counter
   res = await checkRateLimit(kv, "1.1.1.1", 1, now + 60_000);
   assert.equal(res.limited, false);
+});
+
+test("checkRateLimit coalesces rapid kv.put calls within 1.1s while still enforcing limit", async () => {
+  let putCalls = 0;
+  const baseKv = fakeKV();
+  const kv = {
+    async get(k) {
+      return baseKv.get(k);
+    },
+    async put(k, v) {
+      putCalls += 1;
+      return baseKv.put(k, v);
+    },
+  };
+  const now = 60_000 * 150;
+  const r1 = await checkRateLimit(kv, "1.1.1.1", 2, now);
+  const r2 = await checkRateLimit(kv, "1.1.1.1", 2, now + 100);
+  const r3 = await checkRateLimit(kv, "1.1.1.1", 2, now + 200);
+  assert.deepEqual([r1.limited, r1.count], [false, 1]);
+  assert.deepEqual([r2.limited, r2.count], [false, 2]);
+  assert.equal(r3.limited, true);
+  assert.equal(putCalls, 1, "rapid bursts within 1.1s should only write to KV once");
+
+  const r4 = await checkRateLimit(kv, "1.1.1.1", 5, now + 1200);
+  assert.deepEqual([r4.limited, r4.count], [false, 3]);
+  assert.equal(putCalls, 2, "a write past the 1.1s cooldown persists the updated count");
+});
+
+test("checkRateLimit degrades gracefully when kv.put throws 429 Too Many Requests", async () => {
+  const kv = {
+    async get() {
+      return null;
+    },
+    async put() {
+      throw new Error("KV PUT failed: 429 Too Many Requests");
+    },
+  };
+  const now = 60_000 * 160;
+  const r1 = await checkRateLimit(kv, "1.1.1.1", 2, now);
+  const r2 = await checkRateLimit(kv, "1.1.1.1", 2, now + 10);
+  const r3 = await checkRateLimit(kv, "1.1.1.1", 2, now + 20);
+  assert.deepEqual([r1.limited, r1.count], [false, 1]);
+  assert.deepEqual([r2.limited, r2.count], [false, 2]);
+  assert.equal(r3.limited, true);
+});
+
+test("checkRateLimit degrades gracefully when kv.get throws", async () => {
+  const kv = {
+    async get() {
+      throw new Error("KV GET failed: transient error");
+    },
+    async put() {},
+  };
+  const now = 60_000 * 170;
+  const r1 = await checkRateLimit(kv, "1.1.1.1", 1, now);
+  const r2 = await checkRateLimit(kv, "1.1.1.1", 1, now + 50);
+  assert.deepEqual([r1.limited, r1.count], [false, 1]);
+  assert.equal(r2.limited, true);
+});
+
+test("runGuard schedules kv.put via ctx.waitUntil and does not 500 on KV 429", async () => {
+  const scheduled = [];
+  const ctx = {
+    waitUntil(p) {
+      scheduled.push(p);
+    },
+  };
+  const kv = {
+    async get() {
+      return null;
+    },
+    async put() {
+      throw new Error("KV PUT failed: 429 Too Many Requests");
+    },
+  };
+  const env = { RATE_LIMIT: kv };
+  const out = await runGuard(req("/", { "cf-connecting-ip": "1.1.1.1" }), env, ctx, baseCfg, 60_000 * 180);
+  assert.equal(out, null);
+  assert.equal(scheduled.length, 1);
+  await scheduled[0];
 });
 
 // --- runGuard orchestration --------------------------------------------------

@@ -216,18 +216,74 @@ export async function verifySessionCookie(value, secret, nowMs = Date.now()) {
   return true;
 }
 
+const KV_PUT_COOLDOWN_MS = 1100;
+const MAX_LOCAL_BUCKETS = 4096;
+const isolateRateLimitState = new Map();
+
+export function resetRateLimitState() {
+  isolateRateLimitState.clear();
+}
+
+function pruneLocalBuckets(currentWindowId) {
+  if (isolateRateLimitState.size <= MAX_LOCAL_BUCKETS) return;
+  for (const [k, entry] of isolateRateLimitState) {
+    if (entry.windowId < currentWindowId) {
+      isolateRateLimitState.delete(k);
+    }
+  }
+  while (isolateRateLimitState.size > MAX_LOCAL_BUCKETS) {
+    const oldestKey = isolateRateLimitState.keys().next().value;
+    if (oldestKey === undefined) break;
+    isolateRateLimitState.delete(oldestKey);
+  }
+}
+
 /**
  * Fixed-window per-IP rate limit. Counter key is bucketed per 60s so it
- * self-expires; we set a 120s TTL as a safety margin. Returns whether the
- * request is over the limit (it still counts the request that trips it).
+ * self-expires; we set a 120s TTL as a safety margin. Coalesces kv.put writes
+ * to at most once per 1.1s per key per isolate (staying under Cloudflare KV's
+ * 1 write/sec/key limit) and degrades gracefully if KV returns 429. Returns
+ * whether the request is over the limit (it still counts the request that
+ * trips it).
  */
-export async function checkRateLimit(kv, ip, limit, nowMs) {
+export async function checkRateLimit(kv, ip, limit, nowMs, ctx = null) {
   const windowId = Math.floor(nowMs / 60000);
   const key = `rl:${ip}:${windowId}`;
-  const current = parseInt((await kv.get(key)) || "0", 10) || 0;
+  const local = isolateRateLimitState.get(key);
+
+  let kvCount = 0;
+  try {
+    kvCount = parseInt((await kv.get(key)) || "0", 10) || 0;
+  } catch (err) {
+    console.warn(`rate_limit kv.get failed for ${key}:`, err?.message || err);
+  }
+
+  const current = Math.max(kvCount, local ? local.count : 0);
   if (current >= limit) return { limited: true, count: current };
-  await kv.put(key, String(current + 1), { expirationTtl: 120 });
-  return { limited: false, count: current + 1 };
+
+  const nextCount = current + 1;
+  const shouldPut = !local || nowMs - local.lastPutMs >= KV_PUT_COOLDOWN_MS;
+  isolateRateLimitState.set(key, {
+    count: nextCount,
+    lastPutMs: shouldPut ? nowMs : local.lastPutMs,
+    windowId,
+  });
+  pruneLocalBuckets(windowId);
+
+  if (shouldPut) {
+    const putPromise = Promise.resolve()
+      .then(() => kv.put(key, String(nextCount), { expirationTtl: 120 }))
+      .catch((err) => {
+        console.warn(`rate_limit kv.put failed for ${key}:`, err?.message || err);
+      });
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(putPromise);
+    } else {
+      await putPromise;
+    }
+  }
+
+  return { limited: false, count: nextCount };
 }
 
 /**
@@ -261,7 +317,7 @@ export async function runGuard(request, env, ctx, cfg, nowMs = Date.now()) {
     // trustworthy client identity the only safe options are one shared limit
     // or no limit, and no limit is worse. On Cloudflare cf-connecting-ip is
     // always present, so this is the off-CF / misconfigured path.
-    const { limited } = await checkRateLimit(kv, ip, cfg.rateLimit.requestsPerMinute, nowMs);
+    const { limited } = await checkRateLimit(kv, ip, cfg.rateLimit.requestsPerMinute, nowMs, ctx);
     if (limited) {
       return new Response("Too Many Requests", {
         status: 429,
