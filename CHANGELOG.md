@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.0](https://github.com/aynaash/NextDeploy/compare/v1.1.1...v1.2.0) (2026-11-26)
+
+### Features
+
+* **logs:** add `[APP]`, `[NEXTDEPLOY]`, and `[PLATFORM]` fault-ownership classification with plain-English causes and fix hints across live Cloudflare tail, historical telemetry, and VPS logs
+* **logs:** add constant-memory streaming triage (`nextdeploy logs analyze <file>` / `logs --file`) for large or truncated Cloudflare JSON/NDJSON exports, correlating multi-fragment events by `requestId` with optional deduplicated NDJSON export (`--out`)
+* **logs:** add Cloudflare Workers Observability historical queries (`nextdeploy logs --since 1h`) and filtering flags (`--errors`, `--owner`, `--raw`, `--json`, `--top`)
+
 ## [1.1.1](https://github.com/aynaash/NextDeploy/compare/v1.1.0...v1.1.1) (2026-11-26)
 
 ### Bug Fixes
