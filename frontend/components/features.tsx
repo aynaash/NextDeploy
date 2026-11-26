@@ -14,19 +14,7 @@ import {
 } from "lucide-react";
 import AtomicCutoverExplorer from "@/components/atomic-cutover-explorer";
 import InstallTabs from "@/components/install-tabs";
-
-const METADATA_SAMPLE = `{
-  "app_name": "my-next-app",
-  "output_mode": "standalone",
-  "git_commit": "a1b2c3d4e5f6...",
-  "git_dirty": false,
-  "route_info": {
-    "static_routes": ["/", "/pricing"],
-    "ssr_routes": ["/dashboard"],
-    "isr_routes": ["/blog/[slug]"]
-  },
-  "detected_features": { "has_stripe": true, "has_server_actions": true }
-}`;
+import LiveMetadataExplorer from "@/components/live-metadata-explorer";
 
 const ARCHITECTURE_GUIDES = [
   { n: "01", title: "Atomic Zero-Downtime Cutover", href: "/docs/vps/atomic-cutover" },
@@ -121,43 +109,71 @@ export default function Features() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5">
-            {/* Build Intelligence (7 cols) */}
-            <div className="lg:col-span-7 min-w-0 p-4 sm:p-6 bg-surface-900/40 border border-surface-800 rounded-2xl flex flex-col justify-between">
+            {/* Build Intelligence (12 cols — live metadata.json + network mapper) */}
+            <div className="lg:col-span-12 min-w-0 p-4 sm:p-6 nd-meta-frame rounded-2xl flex flex-col justify-between gap-4">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                   <div className="inline-flex items-center gap-2 text-brand-400 font-mono text-xs uppercase tracking-wider">
                     <FileCode2 className="w-4 h-4 shrink-0" aria-hidden="true" />
                     Build Intelligence (nextcore)
                   </div>
-                  <span className="font-mono text-[11px] text-surface-400">
-                    .nextdeploy/metadata.json
-                  </span>
+                  <div className="flex flex-wrap items-center gap-3 font-mono text-[11px]">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[10px]">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      LIVE ON NEXTDEPLOY.ORG · nextcore v1
+                    </span>
+                    <a
+                      href="/nextdeploy-metadata.json"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-brand-300 hover:text-brand-200 underline decoration-dotted underline-offset-2"
+                    >
+                      .nextdeploy/metadata.json ↗
+                    </a>
+                    <a
+                      href="/api/metadata"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-cyan-300 hover:text-cyan-200 underline decoration-dotted underline-offset-2"
+                    >
+                      /api/metadata ↗
+                    </a>
+                  </div>
                 </div>
                 <h3 className="text-xl font-bold text-white mb-2">
-                  Manifest introspection + incremental build.lock
+                  Live manifest introspection + network request mapping
                 </h3>
-                <p className="text-sm text-surface-300 leading-relaxed mb-4">
-                  <code className="text-brand-300 font-mono text-xs">nextdeploy build</code> classifies
-                  every static, SSR, ISR, and middleware route, detects integrations like Stripe, and
-                  hashes build-affecting config fields in{" "}
-                  <code className="text-brand-300 font-mono text-xs">ConfigFingerprint</code> to skip
-                  unnecessary <code className="text-brand-300 font-mono text-xs">next build</code> runs.
+                <p className="text-sm text-surface-300 leading-relaxed mb-5 max-w-4xl">
+                  Every build syncs this site&apos;s real{" "}
+                  <code className="text-brand-300 font-mono text-xs">.nextdeploy/metadata.json</code>{" "}
+                  and <code className="text-brand-300 font-mono text-xs">build.lock</code> into a
+                  live structured JSON inspector, then maps actual browser requests against{" "}
+                  <code className="text-brand-300 font-mono text-xs">route_info</code>,{" "}
+                  <code className="text-brand-300 font-mono text-xs">proxy.ts</code>, and{" "}
+                  Cloudflare edge headers.
                 </p>
-                <pre className="p-3 sm:p-4 rounded-xl bg-surface-950 border border-surface-800 text-[11px] sm:text-xs font-mono text-surface-200 overflow-x-auto max-w-full mb-4">
-                  <code>{METADATA_SAMPLE}</code>
-                </pre>
+                <LiveMetadataExplorer />
               </div>
-              <Link
-                href="/docs/concepts/metadata"
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-400 hover:text-brand-300"
-              >
-                Explore Build Metadata &amp; metadata.json
-                <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
-              </Link>
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-2 border-t border-surface-800/80">
+                <Link
+                  href="/docs/concepts/metadata"
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-400 hover:text-brand-300"
+                >
+                  Explore Build Metadata &amp; metadata.json
+                  <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+                </Link>
+                <Link
+                  href="/routes"
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-cyan-300 hover:text-cyan-200"
+                >
+                  Open Full Routes Dogfood Lab
+                  <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+                </Link>
+              </div>
             </div>
 
-            {/* Defense-in-Depth Security (5 cols) */}
-            <div className="lg:col-span-5 min-w-0 p-4 sm:p-6 bg-surface-900/40 border border-surface-800 rounded-2xl flex flex-col justify-between">
+            {/* Defense-in-Depth Security (6 cols) */}
+            <div className="lg:col-span-6 min-w-0 p-4 sm:p-6 bg-surface-900/40 border border-surface-800 rounded-2xl flex flex-col justify-between">
               <div className="min-w-0">
                 <div className="inline-flex items-center gap-2 text-danger-400 font-mono text-xs uppercase tracking-wider mb-3">
                   <Shield className="w-4 h-4 shrink-0" aria-hidden="true" />
@@ -204,8 +220,8 @@ export default function Features() {
               </Link>
             </div>
 
-            {/* Agent Trace & MCP (5 cols) */}
-            <div className="lg:col-span-5 min-w-0 p-4 sm:p-6 bg-surface-900/40 border border-surface-800 rounded-2xl flex flex-col justify-between">
+            {/* Agent Trace & MCP (6 cols) */}
+            <div className="lg:col-span-6 min-w-0 p-4 sm:p-6 bg-surface-900/40 border border-surface-800 rounded-2xl flex flex-col justify-between">
               <div className="min-w-0">
                 <div className="inline-flex items-center gap-2 text-accent-400 font-mono text-xs uppercase tracking-wider mb-3">
                   <Bot className="w-4 h-4 shrink-0" aria-hidden="true" />
@@ -243,8 +259,8 @@ export default function Features() {
               </Link>
             </div>
 
-            {/* Go Sidecar + shared_static + Rollback (7 cols) */}
-            <div className="lg:col-span-7 min-w-0 p-4 sm:p-6 bg-surface-900/40 border border-surface-800 rounded-2xl flex flex-col justify-between">
+            {/* Go Sidecar + shared_static + Rollback (12 cols) */}
+            <div className="lg:col-span-12 min-w-0 p-4 sm:p-6 bg-surface-900/40 border border-surface-800 rounded-2xl flex flex-col justify-between">
               <div className="min-w-0">
                 <div className="inline-flex flex-wrap items-center gap-2 text-code-400 font-mono text-xs uppercase tracking-wider mb-3">
                   <Cpu className="w-4 h-4 shrink-0" aria-hidden="true" />

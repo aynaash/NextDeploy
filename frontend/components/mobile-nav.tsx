@@ -49,6 +49,13 @@ export default function MobileNav() {
               >
                 Documentation
               </Link>
+              <Link
+                href="/routes"
+                onClick={() => setOpen(false)}
+                className="px-4 py-3 rounded-lg text-base font-medium text-muted-200 hover:bg-surface-800 hover:text-white transition-colors"
+              >
+                Routes Lab
+              </Link>
               <a
                 href="https://github.com/aynaash/NextDeploy"
                 target="_blank"

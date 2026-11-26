@@ -680,3 +680,65 @@
     scale: 0.72;
   }
 }
+
+/* ── 5. Build Intelligence X-Ray Centerpiece ─────────────────────────────── */
+.nd-meta-frame {
+  position: relative;
+  background:
+    radial-gradient(ellipse 80% 45% at 20% 0%, rgba(16, 185, 129, 0.08), transparent 60%),
+    radial-gradient(ellipse 65% 45% at 85% 0%, rgba(34, 211, 238, 0.06), transparent 60%),
+    rgba(15, 23, 42, 0.48);
+  border: 1px solid rgba(52, 211, 153, 0.24);
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.8),
+    0 24px 60px -24px rgba(16, 185, 129, 0.22);
+}
+
+.nd-pipe-track {
+  position: relative;
+  height: 2px;
+  background: rgba(51, 65, 85, 0.75);
+  overflow: hidden;
+  border-radius: 9999px;
+}
+
+.nd-pipe-beam {
+  position: absolute;
+  inset: 0;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, #34d399, #22d3ee, transparent);
+  animation: nd-pipe-travel 1.15s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.nd-node-active {
+  border-color: rgba(52, 211, 153, 0.65) !important;
+  background: rgba(16, 185, 129, 0.1) !important;
+  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.28), 0 0 18px -4px rgba(16, 185, 129, 0.35);
+  animation: nd-node-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes nd-pipe-travel {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}
+
+@keyframes nd-node-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.25), 0 0 14px -4px rgba(16, 185, 129, 0.28);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.55), 0 0 22px -2px rgba(34, 211, 238, 0.38);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nd-pipe-beam,
+  .nd-node-active {
+    animation: none;
+  }
+}

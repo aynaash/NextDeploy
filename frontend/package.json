@@ -3,7 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "sync:metadata": "node scripts/sync-metadata.mjs",
+    "docs:index": "node scripts/build-docs-index.mjs",
+    "prebuild": "node scripts/build-docs-index.mjs && node scripts/sync-metadata.mjs",
     "build": "next build",
+    "postbuild": "node scripts/sync-metadata.mjs",
+    "predev": "node scripts/build-docs-index.mjs",
     "dev": "next dev",
     "lint": "eslint .",
     "start": "next start"

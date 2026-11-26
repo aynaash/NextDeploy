@@ -1,0 +1,760 @@
+{
+  "schema_version": "1.0",
+  "source": ".nextdeploy/metadata.json + .next manifests",
+  "synced_at": "2026-11-26T15:47:02.288Z",
+  "generated_at": "2026-11-26T18:39:56+03:00",
+  "app_name": "nextdeploy-frontend",
+  "domain": "nextdeploy.org",
+  "output_mode": "standalone",
+  "package_manager": "bun",
+  "dist_dir": ".next",
+  "export_dir": "out",
+  "build_id": "I3n7sPZXa_k9TybSYZ8pr",
+  "has_app_router": true,
+  "git_commit": "7e6100f",
+  "git_dirty": true,
+  "config": {
+    "app_name": "nextdeploy-frontend",
+    "domain": "nextdeploy.org",
+    "port": 0,
+    "environment": "",
+    "target_type": "serverless"
+  },
+  "build_lock": {
+    "git_commit": "7e6100f",
+    "git_dirty": true,
+    "generated_at": "2026-11-26T18:39:56+03:00",
+    "metadata_file": ".nextdeploy/metadata.json",
+    "config_hash": "939fd4e8fd608d49dfa4720602e8b5498497bb5cd4815f14cb5fa5c8dd47c09f"
+  },
+  "proxy": {
+    "file": "proxy.ts",
+    "runtime": "nodejs",
+    "matchers": [
+      "/((?!_next/static|_next/image|favicon.ico).*)"
+    ]
+  },
+  "route_info": {
+    "counts": {
+      "static_routes": 32,
+      "dynamic_routes": 8,
+      "isr_routes": 83,
+      "api_routes": 7,
+      "public_assets": 32
+    },
+    "static_routes": [
+      "/",
+      "/_global-error",
+      "/_not-found",
+      "/api/health",
+      "/api/metadata",
+      "/api/routes/methods",
+      "/api/routes/redirect",
+      "/api/routes/revalidate",
+      "/api/routes/stream",
+      "/app",
+      "/apple-icon.png",
+      "/docs",
+      "/favicon.ico",
+      "/icon.png",
+      "/login",
+      "/manifest.webmanifest",
+      "/opengraph-image.png",
+      "/robots.txt",
+      "/routes",
+      "/routes/actions",
+      "/routes/error-demo",
+      "/routes/gallery",
+      "/routes/grouped",
+      "/routes/isr",
+      "/routes/not-found-demo",
+      "/routes/parallel",
+      "/routes/redirect-demo",
+      "/routes/ssr",
+      "/routes/static",
+      "/routes/streaming",
+      "/sitemap.xml",
+      "/twitter-image.png"
+    ],
+    "dynamic_routes": [
+      "/api/routes/items/[id]",
+      "/docs/[...slug]",
+      "/routes/catch-all/[...segments]",
+      "/routes/dynamic/[slug]",
+      "/routes/gallery/(.)item/[id]",
+      "/routes/gallery/item/[id]",
+      "/routes/nested/[category]/[id]",
+      "/routes/optional-catch-all/[[...slug]]"
+    ],
+    "api_routes": [
+      "/api/health",
+      "/api/metadata",
+      "/api/routes/items/[id]",
+      "/api/routes/methods",
+      "/api/routes/redirect",
+      "/api/routes/revalidate",
+      "/api/routes/stream"
+    ],
+    "isr_detail": [
+      {
+        "path": "/",
+        "revalidate": 3600,
+        "tags": [
+          "/"
+        ]
+      },
+      {
+        "path": "/_global-error",
+        "revalidate": null,
+        "tags": [
+          "/_global-error"
+        ]
+      },
+      {
+        "path": "/_not-found",
+        "revalidate": 3600,
+        "tags": [
+          "/_not-found"
+        ]
+      },
+      {
+        "path": "/app",
+        "revalidate": 3600,
+        "tags": [
+          "/app"
+        ]
+      },
+      {
+        "path": "/apple-icon.png",
+        "revalidate": null,
+        "tags": [
+          "/apple-icon.png"
+        ]
+      },
+      {
+        "path": "/docs",
+        "revalidate": 3600,
+        "tags": [
+          "/docs"
+        ]
+      },
+      {
+        "path": "/docs/advanced/auto-provisioning",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/advanced/auto-provisioning"
+        ]
+      },
+      {
+        "path": "/docs/advanced/local-development",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/advanced/local-development"
+        ]
+      },
+      {
+        "path": "/docs/advanced/nextcompile",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/advanced/nextcompile"
+        ]
+      },
+      {
+        "path": "/docs/advanced/nextjs-16-turbopack-on-cloudflare",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/advanced/nextjs-16-turbopack-on-cloudflare"
+        ]
+      },
+      {
+        "path": "/docs/agent-trace/agent-first-infra",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/agent-trace/agent-first-infra"
+        ]
+      },
+      {
+        "path": "/docs/agent-trace/architecture",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/agent-trace/architecture"
+        ]
+      },
+      {
+        "path": "/docs/agent-trace/cli-takeover",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/agent-trace/cli-takeover"
+        ]
+      },
+      {
+        "path": "/docs/aws/cloudfront",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/aws/cloudfront"
+        ]
+      },
+      {
+        "path": "/docs/aws/image-optimization",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/aws/image-optimization"
+        ]
+      },
+      {
+        "path": "/docs/aws/isr",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/aws/isr"
+        ]
+      },
+      {
+        "path": "/docs/aws/lambda",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/aws/lambda"
+        ]
+      },
+      {
+        "path": "/docs/aws/lambda-bridge",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/aws/lambda-bridge"
+        ]
+      },
+      {
+        "path": "/docs/cd_cd/cd_cd",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/cd_cd/cd_cd"
+        ]
+      },
+      {
+        "path": "/docs/cli/reference",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/cli/reference"
+        ]
+      },
+      {
+        "path": "/docs/cli/self-update",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/cli/self-update"
+        ]
+      },
+      {
+        "path": "/docs/cli/trace",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/cli/trace"
+        ]
+      },
+      {
+        "path": "/docs/cloudflare/bindings",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/cloudflare/bindings"
+        ]
+      },
+      {
+        "path": "/docs/cloudflare/dns",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/cloudflare/dns"
+        ]
+      },
+      {
+        "path": "/docs/cloudflare/durable-objects",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/cloudflare/durable-objects"
+        ]
+      },
+      {
+        "path": "/docs/cloudflare/hyperdrive",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/cloudflare/hyperdrive"
+        ]
+      },
+      {
+        "path": "/docs/cloudflare/kv-vectorize-ai",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/cloudflare/kv-vectorize-ai"
+        ]
+      },
+      {
+        "path": "/docs/cloudflare/overview",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/cloudflare/overview"
+        ]
+      },
+      {
+        "path": "/docs/cloudflare/queues",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/cloudflare/queues"
+        ]
+      },
+      {
+        "path": "/docs/cloudflare/quickstart",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/cloudflare/quickstart"
+        ]
+      },
+      {
+        "path": "/docs/cloudflare/r2",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/cloudflare/r2"
+        ]
+      },
+      {
+        "path": "/docs/cloudflare/tokens",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/cloudflare/tokens"
+        ]
+      },
+      {
+        "path": "/docs/cloudflare/workers",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/cloudflare/workers"
+        ]
+      },
+      {
+        "path": "/docs/concepts/architecture",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/concepts/architecture"
+        ]
+      },
+      {
+        "path": "/docs/concepts/how-it-works",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/concepts/how-it-works"
+        ]
+      },
+      {
+        "path": "/docs/concepts/metadata",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/concepts/metadata"
+        ]
+      },
+      {
+        "path": "/docs/concepts/security",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/concepts/security"
+        ]
+      },
+      {
+        "path": "/docs/config/examples",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/config/examples"
+        ]
+      },
+      {
+        "path": "/docs/config/reference",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/config/reference"
+        ]
+      },
+      {
+        "path": "/docs/dns",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/dns"
+        ]
+      },
+      {
+        "path": "/docs/getting-started/aws-quickstart",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/getting-started/aws-quickstart"
+        ]
+      },
+      {
+        "path": "/docs/getting-started/cloudflare-quickstart",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/getting-started/cloudflare-quickstart"
+        ]
+      },
+      {
+        "path": "/docs/getting-started/installation",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/getting-started/installation"
+        ]
+      },
+      {
+        "path": "/docs/getting-started/requirements",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/getting-started/requirements"
+        ]
+      },
+      {
+        "path": "/docs/getting-started/vps-quickstart",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/getting-started/vps-quickstart"
+        ]
+      },
+      {
+        "path": "/docs/mcp/prompt-engineering",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/mcp/prompt-engineering"
+        ]
+      },
+      {
+        "path": "/docs/mcp/server",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/mcp/server"
+        ]
+      },
+      {
+        "path": "/docs/mcp/tools",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/mcp/tools"
+        ]
+      },
+      {
+        "path": "/docs/operations/audit-log",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/operations/audit-log"
+        ]
+      },
+      {
+        "path": "/docs/operations/ci-cd",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/operations/ci-cd"
+        ]
+      },
+      {
+        "path": "/docs/operations/monitoring",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/operations/monitoring"
+        ]
+      },
+      {
+        "path": "/docs/reference/faq",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/reference/faq"
+        ]
+      },
+      {
+        "path": "/docs/reference/limitations",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/reference/limitations"
+        ]
+      },
+      {
+        "path": "/docs/reference/troubleshooting",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/reference/troubleshooting"
+        ]
+      },
+      {
+        "path": "/docs/roadmap",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/roadmap"
+        ]
+      },
+      {
+        "path": "/docs/secrets/doppler",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/secrets/doppler"
+        ]
+      },
+      {
+        "path": "/docs/secrets/encryption",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/secrets/encryption"
+        ]
+      },
+      {
+        "path": "/docs/secrets/lambda-extension",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/secrets/lambda-extension"
+        ]
+      },
+      {
+        "path": "/docs/secrets/overview",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/secrets/overview"
+        ]
+      },
+      {
+        "path": "/docs/vps/atomic-cutover",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/vps/atomic-cutover"
+        ]
+      },
+      {
+        "path": "/docs/vps/caddy",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/vps/caddy"
+        ]
+      },
+      {
+        "path": "/docs/vps/chunk-pooling",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/vps/chunk-pooling"
+        ]
+      },
+      {
+        "path": "/docs/vps/daemon",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/vps/daemon"
+        ]
+      },
+      {
+        "path": "/docs/vps/go-sidecar",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/vps/go-sidecar"
+        ]
+      },
+      {
+        "path": "/docs/vps/overview",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/vps/overview"
+        ]
+      },
+      {
+        "path": "/docs/vps/rollback",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/vps/rollback"
+        ]
+      },
+      {
+        "path": "/docs/vps/systemd-hardening",
+        "revalidate": 3600,
+        "tags": [
+          "/docs/vps/systemd-hardening"
+        ]
+      },
+      {
+        "path": "/favicon.ico",
+        "revalidate": null,
+        "tags": [
+          "/favicon.ico"
+        ]
+      },
+      {
+        "path": "/icon.png",
+        "revalidate": null,
+        "tags": [
+          "/icon.png"
+        ]
+      },
+      {
+        "path": "/login",
+        "revalidate": 3600,
+        "tags": [
+          "/login"
+        ]
+      },
+      {
+        "path": "/manifest.webmanifest",
+        "revalidate": null,
+        "tags": [
+          "/manifest.webmanifest"
+        ]
+      },
+      {
+        "path": "/opengraph-image.png",
+        "revalidate": null,
+        "tags": [
+          "/opengraph-image.png"
+        ]
+      },
+      {
+        "path": "/robots.txt",
+        "revalidate": 3600,
+        "tags": [
+          "/robots.txt"
+        ]
+      },
+      {
+        "path": "/routes",
+        "revalidate": 3600,
+        "tags": [
+          "/routes"
+        ]
+      },
+      {
+        "path": "/routes/dynamic/aws",
+        "revalidate": 3600,
+        "tags": [
+          "/routes/dynamic/aws"
+        ]
+      },
+      {
+        "path": "/routes/dynamic/cloudflare",
+        "revalidate": 3600,
+        "tags": [
+          "/routes/dynamic/cloudflare"
+        ]
+      },
+      {
+        "path": "/routes/dynamic/vps",
+        "revalidate": 3600,
+        "tags": [
+          "/routes/dynamic/vps"
+        ]
+      },
+      {
+        "path": "/routes/gallery",
+        "revalidate": 3600,
+        "tags": [
+          "/routes/gallery"
+        ]
+      },
+      {
+        "path": "/routes/grouped",
+        "revalidate": 3600,
+        "tags": [
+          "/routes/grouped"
+        ]
+      },
+      {
+        "path": "/routes/isr",
+        "revalidate": 30,
+        "tags": [
+          "/routes/isr"
+        ]
+      },
+      {
+        "path": "/routes/static",
+        "revalidate": 3600,
+        "tags": [
+          "/routes/static"
+        ]
+      },
+      {
+        "path": "/sitemap.xml",
+        "revalidate": 3600,
+        "tags": [
+          "/sitemap.xml"
+        ]
+      },
+      {
+        "path": "/twitter-image.png",
+        "revalidate": null,
+        "tags": [
+          "/twitter-image.png"
+        ]
+      }
+    ]
+  },
+  "public_assets": [
+    "/android-chrome-192x192.png",
+    "/android-chrome-512x512.png",
+    "/apple-touch-icon-precomposed.png",
+    "/apple-touch-icon.png",
+    "/browserconfig.xml",
+    "/daemon.sh",
+    "/favicon-16x16.png",
+    "/favicon-32x32.png",
+    "/favicon-48x48.png",
+    "/icon-192.png",
+    "/icon-512.png",
+    "/icon.svg",
+    "/install.bat",
+    "/install.sh",
+    "/llms-full.txt",
+    "/llms.txt",
+    "/logo-icon.svg",
+    "/logo.png",
+    "/logo.svg",
+    "/maskable-icon-512x512.png",
+    "/mstile-144x144.png",
+    "/mstile-150x150.png",
+    "/mstile-310x150.png",
+    "/mstile-310x310.png",
+    "/mstile-70x70.png",
+    "/nextdeploy-metadata.json",
+    "/og.png",
+    "/placeholder-logo.svg",
+    "/placeholder-user.jpg",
+    "/placeholder.jpg",
+    "/placeholder.svg",
+    "/site.webmanifest"
+  ],
+  "detected_features": {
+    "HasYouTube": true,
+    "HasGoogleFonts": false,
+    "HasGoogleAnalytics": false,
+    "HasStripe": false,
+    "HasCloudinary": false,
+    "HasServerActions": false,
+    "HasI18n": false,
+    "UserDefinedCSP": false,
+    "AllowedOrigins": [
+      "**.youtube.com",
+      "**.ytimg.com",
+      "**.ggpht.com"
+    ]
+  },
+  "edge_protection": {
+    "provider": "cloudflare",
+    "compatibility_date": "2026-05-01",
+    "bindings": [
+      "ASSETS (R2)",
+      "AI",
+      "RATE_LIMIT (KV)"
+    ],
+    "enabled": true,
+    "public_paths": [
+      "/",
+      "/login",
+      "/docs",
+      "/docs/*",
+      "/routes",
+      "/routes/*",
+      "/sitemap.xml",
+      "/manifest.webmanifest",
+      "/nextdeploy-metadata.json"
+    ],
+    "protected_paths": [
+      "/app/*"
+    ],
+    "rate_limit_paths": [
+      "/api/*",
+      "/app/*"
+    ],
+    "requests_per_minute": 60
+  }
+}

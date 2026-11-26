@@ -83,6 +83,14 @@ export default function Footer() {
                 CLI Reference
               </Link>
             </li>
+            <li>
+              <Link
+                href="/routes"
+                className="text-muted-400 hover:text-white transition-colors"
+              >
+                Next.js Routes Lab
+              </Link>
+            </li>
           </ul>
         </div>
 

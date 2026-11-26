@@ -317,9 +317,8 @@ run(f"magick -background none /tmp/nd-icon.svg -resize 16x16 {PUBLIC_DIR}/favico
 run(f"magick -background none /tmp/nd-icon.svg -resize 32x32 {PUBLIC_DIR}/favicon-32x32.png")
 run(f"magick -background none /tmp/nd-icon.svg -resize 48x48 {PUBLIC_DIR}/favicon-48x48.png")
 
-# Multi-layer favicon.ico containing 16x16, 32x32, 48x48
-run(f"magick {PUBLIC_DIR}/favicon-16x16.png {PUBLIC_DIR}/favicon-32x32.png {PUBLIC_DIR}/favicon-48x48.png {PUBLIC_DIR}/favicon.ico")
-run(f"cp {PUBLIC_DIR}/favicon.ico {APP_DIR}/favicon.ico")
+# Multi-layer favicon.ico containing 16x16, 32x32, 48x48 (in app/ only to avoid public/ conflict)
+run(f"magick {PUBLIC_DIR}/favicon-16x16.png {PUBLIC_DIR}/favicon-32x32.png {PUBLIC_DIR}/favicon-48x48.png {APP_DIR}/favicon.ico")
 
 # 2. Apple Touch Icons
 run(f"magick -background none /tmp/nd-icon.svg -resize 180x180 {PUBLIC_DIR}/apple-touch-icon.png")
@@ -345,7 +344,6 @@ run(f"magick -background none /tmp/nd-icon.svg -resize 310x310 {PUBLIC_DIR}/msti
 
 # 5. OpenGraph & Twitter Cards
 run(f"magick -font {FONT_PATH} /tmp/nd-og.svg -resize 1200x630 -strip -depth 8 {PUBLIC_DIR}/og.png")
-run(f"cp {PUBLIC_DIR}/og.png {PUBLIC_DIR}/twitter-image.png")
 run(f"cp {PUBLIC_DIR}/og.png {APP_DIR}/opengraph-image.png")
 run(f"cp {PUBLIC_DIR}/og.png {APP_DIR}/twitter-image.png")
 

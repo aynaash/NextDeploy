@@ -6,8 +6,10 @@ app:
 serverless:
   provider: cloudflare
   cloudflare:
-    compatibility_date: "2025-04-01"
-    compatibility_flags: [nodejs_compat_v2]
+    # >= 2025-09-01 enables node:fs (Next's incremental cache + any fs-touching
+    # deps); with 2025-04-01 `require("fs")` threw during module evaluation.
+    compatibility_date: "2026-05-01"
+    compatibility_flags: [nodejs_compat]
 
     bindings:
       r2:
@@ -28,7 +30,7 @@ serverless:
     # Edge protection guard — runs ahead of the app (auth + KV rate-limit).
     protection:
       enabled: true
-      public_paths: ["/", "/login", "/docs", "/docs/*", "/sitemap.xml", "/manifest.webmanifest"]
+      public_paths: ["/", "/login", "/docs", "/docs/*", "/routes", "/routes/*", "/sitemap.xml", "/manifest.webmanifest", "/nextdeploy-metadata.json"]
       auth:
         secret_env: AUTH_SECRET
         protected_paths: ["/app/*"]

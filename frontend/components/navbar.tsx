@@ -20,6 +20,12 @@ export default function Navbar() {
             >
               Documentation
             </Link>
+            <Link
+              href="/routes"
+              className="text-sm font-medium text-muted-400 hover:text-white transition-colors"
+            >
+              Routes Lab
+            </Link>
             <a
               href="https://github.com/aynaash/NextDeploy"
               target="_blank"
