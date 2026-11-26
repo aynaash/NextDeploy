@@ -49,18 +49,18 @@ The deploy advances only when the endpoint returns `200 OK` within `timeout` (de
 
 ```mermaid
 flowchart TD
-    Client[Incoming Client Requests: 443] --> Caddy[Caddy Reverse Proxy]
-    Caddy -.->|1. In-flight requests drain| OldNode[Old Release on 127.0.0.1:3001]
-    Caddy ==>|2. New requests cut over| NewNode[New Release on 127.0.0.1:3002]
-    Daemon[nextdeployd] -->|renameat() symlink swap| Link[current -> releases/2026-11-23_14-20-00]
-    Daemon -->|Reload upstream config| Caddy
-    Daemon -->|SIGTERM after 30s grace period| OldNode
+    Client["Incoming Client Requests (:443)"] --> Caddy["Caddy Reverse Proxy + Coraza WAF"]
+    Caddy -.->|"1. In-flight requests drain"| OldNode["Old Release on 127.0.0.1:3001"]
+    Caddy ==>|"2. New requests cut over"| NewNode["New Release on 127.0.0.1:3002"]
+    Daemon["nextdeployd"] -->|"current.tmp -> current rename()"| Link["current -> releases/1763890000-a1b2c3d"]
+    Daemon -->|"Sandbox validate & reload Caddy"| Caddy
+    Daemon -->|"SIGTERM (TimeoutStopSec=10s)"| OldNode
 ```
 
 ### The 4-Step Cutover Protocol:
-1. `nextdeployd` updates Caddy's upstream via its local admin API `localhost:2019/load`.
-2. Executes an atomic Linux `renameat()` swap replacing `current` with `current.tmp`.
+1. `nextdeployd` validates and reloads Caddy's fragment (`/etc/caddy/nextdeploy.d/<app>.caddy`) pointing at the healthy candidate port.
+2. Executes an atomic POSIX `os.Rename("current.tmp", "current")` swap pointing `current` to the new release directory.
 3. Caddy immediately routes all new incoming requests to the new release on `:3002`.
-4. Sends `SIGTERM` to the previous release on `:3001`, allowing in-flight requests up to 30 seconds to finish cleanly before terminating the process.
+4. Stops the previous systemd unit (`SIGTERM`, `TimeoutStopSec=10s`, `KillMode=control-group`), allowing in-flight requests to finish cleanly before terminating.
 
 If health checks fail at any point, the active release stays untouched and zero users see an error.

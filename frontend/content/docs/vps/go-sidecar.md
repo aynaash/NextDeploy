@@ -18,14 +18,13 @@ In a standard Node.js VPS deployment, Node's single-threaded event loop handles 
 
 NextDeploy's optional Go sidecar sits between Caddy and your Next.js Node server:
 
-```
-Request ──► Caddy (:443) ──► Go Sidecar (:3001)
-                               │
-                               ├─► Prerendered HTML / RSC? ──► Serve directly (sub-ms)
-                               ├─► /_next/image request?   ──► Multi-threaded Go transcoding
-                               │
-                               └─► Dynamic SSR / API /     ──► Reverse proxy to Node (:3000)
-                                   Middleware / Actions
+```mermaid
+flowchart LR
+    Caddy["Caddy (:443)"] -->|"lb_policy first"| Sidecar["Go Sidecar"]
+    Sidecar -->|"Prerendered HTML / RSC"| Cache["Sub-ms In-Memory Cache"]
+    Sidecar -->|"/_next/image"| Img["Multi-Threaded Go Image Transcoder"]
+    Sidecar -->|"Dynamic SSR / API / Middleware"| Node["Next.js Standalone (Node)"]
+    Caddy -.->|"Health Failover"| Node
 ```
 
 The sidecar is an acceleration layer, not a replacement for Next.js. Any route that needs runtime rendering, middleware, or dynamic execution passes straight through to Node.js over HTTP/1.1 keep-alive connections.

@@ -24,13 +24,13 @@ NextDeploy takes a **declarative, zero-external-tool approach**:
 
 ```mermaid
 flowchart TD
-    Config[nextdeploy.yml Spec] --> Engine[NextDeploy Reconciliation Engine]
-    Live[Live Provider APIs: Cloudflare / AWS] --> Engine
-    State[Encrypted State: .nextdeploy/cf-state.json.enc] --> Engine
-    Engine --> Diff{Compute Drift}
-    Diff -->|No Changes| Safe[Zero API Calls / Deploy Instantly]
-    Diff -->|Drift Detected| Plan[Display Plan & Diff]
-    Plan --> Apply[Auto-Provision Missing Resources & Update Encrypted State]
+    Config["nextdeploy.yml Spec"] --> Engine["NextDeploy Reconciliation Engine"]
+    Live["Live Provider APIs: Cloudflare / AWS"] --> Engine
+    State["Encrypted State: .nextdeploy/cf-state.json.enc"] --> Engine
+    Engine --> Diff{"Compute Drift"}
+    Diff -->|"No Changes"| Safe["Zero API Calls / Deploy Instantly"]
+    Diff -->|"Drift Detected"| Plan["Display Plan & Diff"]
+    Plan --> Apply["Auto-Provision Missing Resources & Update Encrypted State"]
 ```
 
 ---

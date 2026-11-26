@@ -30,41 +30,41 @@ This legacy approach causes major issues:
 
 ```mermaid
 flowchart TD
-    subgraph Phase 1: Pre-Flight & Config
-        A[nextdeploy ship] --> Config[Load & Validate nextdeploy.yml]
-        Config --> Creds[Validate Cloud Credentials / SSH]
-        Creds --> GitCheck[Inspect Git Working Directory & Commit Hash]
+    subgraph Phase1 ["Phase 1: Pre-Flight & Config"]
+        A["nextdeploy ship"] --> Config["Load & Validate nextdeploy.yml"]
+        Config --> Creds["Validate Cloud Credentials / SSH"]
+        Creds --> GitCheck["Inspect Git Working Directory & Commit Hash"]
     end
 
-    subgraph Phase 2: Build & NextCore Introspection
-        GitCheck --> LockCheck{Check .nextdeploy/build.lock}
-        LockCheck -->|Inputs Unchanged| CacheHit[Reuse Cached Compile]
-        LockCheck -->|Inputs Changed / --force| Build[Run next build]
-        Build --> Core[NextCore AST & Manifest Evaluation]
+    subgraph Phase2 ["Phase 2: Build & NextCore Introspection"]
+        GitCheck --> LockCheck{"Check .nextdeploy/build.lock"}
+        LockCheck -->|"Inputs Unchanged"| CacheHit["Reuse Cached Compile"]
+        LockCheck -->|"Inputs Changed / --force"| Build["Run next build"]
+        Build --> Core["NextCore AST & Manifest Evaluation"]
         CacheHit --> Core
-        Core --> Meta[Emit .nextdeploy/metadata.json]
+        Core --> Meta["Emit .nextdeploy/metadata.json"]
     end
 
-    subgraph Phase 3: Asset Segregation & Pool Sync
-        Meta --> Split[Extract .next/static & public/]
-        Split --> VPS_Pool[Sync to shared_static on VPS]
-        Split --> R2_S3[Upload to Cloudflare R2 / AWS S3 with Immutable Headers]
+    subgraph Phase3 ["Phase 3: Asset Segregation & Pool Sync"]
+        Meta --> Split["Extract .next/static & public/"]
+        Split --> VPS_Pool["Sync to shared_static on VPS"]
+        Split --> R2_S3["Upload to Cloudflare R2 / AWS S3 with Immutable Headers"]
     end
 
-    subgraph Phase 4: Target Provisioning
-        Meta --> Prov{Target Provider}
-        Prov -->|VPS| VPS_Stage[Deploy Standalone to Isolated Port]
-        Prov -->|Cloudflare| CF_Stage[Compile nextserver & Upload Worker]
-        Prov -->|AWS| AWS_Stage[Package Lambda Bridge & Update Function]
+    subgraph Phase4 ["Phase 4: Target Provisioning"]
+        Meta --> Prov{"Target Provider"}
+        Prov -->|"VPS"| VPS_Stage["Deploy Standalone to Isolated Port"]
+        Prov -->|"Cloudflare"| CF_Stage["Compile nextserver & Upload Worker"]
+        Prov -->|"AWS"| AWS_Stage["Package Lambda Bridge & Update Function"]
     end
 
-    subgraph Phase 5: Verification & Cutover
-        VPS_Stage --> Probe{Dual-Stage Health Verification}
+    subgraph Phase5 ["Phase 5: Verification & Cutover"]
+        VPS_Stage --> Probe{"Dual-Stage Health Verification"}
         CF_Stage --> Probe
         AWS_Stage --> Probe
-        Probe -->|200 OK| Cutover[Atomic Traffic Pointer Flip]
-        Probe -->|Failed| Rollback[Automatic Instant Rollback]
-        Cutover --> Report[Generate HTML Report & DNS Guide]
+        Probe -->|"HTTP < 500"| Cutover["Atomic Traffic Pointer Flip"]
+        Probe -->|"Failed"| Rollback["Automatic Instant Rollback"]
+        Cutover --> Report["Generate HTML Report & DNS Guide"]
     end
 ```
 

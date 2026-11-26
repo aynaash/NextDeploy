@@ -24,12 +24,12 @@ NextDeploy embeds a high-performance, zero-dependency **Lambda Bridge Adapter** 
 
 ```mermaid
 flowchart LR
-    Event[Lambda JSON Event Payload v2.0] --> Bridge[NextDeploy Lambda Bridge]
-    Bridge -->|Transform Headers, Cookies, Query| Req[Mock http.IncomingMessage Stream]
-    Req --> NextServer[Next.js Standalone Server]
-    NextServer -->|Render Stream / Server Actions| Res[Mock http.ServerResponse Stream]
+    Event["Lambda JSON Event Payload v2.0"] --> Bridge["NextDeploy Lambda Bridge"]
+    Bridge -->|"Transform Headers, Cookies, Query"| Req["Mock http.IncomingMessage Stream"]
+    Req --> NextServer["Next.js Standalone Server"]
+    NextServer -->|"Render Stream / Server Actions"| Res["Mock http.ServerResponse Stream"]
     Res --> Bridge
-    Bridge -->|Collect Buffers & Headers| JSON[Lambda Response Envelope / Streaming Response]
+    Bridge -->|"Collect Buffers & Headers"| JSON["Lambda Response Envelope / Streaming Response"]
 ```
 
 ---

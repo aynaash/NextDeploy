@@ -20,12 +20,12 @@ When deploying to AWS, running image transcoding inside the primary Next.js SSR 
 
 ```mermaid
 flowchart LR
-    Browser[Browser Request] --> CF[CloudFront Edge CDN]
-    CF -->|Cache Hit| EdgeCache[Return WebP / AVIF Cache]
-    CF -->|Cache Miss /_next/image| ImgLambda[Dedicated Image Lambda ARM64 / Sharp]
-    ImgLambda -->|Fetch Source Asset| S3[Private S3 Bucket OAC]
-    ImgLambda -->|Fetch External Allowed Origin| Ext[Remote Allowed Domain]
-    ImgLambda -->|Optimized Bytes| CF
+    Browser["Browser Request"] --> CF["CloudFront Edge CDN"]
+    CF -->|"Cache Hit"| EdgeCache["Return WebP / AVIF Cache"]
+    CF -->|"Cache Miss /_next/image"| ImgLambda["Dedicated Image Lambda (ARM64 / Sharp)"]
+    ImgLambda -->|"Fetch Source Asset"| S3["Private S3 Bucket (OAC)"]
+    ImgLambda -->|"Fetch External Allowed Origin"| Ext["Remote Allowed Domain"]
+    ImgLambda -->|"Optimized Bytes"| CF
 ```
 
 ---

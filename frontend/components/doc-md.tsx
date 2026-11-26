@@ -5,6 +5,20 @@ import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 
 import DocPrevNext from '@/components/doc-prev-next'
+import MermaidDiagram from '@/components/mermaid-diagram'
+
+function extractText(node: React.ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') {
+    return String(node)
+  }
+  if (Array.isArray(node)) {
+    return node.map(extractText).join('')
+  }
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) {
+    return extractText(node.props.children)
+  }
+  return ''
+}
 
 export type DocStatus = 'draft' | 'in-progress' | 'ready'
 
@@ -68,7 +82,23 @@ export default function DocMd({ meta, body }: { meta: DocMeta; body: string }) {
 
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
+        rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true, plainText: ['mermaid'] }]]}
+        components={{
+          pre({ children, ...props }) {
+            const firstChild = Array.isArray(children) ? children[0] : children
+            if (
+              React.isValidElement<{ className?: string; children?: React.ReactNode }>(firstChild) &&
+              typeof firstChild.props?.className === 'string' &&
+              firstChild.props.className.includes('language-mermaid')
+            ) {
+              const chart = extractText(firstChild.props.children).trim()
+              if (chart) {
+                return <MermaidDiagram chart={chart} />
+              }
+            }
+            return <pre {...props}>{children}</pre>
+          },
+        }}
       >
         {body}
       </ReactMarkdown>

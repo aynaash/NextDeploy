@@ -2,10 +2,10 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "NextDeploy - Self-Hosted Next.js Deployment Platform",
+    name: "NextDeploy — Self-Hosted Next.js Deployment Engine",
     short_name: "NextDeploy",
     description:
-      "Deploy Next.js to your own Linux VPS, Cloudflare Workers, or AWS Lambda with zero lock-in, atomic zero-downtime rollouts, and automatic SSL.",
+      "Open-source self-hosted Next.js deployment engine. Deploy Next.js to Linux VPS, AWS Lambda, or Cloudflare Workers with zero-downtime rollouts and rollback.",
     start_url: "/",
     display: "standalone",
     background_color: "#020617",

@@ -20,15 +20,15 @@ On Linux VPS targets, NextDeploy executes rollbacks in **under 200 milliseconds*
 
 ```mermaid
 flowchart TD
-    Current[current Symlink -> Release v12]
-    Buffer[Release Ring Buffer on Disk]
-    Buffer --> Rel10[Release v10: /opt/nextdeploy/apps/app/releases/10]
-    Buffer --> Rel11[Release v11: /opt/nextdeploy/apps/app/releases/11]
-    Buffer --> Rel12[Release v12: /opt/nextdeploy/apps/app/releases/12 ACTIVE]
-    
-    RollbackCmd[nextdeploy rollback] --> Switch[Flip Symlink Atomically: current -> Release v11]
-    Switch --> Signal[Caddy Hot-Reload & Drain TCP Connections]
-    Signal --> Complete[Traffic Now Servicing Release v11 in < 200ms]
+    Current["current Symlink -> Release v12"]
+    Buffer["Release Ring Buffer on Disk (keep = 5)"]
+    Buffer --> Rel10["Release v10: /opt/nextdeploy/apps/app/releases/10"]
+    Buffer --> Rel11["Release v11: /opt/nextdeploy/apps/app/releases/11"]
+    Buffer --> Rel12["Release v12: /opt/nextdeploy/apps/app/releases/12 ACTIVE"]
+
+    RollbackCmd["nextdeploy rollback"] --> Switch["Flip Symlink Atomically: current -> Release v11"]
+    Switch --> Signal["Health Probe, Caddy Reload & Drain Old Unit"]
+    Signal --> Complete["Traffic Serving Release v11 Zero-Downtime"]
 ```
 
 ---

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useId } from "react";
 
 interface LogoProps {
   variant?: "icon" | "horizontal" | "full";
@@ -13,30 +13,35 @@ interface LogoProps {
 
 const sizeConfig = {
   xs: {
+    iconPx: 24,
     iconSize: "w-6 h-6",
     textSize: "text-base",
     subtextSize: "text-[10px]",
     badgeSize: "text-[9px] px-1.5 py-0.5",
   },
   sm: {
+    iconPx: 32,
     iconSize: "w-8 h-8",
     textSize: "text-lg",
     subtextSize: "text-xs",
     badgeSize: "text-[10px] px-2 py-0.5",
   },
   md: {
+    iconPx: 40,
     iconSize: "w-10 h-10",
     textSize: "text-xl",
     subtextSize: "text-xs",
     badgeSize: "text-xs px-2.5 py-0.5",
   },
   lg: {
+    iconPx: 48,
     iconSize: "w-12 h-12",
     textSize: "text-2xl",
     subtextSize: "text-sm",
     badgeSize: "text-xs px-3 py-1",
   },
   xl: {
+    iconPx: 64,
     iconSize: "w-16 h-16",
     textSize: "text-3xl",
     subtextSize: "text-base",
@@ -44,42 +49,58 @@ const sizeConfig = {
   },
 };
 
-export function LogoIcon({ className = "w-8 h-8" }: { className?: string }) {
+export function LogoIcon({
+  className = "w-8 h-8",
+  size = 32,
+}: {
+  className?: string;
+  size?: number;
+}) {
+  const uid = useId();
+  const bgId = `${uid}-bg`;
+  const borderId = `${uid}-border`;
+  const frameId = `${uid}-frame`;
+  const boltId = `${uid}-bolt`;
+  const innerId = `${uid}-inner`;
+  const glowId = `${uid}-glow`;
+
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 512 512"
+      width={size}
+      height={size}
       fill="none"
       className={`shrink-0 ${className}`}
       role="img"
       aria-label="NextDeploy Icon"
     >
       <defs>
-        <linearGradient id="logo-icon-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <linearGradient id={bgId} x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stopColor="#0b1329" />
           <stop offset="50%" stopColor="#050a17" />
           <stop offset="100%" stopColor="var(--color-surface-950)" />
         </linearGradient>
-        <linearGradient id="logo-icon-border" x1="0%" y1="0%" x2="100%" y2="100%">
+        <linearGradient id={borderId} x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stopColor="var(--color-brand-400)" stopOpacity="0.7" />
           <stop offset="45%" stopColor="var(--color-cyan-500)" stopOpacity="0.4" />
           <stop offset="100%" stopColor="var(--color-surface-800)" stopOpacity="0.8" />
         </linearGradient>
-        <linearGradient id="logo-icon-frame" x1="0%" y1="0%" x2="100%" y2="100%">
+        <linearGradient id={frameId} x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stopColor="var(--color-brand-500)" />
           <stop offset="100%" stopColor="var(--color-brand-600)" />
         </linearGradient>
-        <linearGradient id="logo-icon-bolt" x1="0%" y1="0%" x2="100%" y2="100%">
+        <linearGradient id={boltId} x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stopColor="var(--color-brand-200)" />
           <stop offset="25%" stopColor="var(--color-brand-400)" />
           <stop offset="70%" stopColor="var(--color-brand-500)" />
           <stop offset="100%" stopColor="var(--color-cyan-500)" />
         </linearGradient>
-        <linearGradient id="logo-icon-inner" x1="0%" y1="0%" x2="100%" y2="100%">
+        <linearGradient id={innerId} x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stopColor="var(--color-surface-900)" stopOpacity="0.95" />
           <stop offset="100%" stopColor="var(--color-surface-950)" stopOpacity="0.98" />
         </linearGradient>
-        <filter id="logo-icon-glow" x="-20%" y="-20%" width="140%" height="140%">
+        <filter id={glowId} x="-20%" y="-20%" width="140%" height="140%">
           <feGaussianBlur stdDeviation="8" result="blur" />
           <feComposite in="SourceGraphic" in2="blur" operator="over" />
         </filter>
@@ -92,8 +113,8 @@ export function LogoIcon({ className = "w-8 h-8" }: { className?: string }) {
         width="480"
         height="480"
         rx="112"
-        fill="url(#logo-icon-bg)"
-        stroke="url(#logo-icon-border)"
+        fill={`url(#${bgId})`}
+        stroke={`url(#${borderId})`}
         strokeWidth="10"
       />
 
@@ -104,8 +125,8 @@ export function LogoIcon({ className = "w-8 h-8" }: { className?: string }) {
         width="320"
         height="320"
         rx="56"
-        fill="url(#logo-icon-inner)"
-        stroke="url(#logo-icon-frame)"
+        fill={`url(#${innerId})`}
+        stroke={`url(#${frameId})`}
         strokeWidth="16"
       />
 
@@ -117,8 +138,8 @@ export function LogoIcon({ className = "w-8 h-8" }: { className?: string }) {
       {/* High-Energy Deploy Lightning Bolt */}
       <path
         d="M275 185 L215 270 L250 270 L220 360 L305 250 L262 250 Z"
-        fill="url(#logo-icon-bolt)"
-        filter="url(#logo-icon-glow)"
+        fill={`url(#${boltId})`}
+        filter={`url(#${glowId})`}
       />
     </svg>
   );
@@ -139,14 +160,14 @@ export default function Logo({
   if (variant === "icon" || !showText) {
     return (
       <div className={`inline-flex items-center ${className}`}>
-        <LogoIcon className={`${cfg.iconSize} ${iconClassName}`} />
+        <LogoIcon className={`${cfg.iconSize} ${iconClassName}`} size={cfg.iconPx} />
       </div>
     );
   }
 
   return (
     <div className={`inline-flex items-center gap-2.5 ${className}`}>
-      <LogoIcon className={`${cfg.iconSize} ${iconClassName}`} />
+      <LogoIcon className={`${cfg.iconSize} ${iconClassName}`} size={cfg.iconPx} />
       
       <div className="flex flex-col">
         <div className="flex items-center gap-2">

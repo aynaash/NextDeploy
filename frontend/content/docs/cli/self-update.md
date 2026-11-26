@@ -25,23 +25,20 @@ nextdeploy version
 ```
 
 ### How `nextdeploy update` Operates:
-1. **GitHub Release Check:** Queries `https://api.github.com/repos/nextdeploy/nextdeploy/releases/latest`.
+1. **GitHub Release Check:** Queries `https://api.github.com/repos/aynaash/NextDeploy/releases/latest`.
 2. **Platform Resolution:** Detects host operating system (`darwin`, `linux`, `windows`) and architecture (`arm64`, `amd64`).
 3. **Checksum Verification:** Downloads `checksums.txt` and calculates SHA-256 hash of the downloaded archive. If hashes do not match, the update immediately aborts without modifying the disk.
 4. **Atomic Binary Swap:** Writes the new executable to a temporary file (`nextdeploy.tmp`) in the same directory as the current binary and executes `os.Rename()`. On POSIX systems, this swap is instantaneous and safe even while the CLI is running.
 
 ---
 
-## Pinning or Rolling Back Specific Versions
+## Pinning Specific Versions
 
-If you need to install a specific historical version or test a release candidate:
+To install a pinned release tag (for example `v1.0.0`) in CI/CD or on a workstation, download the release archive directly from GitHub Releases or pass a versioned tag to the installer:
 
 ```bash
-# Upgrade or downgrade to a specific tagged release
-nextdeploy update --version v0.20.1
-
-# Download without applying (dry run)
-nextdeploy update --dry-run
+# Install a pinned release via GitHub Releases + checksum verification
+curl -fsSL https://github.com/aynaash/NextDeploy/releases/download/v1.0.0/checksums.txt -o checksums.txt
 ```
 
 ---

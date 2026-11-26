@@ -4,6 +4,8 @@ lede: Deploy a Next.js app to your own AWS account using AWS Lambda, Amazon S3, 
 status: ready
 sourceRef: cli/internal/serverless/aws*.go, docs/targets/aws.md
 related:
+  - title: Requirements
+    href: /docs/getting-started/requirements
   - title: AWS Lambda
     href: /docs/aws/lambda
   - title: CloudFront
@@ -13,6 +15,15 @@ related:
   - title: DNS Configuration
     href: /docs/dns
 ---
+
+## Prerequisites
+
+- **AWS IAM Credentials:** An IAM user or role with permissions for Lambda, S3, CloudFront, ACM, SQS, IAM, and Secrets Manager (`AWS_REGION="us-east-1"` is required for ACM/CloudFront).
+- **Standalone Output:** `output: 'standalone'` enabled in `next.config.mjs`.
+- **Domain & Registrar DNS Access:** Ability to add ACM validation CNAME records and point your domain to CloudFront.
+- **Secrets Synchronization:** Sync runtime secrets to AWS Secrets Manager via **Doppler (recommended)** (`doppler run -- nextdeploy secrets sync`) or **`.env`** (`nextdeploy secrets load .env.production && nextdeploy secrets sync`).
+
+See the full [Requirements Guide](/docs/getting-started/requirements) for details.
 
 ## 1. Export AWS Credentials
 

@@ -14,6 +14,7 @@ export const docCategories: DocCategory[] = [
         items: [
             { title: 'Overview', href: '/docs' },
             { title: 'Installation', href: '/docs/getting-started/installation' },
+            { title: 'Requirements', href: '/docs/getting-started/requirements' },
             { title: 'VPS Quickstart', href: '/docs/getting-started/vps-quickstart' },
             { title: 'AWS Quickstart', href: '/docs/getting-started/aws-quickstart' },
             { title: 'Cloudflare Quickstart', href: '/docs/getting-started/cloudflare-quickstart' },

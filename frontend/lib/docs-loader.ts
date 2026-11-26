@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import matter from 'gray-matter'
+import * as yaml from 'js-yaml'
 
 import type { DocMeta } from '@/components/doc-md'
 
@@ -20,7 +21,11 @@ export async function loadDoc(slugSegments: string[]): Promise<LoadedDoc | null>
   for (const filePath of candidates) {
     try {
       const raw = await fs.readFile(filePath, 'utf-8')
-      const parsed = matter(raw)
+      const parsed = matter(raw, {
+        engines: {
+          yaml: (input: string) => (yaml.load(input) as Record<string, unknown>) ?? {},
+        },
+      })
       const data = parsed.data as Partial<DocMeta>
       if (!data.title) continue
       return {

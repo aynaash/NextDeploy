@@ -52,20 +52,20 @@ nextdeploy generate-ci --provider gitlab
 
 ```mermaid
 flowchart TD
-    subgraph Pull Request Trigger
-        PR[PR Opened / Synchronized] --> PR_Lint[Lint & Typecheck]
-        PR_Lint --> PR_Plan[nextdeploy plan --detailed-exitcode]
-        PR_Plan -->|Drift Detected Exit 2| PR_Fail[Fail PR Check]
-        PR_Plan -->|Clean Exit 0| PR_Comment[Post Plan Summary to PR]
-        PR_Comment --> PR_Preview[Deploy Ephemeral Worker: preview-pr-42]
+    subgraph PRFlow ["Pull Request Trigger"]
+        PR["PR Opened / Synchronized"] --> PR_Lint["Lint & Typecheck"]
+        PR_Lint --> PR_Plan["nextdeploy plan --detailed-exitcode"]
+        PR_Plan -->|"Drift Detected (Exit 2)"| PR_Fail["Fail PR Check"]
+        PR_Plan -->|"Clean (Exit 0)"| PR_Comment["Post Plan Summary to PR"]
+        PR_Comment --> PR_Preview["Deploy Ephemeral Worker (app-pr-N)"]
     end
 
-    subgraph Push to Main Trigger
-        Push[Push to main] --> Main_Build[Install Dependencies]
-        Main_Build --> Main_Ship[nextdeploy ship --verify]
-        Main_Ship --> Main_Probe{Dual-Stage Health Verification}
-        Main_Probe -->|200 OK| Main_Success[Cutover Production Traffic]
-        Main_Probe -->|Probe Failed| Main_Rollback[Auto-Rollback to Previous Active Version]
+    subgraph MainFlow ["Push to Main Trigger"]
+        Push["Push to main"] --> Main_Build["Install Dependencies"]
+        Main_Build --> Main_Ship["nextdeploy ship --verify"]
+        Main_Ship --> Main_Probe{"Dual-Stage Health Verification"}
+        Main_Probe -->|"Healthy"| Main_Success["Cutover Production Traffic"]
+        Main_Probe -->|"Probe Failed"| Main_Rollback["Keep Previous Active Release"]
     end
 ```
 

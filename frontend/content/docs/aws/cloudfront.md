@@ -24,11 +24,11 @@ A NextDeploy CloudFront distribution configures 4 optimized cache behaviors:
 
 ```mermaid
 flowchart TD
-    Req[Incoming Edge Request] --> Route{Path Pattern}
-    Route -->|/_next/static/*| S3_Static[Origin: S3 / Immutable Cache 1 Year]
-    Route -->|/static/* or public assets| S3_Public[Origin: S3 / Cache 1 Day]
-    Route -->|/_next/image*| Img_Lambda[Origin: Image Optimization Lambda]
-    Route -->|Default * (SSR/API/Actions)| SSR_Lambda[Origin: Lambda Function URL / No-Cache]
+    Req["Incoming Edge Request"] --> Route{"Path Pattern"}
+    Route -->|"/_next/static/*"| S3_Static["Origin: S3 / Immutable Cache 1 Year"]
+    Route -->|"/static/* or public assets"| S3_Public["Origin: S3 / Cache 1 Day"]
+    Route -->|"/_next/image*"| Img_Lambda["Origin: Image Optimization Lambda"]
+    Route -->|"Default * (SSR/API/Actions)"| SSR_Lambda["Origin: Lambda Function URL / No-Cache"]
 ```
 
 ### 1. Static Assets (`/_next/static/*`)

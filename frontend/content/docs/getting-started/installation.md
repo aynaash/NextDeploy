@@ -4,6 +4,8 @@ lede: Install the NextDeploy CLI on macOS, Linux, or Windows — or build direct
 status: ready
 sourceRef: cli/main.go, docs/guide/getting-started.md
 related:
+  - title: Requirements
+    href: /docs/getting-started/requirements
   - title: VPS Quickstart
     href: /docs/getting-started/vps-quickstart
   - title: Cloudflare Quickstart
@@ -63,10 +65,10 @@ const nextConfig = {
 export default nextConfig
 ```
 
-- Credentials for your chosen target:
-  - **VPS:** Linux server (Ubuntu/Debian) with SSH key access and `sudo`.
-  - **Cloudflare:** `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
-  - **AWS:** `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_REGION`.
+- Target infrastructure & credentials (see the full [Requirements Guide](/docs/getting-started/requirements)):
+  - **VPS (Full-Stack Apps):** An Ubuntu/Debian Linux VPS (ports `22`, `80`, `443` open), a **non-root user with `sudo`** (`nextdeploy prepare` refuses `root` by default), your **SSH private key path** (`key_path: ~/.ssh/id_ed25519`), a **domain name** with an `A` record pointing to the VPS IP, and **secrets sync** via **Doppler (recommended)** or `.env` (`nextdeploy secrets load`).
+  - **Cloudflare:** `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, a domain on Cloudflare DNS, and secrets sync via Doppler or `.env`.
+  - **AWS:** `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, registrar DNS access for ACM + CloudFront, and secrets sync via Doppler or `.env`.
 
 ## Keeping Up to Date
 

@@ -8,6 +8,7 @@ export async function GET() {
 Allow: /
 Disallow: /api/
 Disallow: /app/
+Disallow: /login
 
 Host: ${baseUrl}
 Sitemap: ${baseUrl}/sitemap.xml

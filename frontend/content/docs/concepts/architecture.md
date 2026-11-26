@@ -23,35 +23,35 @@ NextDeploy provides an agent-first, multi-target deployment engine for Next.js a
 ```mermaid
 flowchart TD
     subgraph Agentic ["AI Coding Agents & Developers"]
-        Agent[Cursor / Claude Code / Antigravity / Windsurf]
-        Human[Human Software Engineer]
-        MCP[NextDeploy MCP Server]
+        Agent["Cursor / Claude Code / Antigravity / Windsurf"]
+        Human["Human Software Engineer"]
+        MCP["NextDeploy MCP Server"]
     end
 
     subgraph CoreEngine ["NextDeploy Go CLI & Control Plane"]
-        CLI[nextdeploy CLI]
-        Trace[Agent Trace Engine .nextdeploy/trace/]
-        Config[Config & AST Parser shared/config shared/nextcore]
-        Secrets[Vault & Secrets Manager shared/secrets]
-        Reconcile[Declarative Reconciler cli/cmd/plan.go]
+        CLI["nextdeploy CLI"]
+        Trace["Agent Trace Engine (.nextdeploy/trace/)"]
+        Config["Config & AST Parser (shared/config + shared/nextcore)"]
+        Secrets["Vault & Secrets Manager (shared/secrets)"]
+        Reconcile["Declarative Reconciler (cli/cmd/plan.go)"]
     end
 
     subgraph Targets ["Deployment Runtime Targets"]
-        VPS[1. Linux VPS Bare Metal: Caddy + nextdeployd + shared_static]
-        CF[2. Cloudflare Workers: nextcompile + workerd + R2 + Hyperdrive]
-        AWS[3. AWS Serverless: CloudFront + Lambda Graviton + S3 + ACM]
+        VPS["1. Linux VPS Bare Metal: Caddy + nextdeployd + shared_static"]
+        CF["2. Cloudflare Workers: nextcompile + workerd + R2 + Hyperdrive"]
+        AWS["3. AWS Serverless: CloudFront + Lambda Graviton + S3 + ACM"]
     end
 
-    Agent -->|JSON-RPC Tools| MCP
-    Human -->|Shell Commands| CLI
+    Agent -->|"JSON-RPC Tools"| MCP
+    Human -->|"Shell Commands"| CLI
     MCP --> CLI
     CLI --> Trace
     CLI --> Config
     CLI --> Secrets
     CLI --> Reconcile
-    Reconcile -->|SSH / mTLS| VPS
-    Reconcile -->|v4 REST API| CF
-    Reconcile -->|AWS SDK v2| AWS
+    Reconcile -->|"SSH / SFTP + HMAC"| VPS
+    Reconcile -->|"v4 REST API"| CF
+    Reconcile -->|"AWS SDK v2"| AWS
 ```
 
 ---

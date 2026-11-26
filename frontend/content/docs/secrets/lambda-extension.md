@@ -27,9 +27,9 @@ NextDeploy mitigates this vulnerability by utilizing the **AWS Parameters and Se
 
 ```mermaid
 flowchart LR
-    SM[AWS Secrets Manager] -->|SigV4 Fetch at Cold Start| Ext[AWS Secrets Lambda Extension Layer]
-    Ext -->|Local In-Memory Cache| Daemon[Local HTTP Daemon http://localhost:2773]
-    Daemon -->|Local Fast Path 1ms| NextApp[Next.js Server / Bridge]
+    SM["AWS Secrets Manager"] -->|"SigV4 Fetch at Cold Start"| Ext["AWS Secrets Lambda Extension Layer"]
+    Ext -->|"Local In-Memory Cache"| Daemon["Local HTTP Daemon (http://localhost:2773)"]
+    Daemon -->|"Local Fast Path 1ms"| NextApp["Next.js Server / Bridge"]
 ```
 
 ---

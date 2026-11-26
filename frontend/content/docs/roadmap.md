@@ -16,10 +16,9 @@ related:
 
 | Milestone | Subsystem Focus | Status | Target |
 | :--- | :--- | :--- | :--- |
-| **v0.20.x** | Core Engine: VPS, Cloudflare Workers, AWS Serverless, Next.js 16 Turbopack | **SHIPPED** | Production |
-| **v0.21.x** | Agent-First Infra: Native Agent Trace, Takeover Brief, Port 4044 Local Web UI | **IN ACTIVE DEV** | Q4 2026 |
-| **v0.22.x** | Native MCP Server, Ephemeral Preview Sandboxes, Autonomous Data Plane | **PLANNED** | Q1 2027 |
-| **v0.23.x** | Multi-Region VPS Clusters, Cloudflare Partial Prerendering (PPR), `"use cache"` | **PLANNED** | Q2 2027 |
+| **v1.0.0** | Core Engine (VPS, Cloudflare Workers, AWS Serverless, Next.js 16 Turbopack), Agent Trace, Takeover UI (`:4044`), Native MCP Server, CI/CD & PR Previews | **SHIPPED** | Production |
+| **v1.1.x** | Autonomous Data Plane, Selective Route-Level CDN Invalidation, Deployment Dashboard | **IN ACTIVE DEV** | Q1 2027 |
+| **v1.2.x** | Multi-Region VPS Clusters, Cloudflare Partial Prerendering (PPR), `"use cache"` | **PLANNED** | Q2 2027 |
 
 ---
 
@@ -38,10 +37,10 @@ Transform NextDeploy into the premier execution runtime for AI coding agents (An
 - [x] **Embedded Web UI on Port 4044 (`shared/agenttrace/webui.go`)**:
   - [x] Embedded single-page dashboard with real-time session status, modified files diff viewer, and deployment cards.
   - [x] REST endpoints: `/api/status`, `/api/diff`.
-- [ ] **Native Model Context Protocol (MCP) Server**:
-  - [ ] Implement `nextdeploy mcp` using `mark3labs/mcp-go`.
-  - [ ] Expose tools: `nextdeploy_inspect`, `nextdeploy_plan`, `nextdeploy_ship`, `nextdeploy_logs`, `nextdeploy_env`.
-  - [ ] Auto-scaffold MCP server configuration for Claude Desktop and Cursor.
+- [x] **Native Model Context Protocol (MCP) Server**:
+  - [x] Implement `nextdeploy mcp` over stdio JSON-RPC 2.0 (`cli/cmd/mcp.go`).
+  - [x] Expose tools: `nextdeploy_inspect`, `nextdeploy_plan`, `nextdeploy_ship`, `nextdeploy_status`, `nextdeploy_trace`, `nextdeploy_takeover`, `nextdeploy_rollback`.
+  - [x] Auto-scaffold MCP server configuration for Cursor, Antigravity IDE, and Claude Desktop (`nextdeploy mcp init`).
 - [ ] **Structured Agent Diagnostics (`--format=agent-json`)**:
   - [ ] Parse Next.js 14/15/16 prerender and dynamic server usage errors into structured `{ file, line, error_code, fix_hint }` envelopes.
   - [ ] Non-interactive automated error triage for autonomous agent loops.

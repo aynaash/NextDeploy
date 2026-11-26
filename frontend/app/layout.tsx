@@ -30,11 +30,11 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "NextDeploy — Self-Hosted Next.js Deployment Platform",
+    default: "NextDeploy — Self-Hosted Next.js Deployment Engine",
     template: "%s | NextDeploy",
   },
   description:
-    "Deploy Next.js to your own Linux VPS, Cloudflare Workers, or AWS Lambda with zero lock-in. Complete build intelligence, zero-downtime atomic rollouts, OWASP CRS WAF, and automated SSL.",
+    "Open-source self-hosted Next.js deployment engine. Deploy Next.js to Linux VPS, AWS Lambda, or Cloudflare Workers with zero-downtime rollouts and rollback.",
   applicationName: "NextDeploy",
   authors: [
     { name: "Yussuf Hersi", url: "https://twitter.com/hersiyussuf" },
@@ -42,17 +42,29 @@ export const metadata: Metadata = {
   ],
   generator: "Next.js",
   keywords: [
+    "NextDeploy",
     "Next.js",
+    "self-host Next.js",
     "self-hosted",
     "Next.js deployment",
+    "Next.js deployment engine",
+    "open-source Vercel alternative",
     "Vercel alternative",
+    "deploy Next.js to VPS",
+    "deploy Next.js to AWS Lambda",
+    "deploy Next.js to Cloudflare Workers",
     "Linux VPS",
     "Cloudflare Workers",
     "AWS Lambda",
-    "Turbopack",
+    "atomic deployments",
     "zero-downtime",
+    "ISR",
+    "build intelligence",
+    "Caddy",
     "Caddy reverse proxy",
     "Coraza WAF",
+    "systemd",
+    "Turbopack",
     "Agent Trace",
     "open-source devops",
     "Docker-free deployment",
@@ -78,24 +90,24 @@ export const metadata: Metadata = {
     locale: "en_US",
     url: siteUrl,
     siteName: "NextDeploy",
-    title: "NextDeploy — Self-Hosted Next.js Deployment Platform",
+    title: "NextDeploy — Self-Hosted Next.js Deployment Engine",
     description:
-      "Deploy Next.js to your own Linux VPS, Cloudflare Workers, or AWS Lambda with zero lock-in, zero downtime, and complete transparency.",
+      "Open-source self-hosted Next.js deployment engine. Deploy Next.js to Linux VPS, AWS Lambda, or Cloudflare Workers with zero-downtime rollouts and rollback.",
     images: [
       {
         url: "/og.png",
         width: 1200,
         height: 630,
-        alt: "NextDeploy — Self-Hosted Next.js Deployment Platform",
+        alt: "NextDeploy — Self-Hosted Next.js Deployment Engine",
         type: "image/png",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "NextDeploy — Self-Hosted Next.js Deployment Platform",
+    title: "NextDeploy — Self-Hosted Next.js Deployment Engine",
     description:
-      "Deploy Next.js to your own Linux VPS, Cloudflare Workers, or AWS Lambda with zero lock-in.",
+      "Open-source self-hosted Next.js deployment engine. Deploy Next.js to Linux VPS, AWS Lambda, or Cloudflare Workers with zero-downtime rollouts and rollback.",
     creator: "@hersiyussuf",
     site: "@hersiyussuf",
     images: ["/og.png"],
@@ -140,16 +152,29 @@ const jsonLd = {
   "@context": "https://schema.org",
   "@graph": [
     {
+      "@type": "Organization",
+      "@id": `${siteUrl}/#organization`,
+      name: "NextDeploy",
+      url: siteUrl,
+      logo: {
+        "@type": "ImageObject",
+        url: `${siteUrl}/logo.png`,
+      },
+      sameAs: [
+        "https://github.com/aynaash/NextDeploy",
+        "https://twitter.com/hersiyussuf",
+        "https://discord.gg/xd9Cub9fm",
+      ],
+    },
+    {
       "@type": "WebSite",
       "@id": `${siteUrl}/#website`,
       url: siteUrl,
       name: "NextDeploy",
-      description: "Self-Hosted Next.js Deployment Platform",
+      description: "Self-Hosted Next.js Deployment Engine",
       inLanguage: "en-US",
-      potentialAction: {
-        "@type": "SearchAction",
-        target: `${siteUrl}/docs?q={search_term_string}`,
-        "query-input": "required name=search_term_string",
+      publisher: {
+        "@id": `${siteUrl}/#organization`,
       },
     },
     {
@@ -159,19 +184,32 @@ const jsonLd = {
       applicationCategory: "DeveloperApplication",
       operatingSystem: "Linux, macOS, Windows",
       description:
-        "Open-source self-hosted Next.js deployment engine with build intelligence, zero-downtime atomic port swaps, Caddy reverse proxy, and multi-target support (VPS, Cloudflare, AWS).",
+        "Open-source self-hosted Next.js deployment engine with build intelligence, route classification, zero-downtime atomic deployments, instant rollback, Caddy reverse proxy, Coraza WAF, and multi-target support (Linux VPS, AWS Lambda, Cloudflare Workers).",
       offers: {
         "@type": "Offer",
         price: "0",
         priceCurrency: "USD",
       },
-      softwareVersion: "0.20.0",
+      softwareVersion: "1.0.0",
       url: siteUrl,
+      codeRepository: "https://github.com/aynaash/NextDeploy",
+      downloadUrl: "https://github.com/aynaash/NextDeploy/releases",
+      license: "https://opensource.org/licenses/MIT",
+      sameAs: ["https://github.com/aynaash/NextDeploy"],
+      featureList: [
+        "Build intelligence via structured metadata.json",
+        "Route classification for static, SSR, ISR, API, and middleware routes",
+        "Linux VPS deployments with atomic port switching and Caddy HTTPS",
+        "AWS serverless deployments via Lambda, S3, CloudFront, ACM, and Secrets Manager",
+        "Cloudflare Workers deployments via NextDeploy runtime",
+        "Instant rollback and incremental builds",
+        "Hardened systemd isolation, Coraza WAF, and HMAC-SHA256 command signing",
+      ],
       author: {
-        "@type": "Organization",
-        name: "NextDeploy",
-        url: siteUrl,
-        logo: `${siteUrl}/logo.png`,
+        "@id": `${siteUrl}/#organization`,
+      },
+      publisher: {
+        "@id": `${siteUrl}/#organization`,
       },
     },
   ],
@@ -190,7 +228,7 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
       </head>
-      <body className="font-sans antialiased text-surface-100 bg-surface-950 min-h-screen selection:bg-brand-500 selection:text-surface-950">
+      <body className="font-sans antialiased text-surface-100 bg-surface-950 min-h-screen overflow-x-clip selection:bg-brand-500 selection:text-surface-950">
         <Navbar />
         {children}
         <Analytics />

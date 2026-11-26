@@ -14,6 +14,30 @@ related:
 
 ## Cloudflare Deploy Issues
 
+### `Error: KV PUT failed: 429 Too Many Requests` (`checkRateLimit`)
+If your deployed Cloudflare Worker throws a `500 Internal Server Error` with:
+
+```text
+Error: KV PUT failed: 429 Too Many Requests
+    at async checkRateLimit (worker.mjs:...)
+    at async runGuard (worker.mjs:...)
+```
+
+- **Cause:** Cloudflare Workers KV enforces a hard limit of **1 `PUT` per second to the same key** (plus 1,000 `PUT`s/day on the Free plan). Navigating Next.js pages fires both the document request and concurrent `<Link>` RSC prefetches within the same second, hitting the same `rl:<ip>:<windowId>` rate-limit key.
+- **Fix 1 — Scope rate limiting away from static/docs routes:** Exclude marketing and documentation routes in `nextdeploy.yml` and target `rate_limit.paths` to sensitive routes:
+  ```yaml
+  serverless:
+    cloudflare:
+      protection:
+        enabled: true
+        public_paths: ["/", "/login", "/docs", "/docs/*"]
+        rate_limit:
+          kv_binding: RATE_LIMIT
+          requests_per_minute: 60
+          paths: ["/api/*", "/app/*"]
+  ```
+- **Fix 2 — Upgrade/rebuild the NextDeploy binary:** Current builds of `shared/nextcompile/runtime_src/guard.mjs` coalesce `kv.put` writes to at most once every `1,100ms` per key per isolate, run writes through `ctx.waitUntil(...)`, and catch KV `429` errors gracefully so traffic never 500s. Rebuild your `nextdeploy` CLI binary (`nextdeploy update` or `go build`) and re-run `nextdeploy ship`.
+
 ### `purge_cache: 401 Unauthorized` (non-fatal)
 Your deployment succeeded, but your Cloudflare API token is missing the **Zone → Cache Purge: Purge** permission. Add that permission in the Cloudflare dashboard to enable automatic edge cache purges.
 

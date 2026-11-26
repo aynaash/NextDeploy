@@ -28,6 +28,9 @@ serverless:
 
 When `NEXTCOMPILE_CACHE` is bound, NextDeploy's `CloudflareCacheHandler` automatically propagates `revalidateTag()` timestamps across every Cloudflare edge isolate worldwide.
 
+> [!NOTE]
+> **KV Write Limits & Edge Rate Limiting:** Cloudflare KV limits updates to **1 `PUT` per second per key** (and 1,000 writes/day on Free plans). NextDeploy's edge guard (`guard.mjs`) coalesces rate-limit `kv.put` calls to once per `1,100ms` per key per isolate via `ctx.waitUntil(...)` and catches KV `429` contention errors so concurrent Next.js `<Link>` prefetches do not cause `500` responses. For static or docs sites, scope `protection.rate_limit.paths` to `["/api/*", "/app/*"]` and list public routes under `protection.public_paths`. See [Security Architecture](/docs/concepts/security) and [Troubleshooting](/docs/reference/troubleshooting).
+
 ## Cloudflare D1 (SQLite at the Edge)
 
 ```yaml

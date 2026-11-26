@@ -65,6 +65,23 @@ export const metadata: Metadata = {
       "Comprehensive guide to self-hosting Next.js applications on Linux VPS, Cloudflare Workers, or AWS Lambda with NextDeploy.",
     url: "/docs",
     type: "website",
+    siteName: "NextDeploy",
+    locale: "en_US",
+    images: [
+      {
+        url: "/og.png",
+        width: 1200,
+        height: 630,
+        alt: "NextDeploy Documentation Overview",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "NextDeploy Documentation Overview",
+    description:
+      "Comprehensive guide to self-hosting Next.js applications on Linux VPS, Cloudflare Workers, or AWS Lambda with NextDeploy.",
+    images: ["/og.png"],
   },
 };
 
@@ -81,8 +98,8 @@ export default function DocsIndex() {
 
       <p className="text-muted-300 text-base sm:text-lg mb-4">
         NextDeploy is a self-hosted deployment engine for Next.js. It builds a
-        complete picture of your app at build time and  routes, integrations,
-        secrets, assets and uses that intelligence to deploy cleanly to your
+        complete picture of your app at build time — routes, integrations,
+        secrets, and assets — and uses that intelligence to deploy cleanly to your
         own VPS, AWS Lambda, or Cloudflare Workers without a platform in the
         middle.
       </p>
@@ -93,7 +110,7 @@ export default function DocsIndex() {
 
       <div className="bg-surface-900/60 border border-surface-800 rounded-lg p-4 mb-8 flex items-start gap-3">
         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium bg-brand-500/10 text-brand-400 border border-brand-500/20 shrink-0 mt-0.5">
-          v0.20.x
+          v1.0.0
         </span>
         <div className="text-sm text-surface-300 leading-relaxed">
           Production-ready for Next.js 14, 15, and 16 (Turbopack + Webpack) across Linux VPS, AWS Lambda, and Cloudflare Workers. Run{" "}
@@ -322,6 +339,60 @@ export default function DocsIndex() {
 
       <hr className="border-surface-800 my-8 sm:my-10" />
 
+      {/* ─── REQUIREMENTS ─── */}
+      <h2 className="text-2xl sm:text-3xl font-bold text-white mb-4">
+        Requirements Before You Deploy
+      </h2>
+      <p className="text-muted-300 mb-4">
+        NextDeploy requires a Next.js 14/15/16 app (with{" "}
+        <code className="text-brand-400 bg-surface-900 px-1.5 py-0.5 rounded">
+          output: &apos;standalone&apos;
+        </code>{" "}
+        recommended) and target-specific prerequisites. For full-stack apps on a Linux VPS, you need:
+      </p>
+      <div className="bg-surface-900/40 border border-surface-800 rounded-xl p-6 mb-6">
+        <ul className="space-y-2.5 text-sm text-surface-300 list-none p-0 m-0">
+          <li className="flex items-start gap-2.5">
+            <Check className="w-4 h-4 text-brand-400 shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-white">Linux VPS:</strong> Ubuntu or Debian server with public IPv4 and ports <code className="text-xs bg-surface-800 px-1 py-0.5 rounded text-surface-200">22</code>, <code className="text-xs bg-surface-800 px-1 py-0.5 rounded text-surface-200">80</code>, and <code className="text-xs bg-surface-800 px-1 py-0.5 rounded text-surface-200">443</code> open.
+            </span>
+          </li>
+          <li className="flex items-start gap-2.5">
+            <Check className="w-4 h-4 text-brand-400 shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-white">Non-root <code className="text-xs bg-surface-800 px-1 py-0.5 rounded text-surface-200">sudo</code> user:</strong> A non-root SSH user (e.g. <code className="text-xs bg-surface-800 px-1 py-0.5 rounded text-surface-200">deploy</code> or <code className="text-xs bg-surface-800 px-1 py-0.5 rounded text-surface-200">ubuntu</code>). <code className="text-xs bg-surface-800 px-1 py-0.5 rounded text-surface-200">nextdeploy prepare</code> refuses <code className="text-xs bg-surface-800 px-1 py-0.5 rounded text-surface-200">root</code> by default.
+            </span>
+          </li>
+          <li className="flex items-start gap-2.5">
+            <Check className="w-4 h-4 text-brand-400 shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-white">SSH private key path:</strong> Local SSH key (<code className="text-xs bg-surface-800 px-1 py-0.5 rounded text-surface-200">key_path: ~/.ssh/id_ed25519</code>) configured in <code className="text-xs bg-surface-800 px-1 py-0.5 rounded text-surface-200">nextdeploy.yml</code> for CLI SSH/SFTP access.
+            </span>
+          </li>
+          <li className="flex items-start gap-2.5">
+            <Check className="w-4 h-4 text-brand-400 shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-white">Domain DNS:</strong> An <code className="text-xs bg-surface-800 px-1 py-0.5 rounded text-surface-200">A</code> record pointing your domain to the VPS IP so Caddy can issue Let&apos;s Encrypt TLS certificates.
+            </span>
+          </li>
+          <li className="flex items-start gap-2.5">
+            <Check className="w-4 h-4 text-brand-400 shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-white">Secrets sync (Doppler recommended, or <code className="text-xs bg-surface-800 px-1 py-0.5 rounded text-surface-200">.env</code>):</strong> Sync runtime variables via <code className="text-xs bg-surface-800 px-1 py-0.5 rounded text-surface-200">doppler run -- nextdeploy secrets sync</code> or <code className="text-xs bg-surface-800 px-1 py-0.5 rounded text-surface-200">nextdeploy secrets load .env.production</code>.
+            </span>
+          </li>
+        </ul>
+        <p className="text-xs text-surface-400 mt-4 mb-0">
+          Using AWS or Cloudflare Workers? See the full{" "}
+          <a href="/docs/getting-started/requirements" className="text-brand-400 hover:text-brand-300">
+            Requirements Guide →
+          </a>
+        </p>
+      </div>
+
+      <hr className="border-surface-800 my-8 sm:my-10" />
+
       {/* ─── INSTALLATION ─── */}
       <h2 className="text-2xl sm:text-3xl font-bold text-white mb-6">Installation</h2>
 
@@ -409,9 +480,12 @@ servers:
     host: 1.2.3.4
     port: 22
     username: deploy
-    ssh_key: ~/.ssh/id_rsa`}
+    key_path: ~/.ssh/id_ed25519`}
         className="mb-8"
       />
+      <p className="text-muted-400 text-xs mb-8 -mt-4">
+        Use a non-root user with <code className="text-brand-400">sudo</code> privileges (for example <code className="text-brand-400">deploy</code> or <code className="text-brand-400">ubuntu</code>) and point <code className="text-brand-400">key_path</code> to your local SSH private key. Sync full-stack runtime secrets via <code className="text-brand-400">doppler run -- nextdeploy secrets sync</code> (recommended) or <code className="text-brand-400">nextdeploy secrets load .env.production</code>.
+      </p>
 
       <YouTubeEmbed
         id="9C8WNZSS5o0"
@@ -1040,337 +1114,457 @@ serverless:
 
       <h3 className="text-lg sm:text-xl font-semibold text-white mt-8 mb-4">VPS</h3>
       <div className="my-6 p-3 sm:p-6 bg-surface-900/50 border border-surface-800 rounded-2xl flex flex-col items-center overflow-x-auto">
-        <svg viewBox="0 0 800 320" className="w-full max-w-3xl min-w-120 sm:min-w-150">
+        <svg viewBox="0 0 860 390" className="w-full max-w-4xl min-w-[640px]">
           <defs>
             <marker
-              id="arrowhead"
-              markerWidth="10"
-              markerHeight="7"
-              refX="0"
-              refY="3.5"
+              id="vps-arrow-brand"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
               orientation="auto"
             >
-              <polygon points="0 0, 10 3.5, 0 7" fill="var(--color-brand-500)" />
+              <polygon points="0 0, 8 3, 0 6" fill="var(--color-brand-500)" />
             </marker>
             <marker
-              id="arrowhead-small"
-              markerWidth="6"
-              markerHeight="4"
-              refX="0"
-              refY="2"
+              id="vps-arrow-muted"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
               orientation="auto"
             >
-              <polygon points="0 0, 6 2, 0 4" fill="var(--color-surface-400)" />
+              <polygon points="0 0, 8 3, 0 6" fill="var(--color-surface-400)" />
+            </marker>
+            <marker
+              id="vps-arrow-code"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orientation="auto"
+            >
+              <polygon points="0 0, 8 3, 0 6" fill="var(--color-code-400)" />
+            </marker>
+            <marker
+              id="vps-arrow-accent"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orientation="auto"
+            >
+              <polygon points="0 0, 8 3, 0 6" fill="var(--color-accent-400)" />
             </marker>
           </defs>
+
+          {/* Local / Client Boundary */}
           <rect
-            x="30"
-            y="80"
-            width="170"
-            height="160"
+            x="18"
+            y="24"
+            width="184"
+            height="342"
             rx="12"
             fill="none"
             stroke="var(--color-surface-700)"
-            strokeWidth="2"
+            strokeWidth="1.5"
             strokeDasharray="4 4"
           />
           <text
-            x="115"
-            y="65"
+            x="110"
+            y="46"
             textAnchor="middle"
             fill="var(--color-surface-400)"
-            fontSize="12"
-            fontWeight="600"
-          >
-            Local Machine
-          </text>
-          <rect
-            x="50"
-            y="110"
-            width="130"
-            height="60"
-            rx="8"
-            fill="var(--color-brand-900)"
-            stroke="var(--color-brand-500)"
-            strokeWidth="2"
-          />
-          <text
-            x="115"
-            y="145"
-            textAnchor="middle"
-            fill="var(--color-brand-50)"
-            fontSize="14"
-            fontWeight="600"
-          >
-            nextdeploy CLI
-          </text>
-          <path
-            d="M 200 150 L 310 150"
-            stroke="var(--color-brand-500)"
-            strokeWidth="2"
-            markerEnd="url(#arrowhead)"
-          />
-          <text
-            x="255"
-            y="140"
-            textAnchor="middle"
-            fill="var(--color-brand-500)"
             fontSize="11"
             fontWeight="600"
           >
-            SFTP
+            Clients &amp; Local CLI
           </text>
+
           <rect
-            x="310"
-            y="40"
-            width="440"
-            height="240"
-            rx="12"
-            fill="none"
-            stroke="var(--color-surface-700)"
-            strokeWidth="2"
-            strokeDasharray="4 4"
-          />
-          <text
-            x="530"
-            y="25"
-            textAnchor="middle"
-            fill="var(--color-surface-400)"
-            fontSize="12"
-            fontWeight="600"
-          >
-            Production VPS
-          </text>
-          <rect
-            x="330"
-            y="110"
-            width="100"
-            height="60"
+            x="34"
+            y="70"
+            width="152"
+            height="62"
             rx="8"
             fill="var(--color-surface-800)"
             stroke="var(--color-info-500)"
             strokeWidth="2"
           />
           <text
-            x="380"
-            y="145"
+            x="110"
+            y="97"
             textAnchor="middle"
             fill="var(--color-surface-100)"
             fontSize="13"
             fontWeight="600"
           >
-            Daemon
+            Users / Browser
           </text>
+          <text x="110" y="115" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            HTTPS :443
+          </text>
+
           <rect
-            x="500"
-            y="50"
-            width="100"
-            height="60"
+            x="34"
+            y="278"
+            width="152"
+            height="62"
+            rx="8"
+            fill="var(--color-brand-900)"
+            stroke="var(--color-brand-500)"
+            strokeWidth="2"
+          />
+          <text
+            x="110"
+            y="305"
+            textAnchor="middle"
+            fill="var(--color-brand-50)"
+            fontSize="13"
+            fontWeight="600"
+          >
+            nextdeploy CLI
+          </text>
+          <text x="110" y="323" textAnchor="middle" fill="var(--color-brand-200)" fontSize="10">
+            ship / rollback / prepare
+          </text>
+
+          {/* Production VPS Boundary */}
+          <rect
+            x="275"
+            y="24"
+            width="565"
+            height="342"
+            rx="12"
+            fill="none"
+            stroke="var(--color-surface-700)"
+            strokeWidth="1.5"
+            strokeDasharray="4 4"
+          />
+          <text
+            x="557"
+            y="46"
+            textAnchor="middle"
+            fill="var(--color-surface-400)"
+            fontSize="11"
+            fontWeight="600"
+          >
+            Production Linux VPS
+          </text>
+
+          <rect
+            x="305"
+            y="70"
+            width="170"
+            height="62"
             rx="8"
             fill="var(--color-surface-800)"
             stroke="var(--color-code-500)"
             strokeWidth="2"
           />
           <text
-            x="550"
-            y="85"
+            x="390"
+            y="97"
             textAnchor="middle"
             fill="var(--color-surface-100)"
             fontSize="13"
             fontWeight="600"
           >
-            Caddy
+            Caddy + Coraza WAF
           </text>
+          <text x="390" y="115" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            Auto-TLS &amp; OWASP CRS
+          </text>
+
           <rect
-            x="500"
-            y="200"
-            width="100"
-            height="60"
+            x="305"
+            y="278"
+            width="170"
+            height="62"
             rx="8"
             fill="var(--color-surface-800)"
-            stroke="var(--color-warning-500)"
+            stroke="var(--color-info-500)"
             strokeWidth="2"
           />
           <text
-            x="550"
-            y="235"
+            x="390"
+            y="305"
             textAnchor="middle"
             fill="var(--color-surface-100)"
             fontSize="13"
             fontWeight="600"
           >
-            Next.js
+            nextdeployd Daemon
           </text>
+          <text x="390" y="323" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            HMAC-SHA256 &amp; Audit Log
+          </text>
+
           <rect
-            x="660"
-            y="120"
-            width="70"
-            height="50"
+            x="590"
+            y="56"
+            width="220"
+            height="52"
+            rx="8"
+            fill="var(--color-surface-800)"
+            stroke="var(--color-brand-500)"
+            strokeWidth="2"
+          />
+          <text
+            x="700"
+            y="79"
+            textAnchor="middle"
+            fill="var(--color-surface-100)"
+            fontSize="12"
+            fontWeight="600"
+          >
+            shared_static/ &amp; public/
+          </text>
+          <text x="700" y="96" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            Cumulative Chunks (NVMe sendfile)
+          </text>
+
+          <rect
+            x="590"
+            y="126"
+            width="220"
+            height="52"
             rx="8"
             fill="var(--color-surface-800)"
             stroke="var(--color-danger-500)"
             strokeWidth="2"
           />
           <text
-            x="695"
-            y="150"
+            x="700"
+            y="149"
             textAnchor="middle"
             fill="var(--color-surface-100)"
-            fontSize="11"
+            fontSize="12"
             fontWeight="600"
           >
-            Fail2Ban
+            Fail2Ban (caddy-waf)
           </text>
+          <text x="700" y="166" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            Bans IPs from WAF audit.log
+          </text>
+
+          <rect
+            x="590"
+            y="196"
+            width="220"
+            height="56"
+            rx="8"
+            fill="var(--color-surface-800)"
+            stroke="var(--color-accent-400)"
+            strokeWidth="2"
+            strokeDasharray="4 3"
+          />
+          <text
+            x="700"
+            y="220"
+            textAnchor="middle"
+            fill="var(--color-accent-300)"
+            fontSize="12"
+            fontWeight="600"
+          >
+            Go Sidecar (Optional)
+          </text>
+          <text x="700" y="237" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            HTML/RSC Cache &amp; /_next/image
+          </text>
+
+          <rect
+            x="590"
+            y="284"
+            width="220"
+            height="62"
+            rx="8"
+            fill="var(--color-surface-800)"
+            stroke="var(--color-warning-500)"
+            strokeWidth="2"
+          />
+          <text
+            x="700"
+            y="311"
+            textAnchor="middle"
+            fill="var(--color-surface-100)"
+            fontSize="13"
+            fontWeight="600"
+          >
+            Next.js Release
+          </text>
+          <text x="700" y="329" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            127.0.0.1:&lt;port&gt; (systemd)
+          </text>
+
+          {/* Edges */}
           <path
-            d="M 380 170 L 380 230 L 500 230"
+            d="M 186 101 L 303 101"
+            fill="none"
+            stroke="var(--color-code-400)"
+            strokeWidth="2"
+            markerEnd="url(#vps-arrow-code)"
+          />
+          <text x="238" y="91" textAnchor="middle" fill="var(--color-code-400)" fontSize="10" fontWeight="600">
+            HTTPS :443
+          </text>
+
+          <path
+            d="M 186 309 L 303 309"
+            fill="none"
+            stroke="var(--color-brand-500)"
+            strokeWidth="2"
+            markerEnd="url(#vps-arrow-brand)"
+          />
+          <text x="238" y="299" textAnchor="middle" fill="var(--color-brand-400)" fontSize="10" fontWeight="600">
+            SSH / SFTP
+          </text>
+
+          <path
+            d="M 390 278 L 390 134"
+            fill="none"
             stroke="var(--color-surface-400)"
             strokeWidth="1.5"
-            strokeDasharray="2 2"
-            markerEnd="url(#arrowhead-small)"
+            strokeDasharray="3 3"
+            markerEnd="url(#vps-arrow-muted)"
           />
-          <text x="390" y="210" textAnchor="start" fill="var(--color-surface-400)" fontSize="10">
-            Supervises
+          <text x="398" y="208" textAnchor="start" fill="var(--color-surface-400)" fontSize="10">
+            Validate &amp; Reload
           </text>
+
           <path
-            d="M 380 110 L 380 80 L 500 80"
+            d="M 475 82 L 588 82"
+            fill="none"
+            stroke="var(--color-brand-500)"
+            strokeWidth="1.5"
+            markerEnd="url(#vps-arrow-brand)"
+          />
+          <text x="532" y="72" textAnchor="middle" fill="var(--color-brand-400)" fontSize="10">
+            /_next/static/*
+          </text>
+
+          <path
+            d="M 475 100 L 542 100 L 542 152 L 588 152"
+            fill="none"
             stroke="var(--color-surface-400)"
             strokeWidth="1.5"
-            strokeDasharray="2 2"
-            markerEnd="url(#arrowhead-small)"
+            strokeDasharray="3 3"
+            markerEnd="url(#vps-arrow-muted)"
           />
-          <text x="390" y="68" textAnchor="start" fill="var(--color-surface-400)" fontSize="10">
-            Configures
+          <text x="564" y="143" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            audit.log
           </text>
+
           <path
-            d="M 550 110 L 550 200"
-            stroke="var(--color-code-500)"
+            d="M 475 114 L 522 114 L 522 224 L 588 224"
+            fill="none"
+            stroke="var(--color-accent-400)"
             strokeWidth="1.5"
-            markerEnd="url(#arrowhead-small)"
+            markerEnd="url(#vps-arrow-accent)"
           />
-          <text x="558" y="160" textAnchor="start" fill="var(--color-code-500)" fontSize="10">
-            HTTPS Proxy
+          <text x="554" y="214" textAnchor="middle" fill="var(--color-accent-300)" fontSize="10">
+            lb_policy first
+          </text>
+
+          <path
+            d="M 700 252 L 700 282"
+            fill="none"
+            stroke="var(--color-accent-400)"
+            strokeWidth="1.5"
+            markerEnd="url(#vps-arrow-accent)"
+          />
+          <text x="710" y="271" textAnchor="start" fill="var(--color-accent-300)" fontSize="10">
+            SSR / API
+          </text>
+
+          <path
+            d="M 475 126 L 500 126 L 500 300 L 588 300"
+            fill="none"
+            stroke="var(--color-code-400)"
+            strokeWidth="1.5"
+            strokeDasharray="3 3"
+            markerEnd="url(#vps-arrow-code)"
+          />
+          <text x="544" y="291" textAnchor="middle" fill="var(--color-code-400)" fontSize="10">
+            Direct / Fallback
+          </text>
+
+          <path
+            d="M 475 322 L 588 322"
+            fill="none"
+            stroke="var(--color-surface-400)"
+            strokeWidth="1.5"
+            strokeDasharray="3 3"
+            markerEnd="url(#vps-arrow-muted)"
+          />
+          <text x="532" y="340" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            Probe + systemd
           </text>
         </svg>
       </div>
 
-      <h3 className="text-lg sm:text-xl font-semibold text-white mt-8 mb-4">Serverless</h3>
+      <h3 className="text-lg sm:text-xl font-semibold text-white mt-8 mb-4">Serverless (AWS)</h3>
       <div className="my-6 p-3 sm:p-6 bg-surface-900/50 border border-surface-800 rounded-2xl flex flex-col items-center overflow-x-auto">
-        <svg viewBox="0 0 800 280" className="w-full max-w-3xl min-w-120 sm:min-w-150">
+        <svg viewBox="0 0 860 320" className="w-full max-w-4xl min-w-[640px]">
           <defs>
             <marker
-              id="arrow-green"
-              markerWidth="10"
-              markerHeight="7"
-              refX="0"
-              refY="3.5"
+              id="aws-arrow-brand"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
               orientation="auto"
             >
-              <polygon points="0 0, 10 3.5, 0 7" fill="var(--color-brand-500)" />
+              <polygon points="0 0, 8 3, 0 6" fill="var(--color-brand-500)" />
             </marker>
             <marker
-              id="arrow-gray-sl"
-              markerWidth="6"
-              markerHeight="4"
-              refX="0"
-              refY="2"
+              id="aws-arrow-muted"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
               orientation="auto"
             >
-              <polygon points="0 0, 6 2, 0 4" fill="var(--color-surface-400)" />
+              <polygon points="0 0, 8 3, 0 6" fill="var(--color-surface-400)" />
+            </marker>
+            <marker
+              id="aws-arrow-code"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orientation="auto"
+            >
+              <polygon points="0 0, 8 3, 0 6" fill="var(--color-code-400)" />
             </marker>
           </defs>
-          <text
-            x="115"
-            y="30"
-            textAnchor="middle"
-            fill="var(--color-surface-400)"
-            fontSize="12"
-            fontWeight="600"
-          >
-            Local
-          </text>
+
           <rect
-            x="30"
-            y="80"
-            width="170"
-            height="60"
-            rx="8"
-            fill="var(--color-brand-900)"
-            stroke="var(--color-brand-500)"
-            strokeWidth="2"
-          />
-          <text
-            x="115"
-            y="115"
-            textAnchor="middle"
-            fill="var(--color-brand-50)"
-            fontSize="14"
-            fontWeight="600"
-          >
-            nextdeploy CLI
-          </text>
-          <path
-            d="M 200 110 L 280 110"
-            stroke="var(--color-brand-500)"
-            strokeWidth="2"
-            markerEnd="url(#arrow-green)"
-          />
-          <text
-            x="240"
-            y="100"
-            textAnchor="middle"
-            fill="var(--color-brand-500)"
-            fontSize="10"
-          >
-            Deploy
-          </text>
-          <text
-            x="530"
-            y="20"
-            textAnchor="middle"
-            fill="var(--color-surface-400)"
-            fontSize="12"
-            fontWeight="600"
-          >
-            AWS Cloud
-          </text>
-          <rect
-            x="240"
-            y="40"
-            width="540"
-            height="220"
+            x="18"
+            y="24"
+            width="184"
+            height="272"
             rx="12"
             fill="none"
             stroke="var(--color-surface-700)"
-            strokeWidth="2"
+            strokeWidth="1.5"
             strokeDasharray="4 4"
           />
-          <rect
-            x="280"
-            y="80"
-            width="100"
-            height="60"
-            rx="8"
-            fill="var(--color-surface-800)"
-            stroke="var(--color-warning-500)"
-            strokeWidth="2"
-          />
           <text
-            x="330"
-            y="111"
+            x="110"
+            y="46"
             textAnchor="middle"
-            fill="var(--color-surface-100)"
-            fontSize="12"
+            fill="var(--color-surface-400)"
+            fontSize="11"
             fontWeight="600"
           >
-            Lambda
+            Clients &amp; Local CLI
           </text>
-          <text x="330" y="127" textAnchor="middle" fill="var(--color-surface-400)" fontSize="9">
-            + Bridge Adapter
-          </text>
+
           <rect
-            x="430"
-            y="80"
-            width="100"
+            x="34"
+            y="64"
+            width="152"
             height="60"
             rx="8"
             fill="var(--color-surface-800)"
@@ -1378,19 +1572,69 @@ serverless:
             strokeWidth="2"
           />
           <text
-            x="480"
-            y="115"
+            x="110"
+            y="91"
             textAnchor="middle"
             fill="var(--color-surface-100)"
             fontSize="13"
             fontWeight="600"
           >
-            S3
+            Users / Browser
           </text>
+          <text x="110" y="108" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            HTTPS Edge Request
+          </text>
+
           <rect
-            x="580"
-            y="80"
-            width="120"
+            x="34"
+            y="198"
+            width="152"
+            height="60"
+            rx="8"
+            fill="var(--color-brand-900)"
+            stroke="var(--color-brand-500)"
+            strokeWidth="2"
+          />
+          <text
+            x="110"
+            y="225"
+            textAnchor="middle"
+            fill="var(--color-brand-50)"
+            fontSize="13"
+            fontWeight="600"
+          >
+            nextdeploy CLI
+          </text>
+          <text x="110" y="242" textAnchor="middle" fill="var(--color-brand-200)" fontSize="10">
+            AWS SDK v2 Deploy
+          </text>
+
+          <rect
+            x="275"
+            y="24"
+            width="565"
+            height="272"
+            rx="12"
+            fill="none"
+            stroke="var(--color-surface-700)"
+            strokeWidth="1.5"
+            strokeDasharray="4 4"
+          />
+          <text
+            x="557"
+            y="46"
+            textAnchor="middle"
+            fill="var(--color-surface-400)"
+            fontSize="11"
+            fontWeight="600"
+          >
+            AWS Cloud
+          </text>
+
+          <rect
+            x="305"
+            y="64"
+            width="175"
             height="60"
             rx="8"
             fill="var(--color-surface-800)"
@@ -1398,58 +1642,393 @@ serverless:
             strokeWidth="2"
           />
           <text
-            x="640"
-            y="115"
+            x="392"
+            y="91"
             textAnchor="middle"
             fill="var(--color-surface-100)"
             fontSize="13"
             fontWeight="600"
           >
-            CloudFront
+            CloudFront + ACM
           </text>
+          <text x="392" y="108" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            CDN &amp; Edge TLS
+          </text>
+
           <rect
-            x="350"
-            y="190"
-            width="160"
-            height="50"
+            x="590"
+            y="54"
+            width="220"
+            height="54"
+            rx="8"
+            fill="var(--color-surface-800)"
+            stroke="var(--color-info-500)"
+            strokeWidth="2"
+          />
+          <text
+            x="700"
+            y="78"
+            textAnchor="middle"
+            fill="var(--color-surface-100)"
+            fontSize="13"
+            fontWeight="600"
+          >
+            S3 Bucket (OAC)
+          </text>
+          <text x="700" y="95" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            Static Chunks &amp; Releases
+          </text>
+
+          <rect
+            x="590"
+            y="132"
+            width="220"
+            height="58"
+            rx="8"
+            fill="var(--color-surface-800)"
+            stroke="var(--color-warning-500)"
+            strokeWidth="2"
+          />
+          <text
+            x="700"
+            y="157"
+            textAnchor="middle"
+            fill="var(--color-surface-100)"
+            fontSize="13"
+            fontWeight="600"
+          >
+            Lambda + Bridge
+          </text>
+          <text x="700" y="174" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            SSR / API / Image Opt
+          </text>
+
+          <rect
+            x="590"
+            y="218"
+            width="220"
+            height="54"
             rx="8"
             fill="var(--color-surface-800)"
             stroke="var(--color-danger-500)"
             strokeWidth="2"
           />
           <text
-            x="430"
-            y="220"
+            x="700"
+            y="242"
             textAnchor="middle"
             fill="var(--color-surface-100)"
             fontSize="12"
             fontWeight="600"
           >
-            Secrets Manager
+            AWS Secrets Manager
           </text>
+          <text x="700" y="259" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            Encrypted App Secrets
+          </text>
+
+          {/* Edges */}
           <path
-            d="M 330 140 L 330 190"
+            d="M 186 94 L 303 94"
+            fill="none"
+            stroke="var(--color-code-400)"
+            strokeWidth="2"
+            markerEnd="url(#aws-arrow-code)"
+          />
+          <text x="238" y="84" textAnchor="middle" fill="var(--color-code-400)" fontSize="10" fontWeight="600">
+            HTTPS
+          </text>
+
+          <path
+            d="M 480 81 L 588 81"
+            fill="none"
+            stroke="var(--color-code-400)"
+            strokeWidth="1.5"
+            markerEnd="url(#aws-arrow-code)"
+          />
+          <text x="534" y="72" textAnchor="middle" fill="var(--color-code-400)" fontSize="10">
+            /_next/static/*
+          </text>
+
+          <path
+            d="M 480 108 L 536 108 L 536 152 L 588 152"
+            fill="none"
+            stroke="var(--color-code-400)"
+            strokeWidth="1.5"
+            markerEnd="url(#aws-arrow-code)"
+          />
+          <text x="562" y="143" textAnchor="middle" fill="var(--color-code-400)" fontSize="10">
+            SSR / API
+          </text>
+
+          <path
+            d="M 700 190 L 700 216"
+            fill="none"
             stroke="var(--color-surface-400)"
             strokeWidth="1.5"
-            strokeDasharray="2 2"
-            markerEnd="url(#arrow-gray-sl)"
+            strokeDasharray="3 3"
+            markerEnd="url(#aws-arrow-muted)"
           />
-          <text x="338" y="170" fill="var(--color-surface-400)" fontSize="9">
-            cold-start fetch
+          <text x="710" y="207" textAnchor="start" fill="var(--color-surface-400)" fontSize="10">
+            Extension :2773
           </text>
+
           <path
-            d="M 640 140 L 640 200 L 530 215"
-            stroke="var(--color-code-500)"
-            strokeWidth="1.5"
-            strokeDasharray="2 2"
-            markerEnd="url(#arrow-gray-sl)"
+            d="M 186 228 L 520 228 L 520 172 L 588 172"
+            fill="none"
+            stroke="var(--color-brand-500)"
+            strokeWidth="2"
+            markerEnd="url(#aws-arrow-brand)"
           />
           <path
-            d="M 580 110 L 530 110"
-            stroke="var(--color-code-500)"
-            strokeWidth="1.5"
-            strokeDasharray="2 2"
+            d="M 520 228 L 520 245 L 588 245"
+            fill="none"
+            stroke="var(--color-brand-500)"
+            strokeWidth="2"
+            markerEnd="url(#aws-arrow-brand)"
           />
+          <text x="360" y="218" textAnchor="middle" fill="var(--color-brand-400)" fontSize="10" fontWeight="600">
+            Push Secrets, S3 Assets &amp; Lambda Zip
+          </text>
+        </svg>
+      </div>
+
+      <h3 className="text-lg sm:text-xl font-semibold text-white mt-8 mb-4">
+        Serverless (Cloudflare Workers)
+      </h3>
+      <div className="my-6 p-3 sm:p-6 bg-surface-900/50 border border-surface-800 rounded-2xl flex flex-col items-center overflow-x-auto">
+        <svg viewBox="0 0 860 300" className="w-full max-w-4xl min-w-[640px]">
+          <defs>
+            <marker
+              id="cf-arrow-brand"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orientation="auto"
+            >
+              <polygon points="0 0, 8 3, 0 6" fill="var(--color-brand-500)" />
+            </marker>
+            <marker
+              id="cf-arrow-code"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orientation="auto"
+            >
+              <polygon points="0 0, 8 3, 0 6" fill="var(--color-code-400)" />
+            </marker>
+          </defs>
+
+          <rect
+            x="18"
+            y="24"
+            width="184"
+            height="250"
+            rx="12"
+            fill="none"
+            stroke="var(--color-surface-700)"
+            strokeWidth="1.5"
+            strokeDasharray="4 4"
+          />
+          <text
+            x="110"
+            y="46"
+            textAnchor="middle"
+            fill="var(--color-surface-400)"
+            fontSize="11"
+            fontWeight="600"
+          >
+            Clients &amp; Local CLI
+          </text>
+
+          <rect
+            x="34"
+            y="64"
+            width="152"
+            height="60"
+            rx="8"
+            fill="var(--color-surface-800)"
+            stroke="var(--color-info-500)"
+            strokeWidth="2"
+          />
+          <text
+            x="110"
+            y="91"
+            textAnchor="middle"
+            fill="var(--color-surface-100)"
+            fontSize="13"
+            fontWeight="600"
+          >
+            Users / Browser
+          </text>
+          <text x="110" y="108" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            HTTPS Edge Request
+          </text>
+
+          <rect
+            x="34"
+            y="184"
+            width="152"
+            height="60"
+            rx="8"
+            fill="var(--color-brand-900)"
+            stroke="var(--color-brand-500)"
+            strokeWidth="2"
+          />
+          <text
+            x="110"
+            y="211"
+            textAnchor="middle"
+            fill="var(--color-brand-50)"
+            fontSize="13"
+            fontWeight="600"
+          >
+            nextdeploy CLI
+          </text>
+          <text x="110" y="228" textAnchor="middle" fill="var(--color-brand-200)" fontSize="10">
+            apply &amp; ship (nextcompile)
+          </text>
+
+          <rect
+            x="275"
+            y="24"
+            width="565"
+            height="250"
+            rx="12"
+            fill="none"
+            stroke="var(--color-surface-700)"
+            strokeWidth="1.5"
+            strokeDasharray="4 4"
+          />
+          <text
+            x="557"
+            y="46"
+            textAnchor="middle"
+            fill="var(--color-surface-400)"
+            fontSize="11"
+            fontWeight="600"
+          >
+            Cloudflare Global Edge
+          </text>
+
+          <rect
+            x="305"
+            y="108"
+            width="185"
+            height="64"
+            rx="8"
+            fill="var(--color-surface-800)"
+            stroke="var(--color-warning-500)"
+            strokeWidth="2"
+          />
+          <text
+            x="397"
+            y="136"
+            textAnchor="middle"
+            fill="var(--color-surface-100)"
+            fontSize="13"
+            fontWeight="600"
+          >
+            Worker (NextServer)
+          </text>
+          <text x="397" y="154" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            workerd + nodejs_compat
+          </text>
+
+          <rect
+            x="590"
+            y="64"
+            width="220"
+            height="58"
+            rx="8"
+            fill="var(--color-surface-800)"
+            stroke="var(--color-info-500)"
+            strokeWidth="2"
+          />
+          <text
+            x="700"
+            y="89"
+            textAnchor="middle"
+            fill="var(--color-surface-100)"
+            fontSize="13"
+            fontWeight="600"
+          >
+            R2 Bucket (ASSETS)
+          </text>
+          <text x="700" y="106" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            Static Assets &amp; ISR Cache
+          </text>
+
+          <rect
+            x="590"
+            y="180"
+            width="220"
+            height="58"
+            rx="8"
+            fill="var(--color-surface-800)"
+            stroke="var(--color-code-500)"
+            strokeWidth="2"
+          />
+          <text
+            x="700"
+            y="205"
+            textAnchor="middle"
+            fill="var(--color-surface-100)"
+            fontSize="13"
+            fontWeight="600"
+          >
+            D1 / KV / Hyperdrive
+          </text>
+          <text x="700" y="222" textAnchor="middle" fill="var(--color-surface-400)" fontSize="10">
+            Provisioned Edge Bindings
+          </text>
+
+          {/* Edges */}
+          <path
+            d="M 186 94 L 245 94 L 245 128 L 303 128"
+            fill="none"
+            stroke="var(--color-code-400)"
+            strokeWidth="2"
+            markerEnd="url(#cf-arrow-code)"
+          />
+          <text x="218" y="84" textAnchor="middle" fill="var(--color-code-400)" fontSize="10" fontWeight="600">
+            HTTPS
+          </text>
+
+          <path
+            d="M 186 214 L 245 214 L 245 154 L 303 154"
+            fill="none"
+            stroke="var(--color-brand-500)"
+            strokeWidth="2"
+            markerEnd="url(#cf-arrow-brand)"
+          />
+          <text x="224" y="232" textAnchor="middle" fill="var(--color-brand-400)" fontSize="10" fontWeight="600">
+            Workers API
+          </text>
+
+          <path
+            d="M 490 124 L 540 124 L 540 93 L 588 93"
+            fill="none"
+            stroke="var(--color-code-400)"
+            strokeWidth="1.5"
+            markerEnd="url(#cf-arrow-code)"
+          />
+          <text x="540" y="82" textAnchor="middle" fill="var(--color-code-400)" fontSize="10">
+            /_next/static/*
+          </text>
+
+          <path
+            d="M 490 156 L 540 156 L 540 209 L 588 209"
+            fill="none"
+            stroke="var(--color-code-400)"
+            strokeWidth="1.5"
+            markerEnd="url(#cf-arrow-code)"
+          />
+          <text x="540" y="226" textAnchor="middle" fill="var(--color-code-400)" fontSize="10">
+            Edge Bindings
+          </text>
         </svg>
       </div>
 
@@ -1516,41 +2095,41 @@ serverless:
         {[
           {
             label: "Cloudflare Workers — Next.js 16 Turbopack, R2, KV, Hyperdrive, streaming HTTP bridge",
-            status: "v0.20.x (Live)",
+            status: "v1.0 (Live)",
             done: true,
           },
           {
             label: "AWS — Lambda + S3 + CloudFront + ACM + Secrets Manager + ISR",
-            status: "v0.20.x (Live)",
+            status: "v1.0 (Live)",
             done: true,
           },
           {
             label:
               "Build intelligence — route classification, integration detection, ISR awareness, git provenance",
-            status: "v0.20.x (Live)",
+            status: "v1.0 (Live)",
             done: true,
           },
           {
             label:
               "VPS — Go sidecar, atomic cutover, chunk pooling, Caddy auto-TLS, systemd hardening",
-            status: "v0.20.x (Live)",
+            status: "v1.0 (Live)",
             done: true,
           },
           {
             label:
               "Pre-deploy validation — secret cross-referencing, git dirty warnings, Lambda & Worker size checks",
-            status: "v0.20.x (Live)",
+            status: "v1.0 (Live)",
             done: true,
           },
           {
             label: "Secret management — Doppler, AWS Secrets Manager, Cloudflare Secrets, Local encrypted store",
-            status: "v0.20.x (Live)",
+            status: "v1.0 (Live)",
             done: true,
           },
           {
             label:
               "Agent Trace — provider-independent continuity for AI coding agents, port 4044 dashboard, and 1-command takeover",
-            status: "v0.20.x (Live)",
+            status: "v1.0 (Live)",
             done: true,
           },
           {

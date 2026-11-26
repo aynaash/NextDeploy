@@ -4,6 +4,8 @@ lede: Deploy an unmodified Next.js 14, 15, or 16 (Turbopack) app to Cloudflare W
 status: ready
 sourceRef: cli/internal/serverless/cloudflare*.go, shared/nextcompile/, docs/targets/cloudflare.md
 related:
+  - title: Requirements
+    href: /docs/getting-started/requirements
   - title: Cloudflare Overview
     href: /docs/cloudflare/overview
   - title: Workers Runtime
@@ -13,6 +15,15 @@ related:
   - title: Running Next.js 16 Turbopack on Cloudflare
     href: /docs/advanced/nextjs-16-turbopack-on-cloudflare
 ---
+
+## Prerequisites
+
+- **Cloudflare Account & API Token:** `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` with Workers, R2, Account Settings, Zone, DNS, and Cache Purge permissions.
+- **Standalone Output:** `output: 'standalone'` enabled in `next.config.mjs`.
+- **Domain on Cloudflare DNS:** Your custom domain must belong to a Cloudflare Zone in your account.
+- **Secrets Synchronization:** Sync runtime secrets via **Doppler (recommended)** (`doppler run -- nextdeploy secrets sync`), **`.env`** (`nextdeploy secrets load .env.production && nextdeploy secrets sync`), or Cloudflare Secret Store bindings.
+
+See the full [Requirements Guide](/docs/getting-started/requirements) for details.
 
 ## 1. Export Cloudflare Credentials
 

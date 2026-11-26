@@ -20,12 +20,12 @@ Unlike heavyweight orchestration systems (Kubernetes Kubelet, Nomad, Docker Daem
 
 ```mermaid
 flowchart TD
-    CLI[nextdeploy CLI on Dev / CI] -->|SSH / SFTP / mTLS| Daemon[nextdeployd Go Daemon]
-    Daemon --> FS[Directory Layout Engine: /opt/nextdeploy/apps/<app>]
-    Daemon --> DBus[systemd D-Bus / Process Supervisor]
-    Daemon --> CaddyCtl[Caddy Admin API: http://127.0.0.1:2019/load]
-    Daemon --> Prober[Dual-Stage TCP & HTTP /api/health Prober]
-    Daemon --> Metrics[Prometheus Exporter: :9100/metrics]
+    CLI["nextdeploy CLI on Dev / CI"] -->|"SSH / SFTP + HMAC-SHA256"| Daemon["nextdeployd Go Daemon"]
+    Daemon --> FS["Directory Layout Engine: /opt/nextdeploy/apps/app"]
+    Daemon --> DBus["systemd Unit & Process Supervisor"]
+    Daemon --> CaddyCtl["Caddy Sandbox Validate & Reload"]
+    Daemon --> Prober["Dual-Stage TCP & HTTP Health Prober"]
+    Daemon --> Audit["Redacted JSON Audit Log (0600)"]
 ```
 
 ---

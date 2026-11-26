@@ -79,11 +79,11 @@ NextDeploy permanently eliminates this issue on VPS bare metal by implementing a
 
 ```mermaid
 flowchart TD
-    Build[Next.js Build Output: .next/static] --> Sync[Additive Sync Engine]
-    Sync --> Pool[(Cumulative Pool: /shared_static)]
-    Caddy[Caddy Reverse Proxy] -->|/_next/static/*| Pool
-    Pool -->|Retains v1.0 Chunks| UserOld[Active Users on v1.0]
-    Pool -->|Serves v1.1 Chunks| UserNew[New Users on v1.1]
+    Build["Next.js Build Output: .next/static"] --> Sync["Additive Sync Engine"]
+    Sync --> Pool[("Cumulative Pool: /shared_static")]
+    Caddy["Caddy Reverse Proxy"] -->|"/_next/static/*"| Pool
+    Pool -->|"Retains v1.0 Chunks"| UserOld["Active Users on v1.0"]
+    Pool -->|"Serves v1.1 Chunks"| UserNew["New Users on v1.1"]
 ```
 
 ---

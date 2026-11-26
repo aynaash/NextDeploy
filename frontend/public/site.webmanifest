@@ -1,7 +1,7 @@
 {
-  "name": "NextDeploy - Self-Hosted Next.js Deployment Platform",
+  "name": "NextDeploy — Self-Hosted Next.js Deployment Engine",
   "short_name": "NextDeploy",
-  "description": "Deploy Next.js to your own Linux VPS, Cloudflare Workers, or AWS Lambda with zero lock-in.",
+  "description": "Open-source self-hosted Next.js deployment engine. Deploy Next.js to Linux VPS, AWS Lambda, or Cloudflare Workers with zero-downtime rollouts and rollback.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#020617",
@@ -35,4 +35,4 @@
       "purpose": "maskable"
     }
   ]
-}\n
+}

@@ -28,7 +28,7 @@ serverless:
     # Edge protection guard — runs ahead of the app (auth + KV rate-limit).
     protection:
       enabled: true
-      public_paths: ["/", "/login"]
+      public_paths: ["/", "/login", "/docs", "/docs/*", "/sitemap.xml", "/manifest.webmanifest"]
       auth:
         secret_env: AUTH_SECRET
         protected_paths: ["/app/*"]
@@ -36,3 +36,4 @@ serverless:
       rate_limit:
         kv_binding: RATE_LIMIT
         requests_per_minute: 60
+        paths: ["/api/*", "/app/*"]

@@ -21,17 +21,10 @@ export async function GET() {
       changefreq: "daily",
       priority: "0.9",
     },
-    {
-      loc: `${baseUrl}/login`,
-      lastmod: today,
-      changefreq: "monthly",
-      priority: "0.3",
-    },
   ];
 
   seen.add("/");
   seen.add("/docs");
-  seen.add("/login");
 
   for (const doc of flatDocs) {
     if (!seen.has(doc.href)) {

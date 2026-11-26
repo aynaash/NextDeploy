@@ -43,26 +43,26 @@ nextdeploy mcp init --client all
 
 ```mermaid
 flowchart LR
-    subgraph AI Client Environment
-        Agent[Coding Agent Cursor / Claude / Antigravity]
+    subgraph ClientEnv ["AI Client Environment"]
+        Agent["Coding Agent (Cursor / Claude / Antigravity)"]
     end
 
-    subgraph MCP Transport Layer
-        Agent <-->|stdio JSON-RPC 2.0| Server[NextDeploy MCP Server]
+    subgraph TransportLayer ["MCP Transport Layer"]
+        Agent <-->|"stdio JSON-RPC 2.0"| Server["NextDeploy MCP Server"]
     end
 
-    subgraph NextDeploy Native Engine
-        Server --> Tool_Inspect[Tool: nextdeploy_inspect]
-        Server --> Tool_Plan[Tool: nextdeploy_plan]
-        Server --> Tool_Ship[Tool: nextdeploy_ship]
-        Server --> Tool_Trace[Tool: nextdeploy_trace]
-        Server --> Tool_Logs[Tool: nextdeploy_logs]
+    subgraph NativeEngine ["NextDeploy Native Engine"]
+        Server --> Tool_Inspect["Tool: nextdeploy_inspect"]
+        Server --> Tool_Plan["Tool: nextdeploy_plan"]
+        Server --> Tool_Ship["Tool: nextdeploy_ship"]
+        Server --> Tool_Trace["Tool: nextdeploy_trace"]
+        Server --> Tool_Takeover["Tool: nextdeploy_takeover"]
     end
 
-    subgraph Cloud & Edge
-        Tool_Ship --> VPS[Linux VPS nextdeployd]
-        Tool_Ship --> CF[Cloudflare Workers nextcompile]
-        Tool_Ship --> AWS[AWS Lambda + CloudFront]
+    subgraph CloudEdge ["Cloud & Edge"]
+        Tool_Ship --> VPS["Linux VPS (nextdeployd)"]
+        Tool_Ship --> CF["Cloudflare Workers (nextcompile)"]
+        Tool_Ship --> AWS["AWS Lambda + CloudFront"]
     end
 ```
 

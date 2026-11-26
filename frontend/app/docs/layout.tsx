@@ -8,11 +8,27 @@ export const metadata: Metadata = {
     default: 'Documentation',
     template: '%s | NextDeploy Docs',
   },
-  description: 'Comprehensive documentation for NextDeploy: self-hosted Next.js deployment on Linux VPS, Cloudflare Workers, and AWS Lambda.',
+  description: 'Comprehensive documentation for NextDeploy: self-hosted Next.js deployment engine for Linux VPS, AWS Lambda, and Cloudflare Workers.',
   openGraph: {
     title: 'NextDeploy Documentation',
-    description: 'Comprehensive documentation for NextDeploy: self-hosted Next.js deployment on Linux VPS, Cloudflare Workers, and AWS Lambda.',
+    description: 'Comprehensive documentation for NextDeploy: self-hosted Next.js deployment engine for Linux VPS, AWS Lambda, and Cloudflare Workers.',
     type: 'website',
+    siteName: 'NextDeploy',
+    locale: 'en_US',
+    images: [
+      {
+        url: '/og.png',
+        width: 1200,
+        height: 630,
+        alt: 'NextDeploy Documentation',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'NextDeploy Documentation',
+    description: 'Comprehensive documentation for NextDeploy: self-hosted Next.js deployment engine for Linux VPS, AWS Lambda, and Cloudflare Workers.',
+    images: ['/og.png'],
   },
 }
 
