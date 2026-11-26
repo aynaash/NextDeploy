@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.1.0](https://github.com/aynaash/NextDeploy/compare/v1.0.0...v1.1.0) (2026-11-26)
+
+### Features
+
+* **cloudflare:** add Next.js 16.4+ Workers `nextserver` support (`evalManifestFromRelativePath` + `handleMissing`, safe `fast-set-immediate.external.js` shim with `ImmediateTracker`, and `process.env.__NEXT_DEV_SERVER` dead-code elimination)
+* **serverless:** modularize serverless adapters into dedicated `aws/`, `cloudflare/`, and `core/` packages
+* **config:** add unified multi-server resolution (`server_resolve`) and credential store tests
+* **frontend:** redesign responsive landing page, add interactive Atomic Cutover Explorer, and complete Google/GitHub SEO overhaul
+* **docs:** add full-stack deployment Requirements guide (VPS, non-root `sudo` user, SSH `key_path`, DNS, Doppler/`.env` secrets sync) and Next.js 16.4+ Cloudflare troubleshooting docs
+
+### Bug Fixes
+
+* **cloudflare:** fix `looksLikeCloudflareAccountID` hex range check so `'9'`, `'a'`, and `'f'` characters are accepted
+* **cloudflare:** fix Next.js 16.4.6 Worker `500` errors on `loadManifests` (`TypeError: l2 is not a function`) and `node:timers.setImmediate` read-only ESM namespace assignment
+* **guard:** coalesce Cloudflare KV rate-limit writes (1.1s per key/isolate) and degrade gracefully on KV `429` errors
+* **frontend:** fix `gray-matter` + `js-yaml@4` docs prerendering compatibility and eliminate CRITICAL/HIGH JS dependency CVEs
+
 ## [1.0.0](https://github.com/aynaash/NextDeploy/compare/v0.20.2...v1.0.0) (2026-11-23)
 
 ### 🎉 Milestone: Production Parity for VPS and Cloudflare Workers
