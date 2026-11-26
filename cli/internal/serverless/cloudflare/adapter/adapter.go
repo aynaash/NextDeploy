@@ -650,6 +650,8 @@ const __ndDynRequire = (spec) => {
   }
   const loaded = globalThis.__nextdeployLoadModule?.(spec);
   if (loaded !== undefined) return loaded;
+  const builtin = globalThis.__nextdeployLoadBuiltin?.(spec);
+  if (builtin !== undefined) return builtin;
   if (typeof spec === "string" && spec.endsWith(".json") && globalThis.__nextdeployVFS?.files) {
     const clean = spec.replace(/\\/g, "/").replace(/^\/+/, "");
     const nextIdx = clean.indexOf(".next/");
@@ -668,6 +670,8 @@ const __ndDynImport = async (spec) => {
   }
   const loaded = globalThis.__nextdeployLoadModule?.(spec);
   if (loaded !== undefined) return loaded;
+  const builtin = globalThis.__nextdeployLoadBuiltin?.(spec);
+  if (builtin !== undefined) return { default: builtin, ...builtin };
   return import(spec);
 };
 `

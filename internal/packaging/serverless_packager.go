@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -228,22 +229,37 @@ func (p *Packager) addPrerenderedAsset(assets *[]S3Asset, routePath string) {
 		fsRoutePath = "/index"
 	}
 
-	// Standalone output structure: .next/standalone/.next/server/
-	standaloneNext := filepath.Join(p.standaloneDir, ".next")
-
-	prefixes := []string{
-		filepath.Join(standaloneNext, "server", "app"),
-		filepath.Join(standaloneNext, "server", "pages"),
+	// Check both standalone/.next and buildDir (.next) so prerendered .html, .rsc,
+	// and Next.js 16 .segments/**/*.segment.rsc files are always packaged.
+	nextDirs := []string{filepath.Join(p.standaloneDir, ".next")}
+	if p.buildDir != "" && filepath.Clean(p.buildDir) != filepath.Clean(nextDirs[0]) {
+		nextDirs = append(nextDirs, p.buildDir)
+	}
+	var prefixes []string
+	for _, nextDir := range nextDirs {
+		prefixes = append(prefixes,
+			filepath.Join(nextDir, "server", "app"),
+			filepath.Join(nextDir, "server", "pages"),
+		)
 	}
 
 	pkgLog := shared.PackageLogger("packaging", "📦 PKG")
 	htmlAdded := false
+	queuedKeys := make(map[string]struct{})
+	appendAsset := func(asset S3Asset) {
+		if _, exists := queuedKeys[asset.S3Key]; exists {
+			return
+		}
+		queuedKeys[asset.S3Key] = struct{}{}
+		*assets = append(*assets, asset)
+	}
+
 	for _, prefix := range prefixes {
 		serverPath := filepath.Join(prefix, fsRoutePath)
 
 		htmlPath := serverPath + ".html"
 		if _, err := os.Stat(htmlPath); err == nil {
-			*assets = append(*assets, S3Asset{
+			appendAsset(S3Asset{
 				LocalPath:    htmlPath,
 				S3Key:        s3KeyBase + ".html",
 				CacheControl: "public, max-age=0, must-revalidate",
@@ -255,11 +271,34 @@ func (p *Packager) addPrerenderedAsset(assets *[]S3Asset, routePath string) {
 
 		rscPath := serverPath + ".rsc"
 		if _, err := os.Stat(rscPath); err == nil {
-			*assets = append(*assets, S3Asset{
+			appendAsset(S3Asset{
 				LocalPath:    rscPath,
 				S3Key:        s3KeyBase + ".rsc",
 				CacheControl: "public, max-age=0, must-revalidate",
 				ContentType:  "text/x-component",
+			})
+		}
+
+		segmentsDir := serverPath + ".segments"
+		if info, err := os.Stat(segmentsDir); err == nil && info.IsDir() {
+			_ = filepath.WalkDir(segmentsDir, func(path string, d fs.DirEntry, walkErr error) error {
+				if walkErr != nil || d.IsDir() {
+					return walkErr
+				}
+				if !strings.HasSuffix(d.Name(), ".rsc") {
+					return nil
+				}
+				rel, relErr := filepath.Rel(segmentsDir, path)
+				if relErr != nil {
+					return relErr
+				}
+				appendAsset(S3Asset{
+					LocalPath:    path,
+					S3Key:        s3KeyBase + ".segments/" + filepath.ToSlash(rel),
+					CacheControl: "public, max-age=0, must-revalidate",
+					ContentType:  "text/x-component",
+				})
+				return nil
 			})
 		}
 	}

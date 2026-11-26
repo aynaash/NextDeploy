@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import fsShim, { normalizeVFSPath, readFileSync, existsSync, statSync, readdirSync, promises as fsPromises } from "./vfs_fs_shim.mjs";
 import { invokeNodeHandler } from "./http_bridge.mjs";
 import { CloudflareCacheHandler, resetLocalCacheForTests } from "./cf_cache_handler.mjs";
+import { loadBuiltinModule } from "./builtin_registry.mjs";
 import {
   ensureProcessCompat,
   installNextServerGlobals,
@@ -359,4 +360,121 @@ test("ensureProcessCompat polyfills minimal workerd process and replaces throwin
   assert.equal(typeof workerdLikeProcess.hrtime.bigint(), "bigint");
   assert.equal(workerdLikeProcess.stdout.isTTY, false);
   assert.equal(workerdLikeProcess.versions.node, "22.0.0");
+});
+
+// ── Built-in registry & segmentData cache tests ──────────────────────────────
+
+test("loadBuiltinModule resolves workerd node:* built-ins and VFS fs shims", () => {
+  assert.equal(loadBuiltinModule("fs"), fsShim);
+  assert.equal(loadBuiltinModule("node:fs"), fsShim);
+  assert.equal(loadBuiltinModule("fs/promises"), fsPromises);
+  assert.equal(loadBuiltinModule("node:fs/promises"), fsPromises);
+  assert.equal(typeof loadBuiltinModule("path")?.join, "function");
+  assert.equal(typeof loadBuiltinModule("node:path")?.resolve, "function");
+  assert.equal(typeof loadBuiltinModule("crypto")?.createHash, "function");
+  assert.equal(typeof loadBuiltinModule("node:crypto")?.randomUUID, "function");
+  assert.equal(loadBuiltinModule("process"), globalThis.process);
+  assert.equal(loadBuiltinModule("os")?.platform(), "linux");
+  assert.equal(loadBuiltinModule("nonexistent-pkg"), undefined);
+});
+
+test("CloudflareCacheHandler round-trips APP_PAGE rscData + segmentData Map through R2 and guards stale legacy entries", async () => {
+  const r2Store = new Map();
+  const waitUntilPromises = [];
+
+  globalThis.__nextdeployEnv = {
+    ASSETS: {
+      get: async (k) => (r2Store.has(k) ? { body: r2Store.get(k), json: async () => JSON.parse(r2Store.get(k)) } : null),
+      put: async (k, v) => {
+        r2Store.set(k, v);
+      },
+    },
+  };
+  globalThis.__nextdeployWorkerCtx = {
+    waitUntil: (p) => waitUntilPromises.push(p),
+  };
+
+  const handler = new CloudflareCacheHandler({ assetVersion: "v1" });
+  const segMap = new Map([
+    ["/_tree", Buffer.from("tree-payload")],
+    ["/_index", Buffer.from("index-payload")],
+  ]);
+  await handler.set("/docs", {
+    kind: "APP_PAGE",
+    html: "<h1>Docs</h1>",
+    rscData: Buffer.from("flight-payload"),
+    segmentData: segMap,
+  });
+  await Promise.all(waitUntilPromises);
+
+  // Simulate cold isolate by clearing L1 and verify Buffer + Map revival from R2.
+  resetLocalCacheForTests();
+  const hit = await handler.get("/docs", { kind: "APP_PAGE" });
+  assert.ok(Buffer.isBuffer(hit?.value?.rscData));
+  assert.equal(hit.value.rscData.toString("utf8"), "flight-payload");
+  assert.ok(hit?.value?.segmentData instanceof Map);
+  assert.ok(Buffer.isBuffer(hit.value.segmentData.get("/_tree")));
+  assert.equal(hit.value.segmentData.get("/_tree").toString("utf8"), "tree-payload");
+  assert.equal(hit.value.segmentData.get("/_index").toString("utf8"), "index-payload");
+
+  // Guard against stale legacy R2 entries where Map serialized as `{}`.
+  r2Store.set(
+    "_nextdeploy/cache/v1/legacy-docs.json",
+    JSON.stringify({
+      value: {
+        kind: "APP_PAGE",
+        html: "<h1>Legacy</h1>",
+        segmentData: {},
+      },
+      lastModified: Date.now(),
+      tags: [],
+    }),
+  );
+  resetLocalCacheForTests();
+  const legacyHit = await handler.get("/legacy-docs", { kind: "APP_PAGE" });
+  assert.equal(legacyHit?.value?.html, "<h1>Legacy</h1>");
+  assert.equal(legacyHit?.value?.segmentData, undefined);
+});
+
+test("CloudflareCacheHandler loads .segments/**/*.segment.rsc using VFS .meta segmentPaths", async () => {
+  installNextServerGlobals({
+    vfs: {
+      files: {
+        "package.json": '{"name":"demo"}',
+        ".next/BUILD_ID": "build-turbo-1",
+        ".next/server/app/docs.meta": JSON.stringify({
+          segmentPaths: ["/_tree", "/docs/__PAGE__"],
+          headers: { "x-next-meta": "ok" },
+        }),
+      },
+      dirs: {
+        "": ["package.json", ".next"],
+        ".next": ["BUILD_ID", "server"],
+        ".next/server": ["app"],
+        ".next/server/app": ["docs.meta"],
+      },
+    },
+    assetVersion: "v1",
+  });
+
+  const releaseStore = new Map([
+    ["_nextdeploy/releases/v1/docs.html", { body: "<h1>Docs Shell</h1>" }],
+    ["_nextdeploy/releases/v1/docs.rsc", { body: "0:[\"$\",\"div\",null,{}]\n" }],
+    ["_nextdeploy/releases/v1/docs.segments/_tree.segment.rsc", { body: "seg-tree-data" }],
+    ["_nextdeploy/releases/v1/docs.segments/docs/__PAGE__.segment.rsc", { body: "seg-page-data" }],
+  ]);
+  globalThis.__nextdeployEnv = {
+    ASSETS: {
+      get: async (k) => releaseStore.get(k) || null,
+    },
+  };
+
+  const handler = new CloudflareCacheHandler({ assetVersion: "v1" });
+  const hit = await handler.get("/docs", { kind: "APP_PAGE" });
+  assert.equal(hit?.value?.kind, "APP_PAGE");
+  assert.equal(hit?.value?.html, "<h1>Docs Shell</h1>");
+  assert.deepEqual(hit?.value?.headers, { "x-next-meta": "ok" });
+  assert.ok(hit?.value?.segmentData instanceof Map);
+  assert.equal(hit.value.segmentData.get("/_tree").toString("utf8"), "seg-tree-data");
+  assert.equal(hit.value.segmentData.get("/docs/__PAGE__").toString("utf8"), "seg-page-data");
 });

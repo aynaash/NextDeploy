@@ -15,6 +15,7 @@ import { handleImageRequest } from "../image.mjs";
 import { serverError } from "../errors.mjs";
 import { invokeNodeHandler } from "./http_bridge.mjs";
 import { CloudflareCacheHandler } from "./cf_cache_handler.mjs";
+import { loadBuiltinModule } from "./builtin_registry.mjs";
 
 let cachedHandlerPromise = null;
 
@@ -155,6 +156,7 @@ export function installNextServerGlobals({ vfs, loadServerModule, assetVersion }
   ensureProcessCompat();
   globalThis.__nextdeployVFS = vfs || { files: {}, dirs: {} };
   globalThis.__nextdeployLoadModule = loadServerModule || (() => undefined);
+  globalThis.__nextdeployLoadBuiltin = loadBuiltinModule;
   globalThis.__nextdeployAssetVersion = assetVersion || "";
   globalThis.__nextdeployCacheHandler = CloudflareCacheHandler;
   // Next.js 15/16 reads Symbol.for("@next/cache-handlers").FetchCache across

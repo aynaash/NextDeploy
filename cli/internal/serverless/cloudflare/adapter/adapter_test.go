@@ -380,6 +380,104 @@ console.log("OK:" + body);
 	}
 }
 
+// TestBuildWorkerBundle_NextServerTurbopackExternalRequireBuiltins verifies
+// that Turbopack Context.externalRequire dynamic requires for Node built-ins
+// (node:path, node:fs/promises, fs, node:crypto) resolve via __ndDynRequire +
+// builtin_registry.mjs + VFS fs shim in the bundled worker.mjs.
+func TestBuildWorkerBundle_NextServerTurbopackExternalRequireBuiltins(t *testing.T) {
+	dir := t.TempDir()
+
+	writeTestFile(t, filepath.Join(dir, "package.json"), `{
+		"name": "turbo-builtins-e2e",
+		"dependencies": {"next":"16.4.6","react":"19.2.0"}
+	}`)
+	writeTestFile(t, filepath.Join(dir, ".next", "BUILD_ID"), `turbo-builtins-1`)
+	writeTestFile(t, filepath.Join(dir, ".next", "routes-manifest.json"), `{"version":3,"basePath":""}`)
+	writeTestFile(t, filepath.Join(dir, ".next", "required-server-files.json"), `{"config":{"poweredByHeader":false}}`)
+
+	writeTestFile(t, filepath.Join(dir, ".next", "server", "chunks", "ssr", "[turbopack]_runtime.js"), `
+exports.externalRequire = function(id) {
+  return require(id);
+};
+`)
+	writeTestFile(t, filepath.Join(dir, ".next", "server", "app", "page.js"), `
+const rt = require("../chunks/ssr/[turbopack]_runtime.js");
+exports.probeBuiltins = async function() {
+  const pathMod = rt.externalRequire("node:path");
+  const fsPromises = rt.externalRequire("node:fs/promises");
+  const fsSync = rt.externalRequire("fs");
+  const cryptoMod = rt.externalRequire("node:crypto");
+  const joined = pathMod.join(".next", "BUILD_ID");
+  const syncVal = fsSync.readFileSync(joined, "utf8").trim();
+  const asyncVal = (await fsPromises.readFile(joined, "utf8")).trim();
+  const digest = cryptoMod.createHash("sha256").update(syncVal).digest("hex").slice(0, 8);
+  return { joined, syncVal, asyncVal, digest };
+};
+`)
+	writeTestFile(t, filepath.Join(dir, "node_modules", "next", "dist", "server", "require.js"), `
+exports.requirePage = function(pagePath) {
+  return require(pagePath);
+};
+`)
+	writeTestFile(t, filepath.Join(dir, "node_modules", "next", "dist", "server", "next-server.js"), `
+const { requirePage } = require("./require.js");
+class NextNodeServer {
+  async prepare() {}
+  getRequestHandler() {
+    return async (req, res) => {
+      const page = requirePage(".next/server/app/page.js");
+      const out = await page.probeBuiltins();
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify(out));
+    };
+  }
+}
+module.exports = NextNodeServer;
+`)
+
+	meta := &nextcore.NextCorePayload{
+		AppName:    "turbo-builtins-e2e",
+		DistDir:    ".next",
+		OutputMode: nextcore.OutputModeStandalone,
+		NextBuildMetadata: nextcore.NextBuildMetadata{
+			BuildID:      "turbo-builtins-1",
+			HasAppRouter: true,
+		},
+	}
+
+	log := shared.PackageLogger("test", "TEST")
+	workerOut, err := BuildWorkerBundle(context.Background(), dir, meta, nil, log)
+	if err != nil {
+		t.Fatalf("BuildWorkerBundle: %v", err)
+	}
+
+	nodeBin, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not on PATH; skipping runtime execution check")
+	}
+
+	script := `
+import worker from ` + `"` + filepath.ToSlash(workerOut) + `"` + `;
+const res = await worker.fetch(new Request("https://app.example.com/"), {}, { waitUntil() {} });
+const text = await res.text();
+if (res.status !== 200) throw new Error("status=" + res.status + " body=" + text);
+const data = JSON.parse(text);
+if (data.syncVal !== "turbo-builtins-1" || data.asyncVal !== "turbo-builtins-1" || !data.digest) {
+  throw new Error("unexpected payload: " + text);
+}
+console.log("OK:" + text);
+`
+	cmd := exec.CommandContext(t.Context(), nodeBin, "--input-type=module", "-e", script) // #nosec G204
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("executing compiled Turbopack worker.mjs failed: %v\noutput:\n%s", err, string(out))
+	}
+	if !strings.Contains(string(out), `"syncVal":"turbo-builtins-1"`) {
+		t.Fatalf("unexpected worker output: %s", string(out))
+	}
+}
+
 // TestBuildWorkerBundle_RealStandaloneSmoke lets developers verify the
 // nextserver engine against any real Next.js standalone tree on disk:
 //

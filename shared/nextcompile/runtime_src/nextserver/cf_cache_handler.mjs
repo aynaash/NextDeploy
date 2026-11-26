@@ -34,18 +34,128 @@ function releaseAssetKey(relPath, assetVersion) {
   return assetVersion ? `_nextdeploy/releases/${assetVersion}/${clean}` : clean;
 }
 
-function reviveSerializedBuffers(value) {
-  if (!value || typeof value !== "object") return value;
-  if (
-    value.rscData &&
-    typeof value.rscData === "object" &&
-    value.rscData.type === "Buffer" &&
-    Array.isArray(value.rscData.data) &&
-    typeof Buffer !== "undefined"
-  ) {
-    return { ...value, rscData: Buffer.from(value.rscData.data) };
+function bytesToBase64(bytes) {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
+  }
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) {
+    bin += String.fromCharCode(bytes[i]);
+  }
+  return btoa(bin);
+}
+
+function base64ToBuffer(b64) {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(b64, "base64");
+  }
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) {
+    out[i] = bin.charCodeAt(i);
+  }
+  return out;
+}
+
+function serializeBinary(value) {
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(value)) {
+    return { __ndType: "Buffer", base64: bytesToBase64(value) };
+  }
+  if (value instanceof Uint8Array) {
+    return { __ndType: "Buffer", base64: bytesToBase64(value) };
   }
   return value;
+}
+
+function reviveBinary(value) {
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(value)) {
+    return value;
+  }
+  if (value instanceof Uint8Array) {
+    return typeof Buffer !== "undefined"
+      ? Buffer.from(value.buffer, value.byteOffset, value.byteLength)
+      : value;
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  if (value.__ndType === "Buffer" && typeof value.base64 === "string") {
+    return base64ToBuffer(value.base64);
+  }
+  if (value.type === "Buffer" && Array.isArray(value.data)) {
+    return typeof Buffer !== "undefined" ? Buffer.from(value.data) : new Uint8Array(value.data);
+  }
+  const keys = Object.keys(value);
+  if (keys.length > 0 && keys.every((k, idx) => k === String(idx))) {
+    const arr = new Uint8Array(keys.length);
+    for (let i = 0; i < keys.length; i++) {
+      arr[i] = value[keys[i]];
+    }
+    return typeof Buffer !== "undefined" ? Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength) : arr;
+  }
+  return value;
+}
+
+function serializeCacheValue(value) {
+  if (!value || typeof value !== "object") return value;
+  const out = { ...value };
+  if (out.rscData != null) {
+    out.rscData = serializeBinary(out.rscData);
+  }
+  if (out.segmentData instanceof Map) {
+    out.segmentData = {
+      __ndType: "Map",
+      entries: Array.from(out.segmentData.entries(), ([k, v]) => [k, serializeBinary(v)]),
+    };
+  }
+  return out;
+}
+
+function reviveCacheValue(value) {
+  if (!value || typeof value !== "object") return value;
+  const out = { ...value };
+  if (out.rscData != null) {
+    out.rscData = reviveBinary(out.rscData);
+  }
+  if (out.segmentData instanceof Map) {
+    const revived = new Map();
+    for (const [k, v] of out.segmentData.entries()) {
+      revived.set(k, reviveBinary(v));
+    }
+    out.segmentData = revived;
+  } else if (out.segmentData && out.segmentData.__ndType === "Map" && Array.isArray(out.segmentData.entries)) {
+    const revived = new Map();
+    for (const [k, v] of out.segmentData.entries) {
+      revived.set(k, reviveBinary(v));
+    }
+    out.segmentData = revived;
+  } else if (out.segmentData !== undefined) {
+    // Guard against stale legacy R2 JSON entries where Map serialized to `{}`.
+    out.segmentData = undefined;
+  }
+  return out;
+}
+
+function readRouteMetaFromVFS(clean) {
+  const files = globalThis.__nextdeployVFS?.files;
+  if (!files) return null;
+  const exactKey = `.next/server/app/${clean}.meta`;
+  let raw = Object.prototype.hasOwnProperty.call(files, exactKey) ? files[exactKey] : undefined;
+  if (raw === undefined) {
+    const suffix = `/server/app/${clean}.meta`;
+    for (const k of Object.keys(files)) {
+      if (k.endsWith(suffix)) {
+        raw = files[k];
+        break;
+      }
+    }
+  }
+  if (typeof raw !== "string" || !raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 async function readR2Text(obj) {
@@ -114,7 +224,7 @@ export class CloudflareCacheHandler {
           : JSON.parse(await readR2Text(obj));
         if (parsed && typeof parsed === "object") {
           if (!(await isEntryInvalidatedByTags(parsed.tags, parsed.lastModified, env))) {
-            parsed.value = reviveSerializedBuffers(parsed.value);
+            parsed.value = reviveCacheValue(parsed.value);
             l1Cache.set(key, parsed);
             return { value: parsed.value, lastModified: parsed.lastModified };
           }
@@ -125,19 +235,41 @@ export class CloudflareCacheHandler {
     }
 
     // Fallback for build-time pre-rendered SSG/ISR routes stored in R2
-    // (_nextdeploy/releases/<assetVersion>/<route>.html and optional .rsc).
-    // Serves both HTML and client-side RSC Flight navigations for
-    // generateStaticParams routes without hitting NoFallbackError.
+    // (_nextdeploy/releases/<assetVersion>/<route>.html, optional .rsc, and
+    // Next.js 16 .segments/**/*.segment.rsc).
+    // Serves HTML, client-side RSC Flight navigations, and segment prefetches
+    // without hitting NoFallbackError or Missing SegmentData errors.
     if (ctx?.kind !== "FETCH" && typeof key === "string" && key.startsWith("/")) {
       try {
         const clean = key === "/" ? "index" : key.replace(/^\/+/, "");
         const htmlObj = await env.ASSETS.get(releaseAssetKey(`${clean}.html`, this.assetVersion));
         if (htmlObj) {
-          const [html, rscObj] = await Promise.all([
+          const meta = readRouteMetaFromVFS(clean);
+          const segmentPaths = Array.isArray(meta?.segmentPaths) ? meta.segmentPaths : [];
+          const [html, rscObj, ...segObjs] = await Promise.all([
             readR2Text(htmlObj),
             env.ASSETS.get(releaseAssetKey(`${clean}.rsc`, this.assetVersion)).catch(() => null),
+            ...segmentPaths.map((segPath) => {
+              const relSeg = String(segPath).replace(/^\/+/, "");
+              return env.ASSETS.get(
+                releaseAssetKey(`${clean}.segments/${relSeg}.segment.rsc`, this.assetVersion),
+              ).catch(() => null);
+            }),
           ]);
           const rscData = rscObj ? await readR2Buffer(rscObj) : undefined;
+          let segmentData;
+          if (segmentPaths.length > 0) {
+            segmentData = new Map();
+            for (let i = 0; i < segmentPaths.length; i++) {
+              const segObj = segObjs[i];
+              if (segObj) {
+                const segBuf = await readR2Buffer(segObj);
+                if (segBuf !== undefined) {
+                  segmentData.set(segmentPaths[i], segBuf);
+                }
+              }
+            }
+          }
           const lastModified =
             Number(htmlObj.customMetadata?.revalidatedAt) ||
             (htmlObj.uploaded instanceof Date ? htmlObj.uploaded.getTime() : Date.now());
@@ -146,9 +278,10 @@ export class CloudflareCacheHandler {
               kind: "APP_PAGE",
               html,
               rscData,
-              headers: {},
-              postponed: undefined,
-              status: key === "/_not-found" ? 404 : undefined,
+              headers: meta && typeof meta.headers === "object" && meta.headers ? meta.headers : {},
+              postponed: meta?.postponed ?? undefined,
+              status: key === "/_not-found" ? 404 : (meta?.status ?? undefined),
+              segmentData,
             },
             lastModified,
             tags: [],
@@ -175,9 +308,14 @@ export class CloudflareCacheHandler {
     l1Cache.set(key, entry);
 
     if (typeof env?.ASSETS?.put !== "function") return;
+    const serializedEntry = {
+      value: serializeCacheValue(data),
+      lastModified: entry.lastModified,
+      tags,
+    };
     const writePromise = env.ASSETS.put(
       cacheObjectKey(key, this.assetVersion),
-      JSON.stringify(entry),
+      JSON.stringify(serializedEntry),
       {
         httpMetadata: { contentType: "application/json" },
         customMetadata: { revalidatedAt: String(entry.lastModified) },
