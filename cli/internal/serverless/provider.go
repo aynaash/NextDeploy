@@ -39,6 +39,8 @@ type (
 	CFTailEventDetail  = cloudflare.CFTailEventDetail
 	CFTailRequest      = cloudflare.CFTailRequest
 	CFTailResponse     = cloudflare.CFTailResponse
+	TailOptions        = cloudflare.TailOptions
+	QueryOptions       = cloudflare.QueryOptions
 )
 
 // PlanAction constants.

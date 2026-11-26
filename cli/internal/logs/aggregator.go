@@ -77,6 +77,14 @@ func (a *LogAggregator) printLine(source LogSource, content string) error {
 	// Special case for journalctl metadata (Mar 05 19:39:47 ...)
 	content = stripJournalMetadata(content)
 
+	ownerBadge := ""
+	if source == SourceApp && looksLikeAppErrorLine(content) {
+		diag := Classify(Signal{Messages: []string{content}})
+		if diag.Owner != OwnerUnknown {
+			ownerBadge = OwnerBadge(diag.Owner) + " "
+		}
+	}
+
 	// Apply Next.js specific colorization
 	content = colorizeNextJS(content)
 
@@ -85,8 +93,28 @@ func (a *LogAggregator) printLine(source LogSource, content string) error {
 		content = formatAuditJSON(content)
 	}
 
-	_, err := fmt.Fprintf(a.Out, "%s%s %s\n", timestamp, sourceLabel, content)
+	_, err := fmt.Fprintf(a.Out, "%s%s %s%s\n", timestamp, sourceLabel, ownerBadge, content)
 	return err
+}
+
+func looksLikeAppErrorLine(line string) bool {
+	for _, marker := range []string{
+		"⨯",
+		"Error:",
+		"[nextcompile",
+		"TypeError",
+		"ReferenceError",
+		"SyntaxError",
+		"RangeError",
+		"ENOENT",
+		"externalRequire",
+		"unhandled",
+	} {
+		if strings.Contains(line, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func stripJournalMetadata(line string) string {
