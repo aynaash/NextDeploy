@@ -8,18 +8,25 @@ NextDeploy is an open-source, self-hosted deployment engine built specifically f
 
 Before deploying with NextDeploy, make sure you have:
 
-- A Next.js application that successfully runs `next build`.
-- Recommended: Output standalone enabled in `next.config.js`:
+- A Next.js 14, 15, or 16 application that successfully runs `next build`.
+- Recommended: Output standalone enabled in `next.config.mjs`:
   ```js
-  // next.config.js / next.config.mjs
-  module.exports = {
+  // next.config.mjs
+  export default {
     output: 'standalone',
   }
   ```
-- Target credentials:
-  - **VPS target**: A Linux VPS (Ubuntu, Debian) with SSH access and sudo privileges.
-  - **Cloudflare target**: `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
-  - **AWS target**: AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`).
+- **Secrets synchronization (Full-Stack Apps):**
+  - **Doppler (Recommended):** Zero `.env` files on disk; run `doppler run -- nextdeploy secrets sync` and `doppler run -- nextdeploy ship`.
+  - **Or `.env` file:** Import into NextDeploy's encrypted vault via `nextdeploy secrets load .env.production` and `nextdeploy secrets sync`.
+- Target infrastructure & credentials:
+  - **VPS target (Recommended for full-stack apps):**
+    1. A Linux VPS (Ubuntu or Debian) with public IPv4 and ports `22`, `80`, and `443` open.
+    2. A **non-root user with `sudo` privileges** (e.g., `deploy` or `ubuntu`) — `nextdeploy prepare` refuses `root` SSH logins by default.
+    3. A local **SSH private key path** (`key_path: ~/.ssh/id_ed25519`, `chmod 600`) configured in `nextdeploy.yml` whose public key is in the remote user's `~/.ssh/authorized_keys`.
+    4. A **domain name** with an `A` record pointing to the VPS IP so Caddy can automatically provision Let's Encrypt HTTPS.
+  - **Cloudflare target:** `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and a domain on Cloudflare DNS.
+  - **AWS target:** AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`) and registrar DNS access for ACM validation + CloudFront CNAME.
 
 ---
 

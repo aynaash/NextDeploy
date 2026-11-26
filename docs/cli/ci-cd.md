@@ -1,20 +1,4 @@
-# `nextdeploy generate-ci`
-
-> Status: ✅ **Production-Ready** for both **VPS** and **Cloudflare** targets across **GitHub Actions** and **GitLab CI**.
-
-Scaffold production-grade CI/CD automation pipelines for GitHub Actions and GitLab CI with zero vendor lock-in and hardened Doppler-first secret management.
-
----
-
-## Capabilities Matrix
-
-| Target | Status | Key Features |
-| :--- | :--- | :--- |
-| **Cloudflare** | ✅ **Production-ready** | Target-aware detection, automated IaC resource reconciliation (`apply`), atomic deployment (`ship --no-provision --verify`), PR previews (`--preview`), automated teardown on PR close, encrypted state synchronization via `NEXTDEPLOY_CF_STATE_KEY`, and dry-run drift checks (`plan --detailed-exitcode`). |
-| **VPS** | ✅ **Production-ready** | Target-aware detection, automated SSH key deployment (`chmod 700 ~/.ssh`), dual-key path compatibility (`id_ed25519` & `id_rsa`), host-key pinning (`SSH_KNOWN_HOSTS`), strict host-key verification (`NEXTDEPLOY_STRICT_HOST_KEY`), dual-stage health probing (`ship --verify`), and zero-downtime atomic symlink cutover. |
-
----
-
+# 
 ## Usage
 
 ```bash
@@ -32,7 +16,7 @@ nextdeploy generate-ci [flags]
 | `--force` | boolean | Overwrite existing workflow files if they already exist. |
 
 ---
-
+  
 ## Deployment Type Resolution
 
 The CI pipeline is designed to know and enforce the deployment type at multiple levels:
@@ -63,12 +47,12 @@ NextDeploy CI/CD pipelines use a **Doppler-first** architecture with transparent
 When using Doppler, **`DOPPLER_TOKEN` is the ONLY secret you need to configure** in your CI provider (GitHub Secrets or GitLab CI/CD Variables):
 - **`DOPPLER_TOKEN`**: A Doppler Service Token scoped to your environment (e.g. `prd`, `stg`).
 
-All deployment credentials (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `R2_*`, `SSH_PRIVATE_KEY`, `SSH_KNOWN_HOSTS`, `CLOUDFLARE_WORKERS_SUBDOMAIN`), remote state encryption keys, and application environment variables are securely fetched directly from Doppler in memory.
+All deployment credentials (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `R2_*`, `VPS_HOST`, `SSH_PRIVATE_KEY`, `SSH_KNOWN_HOSTS`, `CLOUDFLARE_WORKERS_SUBDOMAIN`), remote state encryption keys, and application environment variables are securely fetched directly from Doppler in memory.
 
 When `DOPPLER_TOKEN` is detected:
 - The pipeline installs the Doppler CLI idempotently.
 - Deployment executes with `doppler run --`, streaming all infrastructure credentials and application environment variables into the process without ever writing secrets to disk.
-- For VPS deployments, the SSH private key, known hosts, and passphrase can be retrieved dynamically from Doppler via `doppler secrets get ... --plain`.
+- For VPS deployments, `VPS_HOST`, the SSH private key, known hosts, and passphrase can be retrieved dynamically from Doppler via `doppler secrets get ... --plain`.
 - For PR preview deployments, `CLOUDFLARE_WORKERS_SUBDOMAIN` is pulled directly from Doppler.
 
 ### 2. Normal Way (Direct CI Secrets / Variables)
@@ -83,6 +67,7 @@ If `DOPPLER_TOKEN` is omitted, NextDeploy automatically falls back to standard p
 - `CLOUDFLARE_WORKERS_SUBDOMAIN` (required for `--preview`) — The account's workers.dev subdomain.
 
 #### VPS Target
+- `VPS_HOST` (optional — required if `nextdeploy.yml` uses `host: ${VPS_HOST}` or omits `servers[].host`) — Target VPS IP address or hostname.
 - `SSH_PRIVATE_KEY` (required) — Private SSH key matching the public key authorized on your VPS (`~/.ssh/authorized_keys`).
 - `SSH_KNOWN_HOSTS` (optional) — Remote server host key entries to pin in CI and prevent MITM attacks.
 - `SSH_KEY_PASSPHRASE` (optional) — Passphrase if your SSH private key is encrypted.

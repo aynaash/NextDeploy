@@ -42,6 +42,18 @@ Incoming Request (:443)
 
 ---
 
+## Prerequisites
+
+Before bootstrapping or shipping a full-stack Next.js app to a VPS, make sure you have:
+
+1. **Linux VPS:** Ubuntu or Debian server with a public IPv4 address and inbound ports `22` (SSH), `80` (HTTP/ACME), and `443` (HTTPS) open.
+2. **Non-root `sudo` user:** A non-root SSH user (e.g., `deploy` or `ubuntu`) with `sudo` privileges. `nextdeploy prepare` refuses `root` SSH logins by default for security (pass `--allow-root` only if unavoidable).
+3. **SSH private key path:** A local private SSH key (`~/.ssh/id_ed25519` with `chmod 600`) configured as `key_path` in `nextdeploy.yml`, with its public key installed in the remote user's `~/.ssh/authorized_keys`.
+4. **Domain name pointing to your VPS IP:** An `A` record (`@` or subdomain -> VPS IPv4) at your DNS registrar so Caddy can issue Let's Encrypt TLS certificates automatically.
+5. **Secrets synchronization:** Sync full-stack environment variables (`DATABASE_URL`, `AUTH_SECRET`, API keys) via **Doppler (recommended)** (`doppler run -- nextdeploy secrets sync`) or **`.env`** (`nextdeploy secrets load .env.production && nextdeploy secrets sync`).
+
+---
+
 ## Step-by-Step Setup
 
 ### 1. Configure SSH Access

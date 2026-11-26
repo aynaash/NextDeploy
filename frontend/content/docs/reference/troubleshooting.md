@@ -38,6 +38,26 @@ Error: KV PUT failed: 429 Too Many Requests
   ```
 - **Fix 2 — Upgrade/rebuild the NextDeploy binary:** Current builds of `shared/nextcompile/runtime_src/guard.mjs` coalesce `kv.put` writes to at most once every `1,100ms` per key per isolate, run writes through `ctx.waitUntil(...)`, and catch KV `429` errors gracefully so traffic never 500s. Rebuild your `nextdeploy` CLI binary (`nextdeploy update` or `go build`) and re-run `nextdeploy ship`.
 
+### Next.js 16.4+ Worker 500: `TypeError: l2 is not a function` / `Cannot set property setImmediate`
+If every route (`/`, `/docs`, `/api/health`) returns `HTTP 500 Internal Server Error` after upgrading to Next.js `16.4+` and live Cloudflare logs (`nextdeploy logs`) or local smoke tests show either:
+
+```text
+TypeError: l2 is not a function
+    at r0.loadManifests (...)
+```
+
+or:
+
+```text
+Error: Failed to load external module next/dist/compiled/next-server/app-page-turbo.runtime.prod.js:
+TypeError: Cannot set property setImmediate of #<Object> which has only a getter
+```
+
+- **Cause:**
+  1. Next.js `16.4+` imports `evalManifestFromRelativePath` (and relies on `handleMissing` returning `undefined`) from `next/dist/server/load-manifest.external.js`. Older Worker shims only exported `evalManifest` and `loadManifestFromRelativePath`.
+  2. Next.js `16.4+` executes `install()` at module load inside `next/dist/server/node-environment-extensions/fast-set-immediate.external.js`, assigning `require("node:timers").setImmediate = patchedSetImmediate`, which throws on esbuild's read-only ESM namespace wrapper in Cloudflare Workers.
+- **Fix:** Update/rebuild the `nextdeploy` CLI binary (`nextdeploy update` or `go build -o ./bin/nextdeploy ./cli`) so `cli/internal/serverless/cloudflare/adapter/adapter.go` and `shared/nextcompile/runtime_src/next_shims/fast_set_immediate.mjs` include the updated `load-manifest.external.js` and `fast-set-immediate.external.js` shims, then re-run `nextdeploy ship`.
+
 ### `purge_cache: 401 Unauthorized` (non-fatal)
 Your deployment succeeded, but your Cloudflare API token is missing the **Zone → Cache Purge: Purge** permission. Add that permission in the Cloudflare dashboard to enable automatic edge cache purges.
 
@@ -70,8 +90,8 @@ NEXTDEPLOY_CF_ENGINE=legacy nextdeploy ship
 Test your compiled Worker locally against Node before uploading:
 
 ```bash
-NEXTDEPLOY_TEST_STANDALONE=/path/to/your-app/.next/standalone \
-  go test -v ./cli/internal/serverless -run TestBuildWorkerBundle_RealStandaloneSmoke
+NEXTDEPLOY_CF_ENGINE=nextserver NEXTDEPLOY_TEST_STANDALONE=/path/to/your-app/.next/standalone \
+  go test -v ./cli/internal/serverless/cloudflare/adapter -run TestBuildWorkerBundle_RealStandaloneSmoke
 ```
 
 ---

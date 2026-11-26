@@ -71,7 +71,7 @@ Cloudflare Workers forbid runtime `eval()`, `new Function()`, and dynamic filesy
 
 - **Compile time (`EmitServerChunkRegistry`)**: Walks `.next/server` and generates a static lookup table mapping every server JS/CJS/MJS chunk and manifest module to a static `() => require(...)` thunk that esbuild bundles into the single Worker file.
 - **Path normalization**: Turbopack emits runtime chunk requests like `/server/chunks/ssr/[root-of-the-server]__*.js` (omitting `.next/`). `loadServerModule` normalizes leading slashes, `DIST_PREFIX` (`.next/`), and `SERVER_PREFIX` (`.next/server/`).
-- **Dynamic `require` patching (`cloudflare_adapter.go`)**: An esbuild `OnLoad` plugin rewrites non-literal `require(expr)` calls in `/next/dist/server/` and `/[turbopack]` modules to `__ndDynRequire(expr)`, falling back to JSON VFS lookups and throwing `MODULE_NOT_FOUND` cleanly on optional probes (like `instrumentation.js`).
+- **Dynamic `require` patching (`cli/internal/serverless/cloudflare/adapter/adapter.go`)**: An esbuild `OnLoad` plugin rewrites non-literal `require(expr)` calls in `/next/dist/server/` and `/[turbopack]` modules to `__ndDynRequire(expr)`, falling back to JSON VFS lookups and throwing `MODULE_NOT_FOUND` cleanly on optional probes (like `instrumentation.js`).
 
 ### 4. Streaming Web ↔ Node HTTP Bridge (`http_bridge.mjs`)
 
@@ -90,13 +90,15 @@ Implements Next.js's official `IncrementalCache` handler contract:
 - **Cross-Isolate Tag Invalidation**: Records `revalidateTag()` timestamps in KV (`env.NEXTCOMPILE_CACHE` under `tag:<name>`).
 - **Global Registration**: Registered on `globalThis[Symbol.for("@next/cache-handlers")].FetchCache` inside `installNextServerGlobals()` so every `IncrementalCache` instance inside Next.js 15/16 uses `CloudflareCacheHandler` without falling back to `FileSystemCache` or triggering dynamic `import()`.
 
-### 6. `workerd` Shims & Bundle Trimming (`cloudflare_adapter.go`)
+### 6. `workerd` Shims & Bundle Trimming (`cli/internal/serverless/cloudflare/adapter/adapter.go`)
 
 | Target | Why It's Shimmed / Trimmed |
 | :--- | :--- |
 | `next/dist/server/require-hook.js` | Monkey-patches `Module.prototype.require` (unavailable in ESM / `workerd`). Replaced with a no-op hook map. |
-| `next/dist/server/load-manifest.external.js` | `evalManifest` calls `vm.runInNewContext` (blocked by `workerd` CSP). Replaced with VFS + static chunk-registry lookup. |
+| `next/dist/server/load-manifest.external.js` | `evalManifest` calls `vm.runInNewContext` (blocked by `workerd` CSP). Replaced with VFS + static chunk-registry lookup exporting `loadManifest`, `evalManifest`, `evalManifestFromRelativePath`, `loadManifestFromRelativePath`, and `clearManifestCache` with `handleMissing` support (Next.js `16.4+`). |
+| `next/dist/server/node-environment-extensions/fast-set-immediate.external.js` | Calls `install()` on import and assigns `require("node:timers").setImmediate = ...`, throwing on esbuild's read-only ESM namespace wrapper in Next.js `16.4+`. Replaced with safe no-op exports (`DANGEROUSLY_runPendingImmediatesAfterCurrentTask`, `expectNoPendingImmediates`, `unpatchedSetImmediate`, `ImmediateTracker`, `runWithNativeImmediateTracking`). |
 | `next/dist/server/node-environment.js` | Calls `process.listeners("unhandledRejection")` and monkey-patches `node:crypto`. Replaced with just the `AsyncLocalStorage` baseline. |
+| `process.env.__NEXT_DEV_SERVER` | Defined as `""` in esbuild so Next.js `16.4+` dead-code eliminates dev-only `require()` branches (e.g. `hot-reloader-app`). |
 | `ensureProcessCompat()` | Polyfills missing/throwing `[unenv]` `process` methods in `workerd` (`listeners`, `on`/`off`/`emit`, `cwd`, `uptime`, `hrtime.bigint`, `stdout`, `stderr`, `versions`). |
 | Dev / experimental / static runtimes | Trims `*.runtime.dev.js`, `*-experimental.runtime.*`, `edge-runtime`, `react-dom/static`, `caniuse-lite`, `@swc/helpers` (~1.60 MB gzipped final bundle). |
 
@@ -107,6 +109,6 @@ Implements Next.js's official `IncrementalCache` handler contract:
 An opt-in Go smoke test compiles and executes any real Next.js standalone build directly:
 
 ```bash
-NEXTDEPLOY_TEST_STANDALONE=/path/to/app/.next/standalone \
-  go test -v -count=1 ./cli/internal/serverless -run TestBuildWorkerBundle_RealStandaloneSmoke
+NEXTDEPLOY_CF_ENGINE=nextserver NEXTDEPLOY_TEST_STANDALONE=/path/to/app/.next/standalone \
+  go test -v -count=1 ./cli/internal/serverless/cloudflare/adapter -run TestBuildWorkerBundle_RealStandaloneSmoke
 ```

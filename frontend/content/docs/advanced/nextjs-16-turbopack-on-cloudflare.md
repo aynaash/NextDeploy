@@ -142,7 +142,7 @@ Testing against unit fixtures was easy. Running a real **Next.js 16.0.10 + Turbo
 Turbopack's runtime requests `/server/chunks/ssr/[root-of-the-server]__*.js` without `.next/`. Normalizing `DIST_PREFIX` (`.next/`) and `SERVER_PREFIX` (`.next/server/`) inside `chunks.mjs` made every Turbopack chunk resolve cleanly.
 
 ### 2. `evalManifest` uses `vm.runInNewContext` (blocked in `workerd`)
-Next.js loads `page_client-reference-manifest.js` via `load-manifest.external.js`'s `evalManifest()`, which executes JS through `vm.runInNewContext`. Replacing `load-manifest.external.js` at bundle time with a VFS + static chunk-registry shim (`loadManifest`, `evalManifest`, `loadManifestFromRelativePath`, `clearManifestCache`) made manifest loading 100% CSP-compliant.
+Next.js loads `page_client-reference-manifest.js` via `load-manifest.external.js`'s `evalManifest()` / `evalManifestFromRelativePath()`, which execute JS through `vm.runInNewContext`. Replacing `load-manifest.external.js` at bundle time with a VFS + static chunk-registry shim exporting all 5 Next.js `16.4+` helpers (`loadManifest`, `evalManifest`, `evalManifestFromRelativePath`, `loadManifestFromRelativePath`, `clearManifestCache`) with `handleMissing` support keeps manifest loading 100% CSP-compliant.
 
 ### 3. `next/dist/server/require-hook.js` crashes in ESM bundles
 `require-hook.js` patches `Module.prototype.require`, which does not exist in ESM Worker bundles. Replacing it with a tiny no-op shim fixes startup cleanly.
@@ -185,6 +185,23 @@ Client-side `<Link>` transitions send `rsc: 1` expecting `text/x-component`. Ski
 
 ### 10. Exclude internal error routes from post-deploy smoke checks
 Next.js lists `/_global-error` and `/_not-found` in `routes-manifest.json`'s `staticRoutes`. Post-deploy `SmokeVerify` now skips `/_*`, `/404`, and `/500` so it probes real user-facing routes (`/`, `/docs`, `/login`).
+
+---
+
+## Next.js 16.4+ Compatibility Notes
+
+Upgrading from Next.js `16.0.10` to `16.4.6` introduced three additional runtime requirements handled automatically in `cli/internal/serverless/cloudflare/adapter/adapter.go`:
+
+1. **`evalManifestFromRelativePath` + `handleMissing` (`load-manifest.external.js`)**: `NextNodeServer.loadManifests()` calls `evalManifestFromRelativePath` with `handleMissing: true` when probing optional manifests. Missing this export caused `TypeError: l2 is not a function`; the shim exports all 5 manifest functions and returns `undefined` on missing optional manifests.
+2. **Safe `fast-set-immediate.external.js` shim**: Next.js `16.4+` runs `install()` on import and assigns `require("node:timers").setImmediate = ...`, throwing `TypeError: Cannot set property setImmediate of #<Object> which has only a getter` against esbuild's read-only ESM namespace wrapper. NextDeploy shims `fast-set-immediate.external.js` (and `shared/nextcompile/runtime_src/next_shims/fast_set_immediate.mjs`) to export `DANGEROUSLY_runPendingImmediatesAfterCurrentTask`, `expectNoPendingImmediates`, `unpatchedSetImmediate`, `ImmediateTracker`, and `runWithNativeImmediateTracking` without mutating `node:timers`.
+3. **Eliminating dev-only imports (`process.env.__NEXT_DEV_SERVER`)**: Next.js `16.4+` guards dev-only `require()` calls (such as `hot-reloader-app`) behind `process.env.__NEXT_DEV_SERVER`. Setting `process.env.__NEXT_DEV_SERVER: ""` in esbuild's `Define` drops those branches at bundle time.
+
+Verify any local standalone build before shipping:
+
+```bash
+NEXTDEPLOY_CF_ENGINE=nextserver NEXTDEPLOY_TEST_STANDALONE=/path/to/app/.next/standalone \
+  go test -v ./cli/internal/serverless/cloudflare/adapter -run TestBuildWorkerBundle_RealStandaloneSmoke
+```
 
 ---
 

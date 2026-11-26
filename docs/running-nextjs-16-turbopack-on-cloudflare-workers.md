@@ -145,9 +145,9 @@ Testing against unit-test fixtures was easy. Testing against a real **Next.js 16
 Turbopack's `[turbopack]_runtime.js` calls `require("/server/chunks/ssr/[root-of-the-server]__*.js")` — omitting the `.next/` prefix. Normalizing `DIST_PREFIX` (`.next/`) and `SERVER_PREFIX` (`.next/server/`) inside `chunks.mjs` made every Turbopack chunk resolve on the first try.
 
 ### Lesson 2: `evalManifest` uses `vm.runInNewContext` (forbidden in `workerd`)
-Next.js loads `page_client-reference-manifest.js` via `load-manifest.external.js`'s `evalManifest()`, which executes manifest JS using Node's `vm.runInNewContext`. In Cloudflare Workers, dynamic code evaluation is blocked by CSP.
+Next.js loads `page_client-reference-manifest.js` via `load-manifest.external.js`'s `evalManifest()` and `evalManifestFromRelativePath()`, which execute manifest JS using Node's `vm.runInNewContext`. In Cloudflare Workers, dynamic code evaluation is blocked by CSP.
 
-**Fix:** Replace `next/dist/server/load-manifest.external.js` at bundle time with a 40-line shim (`loadManifest`, `evalManifest`, `loadManifestFromRelativePath`, `clearManifestCache`) that executes the pre-bundled manifest thunk from our static chunk registry instead of `vm`.
+**Fix:** Replace `next/dist/server/load-manifest.external.js` at bundle time with a shim exporting all 5 Next.js `16.4+` functions (`loadManifest`, `evalManifest`, `evalManifestFromRelativePath`, `loadManifestFromRelativePath`, `clearManifestCache`) with `handleMissing` support, executing pre-bundled manifest thunks from our static chunk registry instead of `vm`.
 
 ### Lesson 3: `next/dist/server/require-hook.js` crashes in ESM bundles
 `require-hook.js` monkey-patches `Module.prototype.require`, which is `undefined` inside an esbuild ESM bundle. Replacing it with a tiny no-op shim (`addHookAliases`, `defaultOverrides`, `hookPropertyMap`) avoids the startup crash cleanly.
@@ -199,6 +199,23 @@ Next.js includes `/_global-error` and `/_not-found` in `routes-manifest.json`'s 
 
 ---
 
+## Next.js 16.4+ Compatibility Update
+
+Upgrading from Next.js `16.0.10` to `16.4.6` surfaced three additional runtime requirements now handled in `cli/internal/serverless/cloudflare/adapter/adapter.go`:
+
+1. **`evalManifestFromRelativePath` + `handleMissing` (`load-manifest.external.js`)**: `NextNodeServer.loadManifests()` calls `evalManifestFromRelativePath` with `handleMissing: true`. Exporting all 5 manifest helpers and returning `undefined` when `handleMissing` is true fixes `TypeError: l2 is not a function`.
+2. **Safe `fast-set-immediate.external.js` shim**: Next.js `16.4+` runs `install()` at module load and mutates `require("node:timers").setImmediate`, which throws `TypeError: Cannot set property setImmediate of #<Object> which has only a getter` on esbuild's read-only ESM namespace wrapper. Replacing it with safe exports (`DANGEROUSLY_runPendingImmediatesAfterCurrentTask`, `expectNoPendingImmediates`, `unpatchedSetImmediate`, `ImmediateTracker`, `runWithNativeImmediateTracking`) avoids mutating `node:timers`.
+3. **`process.env.__NEXT_DEV_SERVER` Define**: Defining `process.env.__NEXT_DEV_SERVER: ""` at bundle time lets esbuild dead-code eliminate Next.js `16.4+` dev-only imports.
+
+You can verify any real standalone build locally before deploying:
+
+```bash
+NEXTDEPLOY_CF_ENGINE=nextserver NEXTDEPLOY_TEST_STANDALONE=/path/to/app/.next/standalone \
+  go test -v ./cli/internal/serverless/cloudflare/adapter -run TestBuildWorkerBundle_RealStandaloneSmoke
+```
+
+---
+
 ## Live Production Results (`https://nextdeploy.org`)
 
 Deployed straight from `nextdeployfrontend` (Next.js 16.0.10, Turbopack, React 19.2.0, 52 routes, Tailwind v4, Geist fonts, edge auth protection, R2 assets) using `doppler run -- nextdeploy ship`:
@@ -227,5 +244,5 @@ Deployed straight from `nextdeployfrontend` (Next.js 16.0.10, Turbopack, React 1
 - Streaming Web ↔ Node HTTP bridge: `shared/nextcompile/runtime_src/nextserver/http_bridge.mjs`
 - R2 + KV `CloudflareCacheHandler`: `shared/nextcompile/runtime_src/nextserver/cf_cache_handler.mjs`
 - Request driver & `workerd` `process` polyfill: `shared/nextcompile/runtime_src/nextserver/nextserver_driver.mjs`
-- esbuild plugins (`require` rewriter, `load-manifest`/`node-environment` shims, bundle trimmer): `cli/internal/serverless/cloudflare_adapter.go`
+- esbuild plugins (`require` rewriter, `load-manifest`/`fast-set-immediate`/`node-environment` shims, bundle trimmer): `cli/internal/serverless/cloudflare/adapter/adapter.go`
 - Post-deploy smoke verification: `cli/internal/serverless/smoke.go`
