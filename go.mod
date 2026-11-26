@@ -26,7 +26,7 @@ require (
 	github.com/fatih/color v1.19.0
 	github.com/gofrs/flock v0.13.2
 	github.com/google/uuid v1.6.0
-	github.com/gorilla/websocket v1.5.3
+	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4
 	github.com/magefile/mage v1.17.2
 	github.com/pkg/sftp v1.13.12
 	github.com/spf13/cobra v1.10.2
