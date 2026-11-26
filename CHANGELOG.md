@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.1](https://github.com/aynaash/NextDeploy/compare/v1.1.0...v1.1.1) (2026-11-26)
+
+### Bug Fixes
+
+* **security:** upgrade `github.com/gorilla/websocket` to `v1.5.4-0.20240701034025-d67f41855da4` to resolve `GO-2026-6278`
+
 ## [1.1.0](https://github.com/aynaash/NextDeploy/compare/v1.0.0...v1.1.0) (2026-11-26)
 
 ### Features
